@@ -12,7 +12,7 @@ message_dependent = False
 scope_targets = ["rooms"]
 config_schema = [
     {"key": "export_dir", "aliases": ["save_path"], "label": "导出目录", "type": "text", "default": "", "description": "群消息文件会输出到这个目录。"},
-    {"key": "wxpid", "label": "默认微信进程ID", "type": "number", "full_width": False},
+    {"key": "wxpid", "label": "微信进程", "type": "number", "full_width": False},
     {"key": "max_count", "label": "最多导出消息数", "type": "number", "default": 500, "min": 1, "max": 20000, "step": 1, "full_width": False},
     {"key": "file_type", "aliases": ["output_format"], "label": "输出格式", "type": "select", "default": "txt", "full_width": False, "options": [{"label": "TXT(JSONL 每行一条)", "value": "txt"}, {"label": "JSONL", "value": "jsonl"}, {"label": "JSON", "value": "json"}]},
     {"key": "time_range", "label": "默认时间范围", "type": "select", "default": "2h", "full_width": False, "description": "如果未手动填写开始和结束时间，就按这里的范围导出。", "options": [{"label": "最近 2 小时", "value": "2h"}, {"label": "最近 6 小时", "value": "6h"}, {"label": "最近 12 小时", "value": "12h"}, {"label": "最近 1 天", "value": "1d"}, {"label": "最近 3 天", "value": "3d"}, {"label": "最近 1 年", "value": "1y"}]},

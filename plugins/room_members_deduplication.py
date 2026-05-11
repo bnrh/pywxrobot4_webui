@@ -12,7 +12,7 @@ category = "functional"
 message_dependent = False
 scope_targets = ["rooms"]
 config_schema = [
-    {"key": "wxpid", "label": "默认微信进程ID", "type": "number", "full_width": False},
+    {"key": "wxpid", "label": "微信进程", "type": "number", "full_width": False},
     {"key": "delay_ms", "label": "删除间隔毫秒", "type": "number", "default": 100, "min": 0, "max": 10000, "step": 10, "full_width": False},
     {"key": "dry_run", "label": "仅生成报告不删除", "type": "checkbox", "default": True, "full_width": False},
     {"key": "remove_duplicates", "label": "允许实际删除重复成员", "type": "checkbox", "default": True, "full_width": False},

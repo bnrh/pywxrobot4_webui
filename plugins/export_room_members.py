@@ -36,10 +36,9 @@ config_schema = [
     },
     {
         "key": "wxpid",
-        "label": "默认微信进程ID",
+        "label": "微信进程",
         "type": "number",
         "full_width": False,
-        "description": "留空时使用主 API 的默认微信进程。",
     },
     {
         "key": "rooms",

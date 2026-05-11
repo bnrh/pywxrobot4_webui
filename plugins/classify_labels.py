@@ -11,7 +11,6 @@ config_schema = [
         "label": "微信进程",
         "type": "select",
         "options_source": "wxpid_options",
-        "empty_option_label": "请选择微信进程",
         "required": True,
         "required_message": "微信进程不能为空",
         "full_width": False,
