@@ -309,8 +309,10 @@ async def execute(context):
         return {"handled": False, "detail": "请先选择微信进程", "data": report}
     if not report["rooms"]:
         return {"handled": False, "detail": "没有可执行的标签配置规则", "data": report}
+    detail = f"已遍历 {len(report['rooms'])} 个群聊，成功为 {report['appliedCount']} 位好友设置标签"
+    context.logger.info(detail, report)
     return {
         "handled": True,
-        "detail": f"已遍历 {len(report['rooms'])} 个群聊，成功为 {report['appliedCount']} 位好友设置标签",
+        "detail": detail,
         "data": report,
     }
