@@ -219,6 +219,27 @@ def build_notice_log_payload(event, roomid, type_code, notice_meta):
     }
 
 
+def build_members_from_usernames(usernames, latest_members_map, fallback_members_map=None):
+    fallback_map = fallback_members_map if isinstance(fallback_members_map, dict) else {}
+    latest_map = latest_members_map if isinstance(latest_members_map, dict) else {}
+    unique_usernames: list[str] = []
+    seen: set[str] = set()
+    for username in usernames or []:
+        normalized_username = normalize_text(username)
+        if not normalized_username or normalized_username in seen:
+            continue
+        seen.add(normalized_username)
+        unique_usernames.append(normalized_username)
+
+    return [
+        {
+            "username": username,
+            "nick_name": normalize_text(latest_map.get(username) or fallback_map.get(username) or username or "成员"),
+        }
+        for username in unique_usernames
+    ]
+
+
 async def warmup_room_members(context, wxpid):
     welcome_map = get_welcome_map(context.config)
     room_cache = context.state.namespace("room_members_cache")
@@ -259,7 +280,10 @@ async def handle_message(event, context):
 
     room_cache = context.state.namespace("room_members_cache")
     old_members = room_cache.get(roomid)
-    if not old_members:
+    if not isinstance(old_members, dict):
+        old_members = {}
+
+    if not old_members and not notice_meta["member_usernames"]:
         initialized_members = await fetch_room_member_map(context, roomid, event.normalized_wxpid)
         room_cache.set(roomid, initialized_members)
         context.logger.info("入群欢迎插件已初始化群成员缓存", {**log_payload, "cached_member_count": len(initialized_members)})
@@ -268,12 +292,34 @@ async def handle_message(event, context):
     await sleep((NOTICE_DELAY_SECONDS if type_code == MESSAGE_TYPES.NOTICE else SYSMSG_DELAY_SECONDS) * 1000)
     new_members_map = await fetch_room_member_map(context, roomid, event.normalized_wxpid)
     room_cache.set(roomid, new_members_map)
-    new_members = [{"username": username, "nick_name": nickname} for username, nickname in new_members_map.items() if username not in old_members]
+    if notice_meta["member_usernames"]:
+        new_members = build_members_from_usernames(notice_meta["member_usernames"], new_members_map, old_members)
+        context.logger.info(
+            "入群欢迎插件直接使用通知中的成员 wxid",
+            {
+                **log_payload,
+                "cached_member_count": len(old_members),
+                "latest_member_count": len(new_members_map),
+                "new_member_source": "notice_memberlist",
+                "resolved_new_members": new_members,
+            },
+        )
+    else:
+        new_members = [{"username": username, "nick_name": nickname} for username, nickname in new_members_map.items() if username not in old_members]
     if not new_members:
         context.logger.info("入群欢迎插件未识别到新增成员", {**log_payload, "cached_member_count": len(old_members), "latest_member_count": len(new_members_map)})
         return {"handled": False, "detail": "没有识别到新增成员"}
 
-    context.logger.info("入群欢迎插件识别到新增成员", {**log_payload, "cached_member_count": len(old_members), "latest_member_count": len(new_members_map), "new_members": new_members})
+    context.logger.info(
+        "入群欢迎插件识别到新增成员",
+        {
+            **log_payload,
+            "cached_member_count": len(old_members),
+            "latest_member_count": len(new_members_map),
+            "new_member_source": "notice_memberlist" if notice_meta["member_usernames"] else "member_cache_diff",
+            "new_members": new_members,
+        },
+    )
 
     interval_ms = float(context.config.get("message_interval_seconds", 1.5) or 0) * 1000
     sent_count = 0
