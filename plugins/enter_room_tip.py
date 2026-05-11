@@ -12,7 +12,7 @@ event_filters = ["notice", "sysmsg"]
 NOTICE_DELAY_SECONDS = 3.0
 SYSMSG_DELAY_SECONDS = 1.0
 IMAGE_UPLOAD_DIR = "uploads/enter_room_tip"
-ENTER_ROOM_KEYWORD = "加入群聊"
+ENTER_ROOM_PATTERN = re.compile(r"加入(?:了)?群聊")
 CONTENT_PREVIEW_LIMIT = 160
 config_schema = [
     {
@@ -196,7 +196,7 @@ def inspect_enter_room_notice(content):
         or normalized_content
     )
     return {
-        "matched": ENTER_ROOM_KEYWORD in notice_text,
+        "matched": bool(ENTER_ROOM_PATTERN.search(notice_text)),
         "notice_text": notice_text,
         "sysmsg_type": sysmsg_type,
         "scene": find_first_xml_tag_value(link_xml, "scene") or find_xml_tag_text(xml_text, ["delchatroommember", "link", "scene"]),
