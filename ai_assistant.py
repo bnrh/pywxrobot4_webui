@@ -25,6 +25,16 @@ DEFAULT_SYSTEM_PROMPT = (
     "当工具执行失败时，明确说明失败原因并给出下一步建议。"
 )
 
+INTERNAL_TOOL_ROUTING_PROMPT = (
+    "工具选择规则："
+    "当用户询问某个群里有多少成员是其好友、某个群里哪些成员是其好友、统计群好友数量、分页列出群好友时，"
+    "优先调用 count_room_friend_members 或 list_room_friend_members。"
+    "对于这类问题，不要先调用 get_user_list、get_room_members、get_user_list_summary、get_room_members_summary，"
+    "除非上述聚合工具不可用或执行失败。"
+    "如果用户只问数量，先用 count_room_friend_members；"
+    "如果用户要名单、明细或继续翻页，优先用 list_room_friend_members。"
+)
+
 PROVIDER_CATALOG = {
     "zhipu": {
         "key": "zhipu",
@@ -419,7 +429,7 @@ LOCAL_TOOL_REGISTRY = {
 
 
 def _merge_tool_registry(base_registry: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {**base_registry, **LOCAL_TOOL_REGISTRY}
+    return {**LOCAL_TOOL_REGISTRY, **base_registry}
 
 
 def _get_mcp_server_source_path() -> Path | None:
@@ -1211,6 +1221,39 @@ def _normalize_chat_history(
     return normalized[-MAX_CONVERSATION_MESSAGES:]
 
 
+def _build_contextual_tool_routing_prompt(latest_user_message: str) -> str:
+    normalized_text = str(latest_user_message or "").strip().lower()
+    if not normalized_text:
+        return ""
+
+    contains_room = any(token in normalized_text for token in ["群", "群聊", "chatroom", "@chatroom", "roomid"])
+    contains_friend = "好友" in normalized_text
+    if not (contains_room and contains_friend):
+        return ""
+
+    list_keywords = ["哪些", "名单", "列出", "明细", "都有谁", "分别是", "翻页", "分页"]
+    count_keywords = ["多少", "几个", "几位", "统计", "数量", "占比"]
+
+    if any(keyword in normalized_text for keyword in list_keywords):
+        return (
+            "当前问题是在查询某个群里哪些成员是好友或查看名单。"
+            "优先先调用 list_room_friend_members，不要先调用 get_user_list 或 get_room_members 这类全量列表工具。"
+            "如果还需要总数，可再调用 count_room_friend_members。"
+        )
+
+    if any(keyword in normalized_text for keyword in count_keywords):
+        return (
+            "当前问题是在统计某个群里有多少成员是好友。"
+            "优先先调用 count_room_friend_members，不要先调用 get_user_list 或 get_room_members 这类全量列表工具。"
+            "如果用户后续要求查看名单，再调用 list_room_friend_members。"
+        )
+
+    return (
+        "当前问题与群成员好友交集分析有关。"
+        "优先使用 count_room_friend_members 或 list_room_friend_members，避免先调用全量列表工具。"
+    )
+
+
 def _build_provider_url(base_url: str, chat_path: str) -> str:
     normalized_path = str(chat_path or "/chat/completions").strip() or "/chat/completions"
     if not normalized_path.startswith("/"):
@@ -1636,7 +1679,16 @@ async def run_ai_assistant(
     if not history or history[-1]["role"] != "user":
         raise RuntimeError("请先输入要交给智能插件处理的问题")
 
-    request_messages: list[dict[str, Any]] = [{"role": "system", "content": normalized_settings["system_prompt"]}, *history]
+    contextual_tool_routing_prompt = _build_contextual_tool_routing_prompt(history[-1].get("content") or "")
+    request_messages: list[dict[str, Any]] = [
+        {"role": "system", "content": normalized_settings["system_prompt"]},
+        {"role": "system", "content": INTERNAL_TOOL_ROUTING_PROMPT},
+        *(
+            [{"role": "system", "content": contextual_tool_routing_prompt}]
+            if contextual_tool_routing_prompt else []
+        ),
+        *history,
+    ]
     tool_schemas = get_tool_schemas()
     trace_entries: list[dict[str, Any]] = []
     max_tool_rounds = normalized_settings["max_tool_rounds"]
