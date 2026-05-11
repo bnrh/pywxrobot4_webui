@@ -74,6 +74,17 @@ config_schema = [
         "full_width": False,
         "description": "当同一条规则同时配置了文本和图片时，两次发送之间会等待这个间隔。",
     },
+    {
+        "key": "welcome_delay_seconds",
+        "label": "检测到入群后等待发送秒数",
+        "type": "number",
+        "default": 0,
+        "min": 0,
+        "max": 300,
+        "step": 0.1,
+        "full_width": False,
+        "description": "识别到新增成员后，先等待这么多秒再发送欢迎内容。",
+    },
 ]
 
 
@@ -322,9 +333,23 @@ async def handle_message(event, context):
     )
 
     interval_ms = float(context.config.get("message_interval_seconds", 1.5) or 0) * 1000
+    welcome_delay_ms = float(context.config.get("welcome_delay_seconds", 0) or 0) * 1000
     sent_count = 0
     message_text = str(welcome_entry.get("content") or "").strip()
-    context.logger.info("入群欢迎插件准备发送欢迎内容", {**log_payload, "member_count": len(new_members), "has_text": bool(message_text), "has_image": bool(welcome_entry.get("path")), "interval_ms": interval_ms})
+    context.logger.info(
+        "入群欢迎插件准备发送欢迎内容",
+        {
+            **log_payload,
+            "member_count": len(new_members),
+            "has_text": bool(message_text),
+            "has_image": bool(welcome_entry.get("path")),
+            "welcome_delay_ms": welcome_delay_ms,
+            "interval_ms": interval_ms,
+        },
+    )
+    if welcome_delay_ms > 0:
+        context.logger.info("入群欢迎插件等待发送欢迎内容", {**log_payload, "member_count": len(new_members), "welcome_delay_ms": welcome_delay_ms})
+        await sleep(welcome_delay_ms)
     if message_text:
         atlist = ""
         if "@{nick_name}" in message_text:
