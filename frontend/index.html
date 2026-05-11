@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>wxrobot_api 控制台</title>
+    <link rel="stylesheet" href="/static/css/app.css?v=20260511-07">
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar shell-card">
+            <div class="brand-block">
+                <p class="brand-eyebrow">wxrobot_api / webui</p>
+                <h1 class="brand-title">控制台</h1>
+                <p class="brand-copy">面向消息流的插件控制台，统一观察处理状态、调度插件并维护运行环境。</p>
+            </div>
+
+            <nav class="sidebar-nav" aria-label="控制台导航">
+                <button class="nav-tab is-active" type="button" data-tab="dashboard">
+                    <span class="nav-tab-title">仪表盘</span>
+                    <span class="nav-tab-copy">集中查看运行指标与当前状态</span>
+                </button>
+                <button class="nav-tab" type="button" data-tab="messages">
+                    <span class="nav-tab-title">消息中心</span>
+                    <span class="nav-tab-copy">查看最新进入插件服务的消息</span>
+                </button>
+                <button class="nav-tab" type="button" data-tab="users">
+                    <span class="nav-tab-title">用户管理</span>
+                    <span class="nav-tab-copy">查看心跳检测获取到的登录账号</span>
+                </button>
+                <button class="nav-tab" type="button" data-tab="features">
+                    <span class="nav-tab-title">功能插件</span>
+                    <span class="nav-tab-copy">执行一次性功能插件并管理常驻任务</span>
+                </button>
+                <button class="nav-tab" type="button" data-tab="ai-assistant">
+                    <span class="nav-tab-title">智能插件</span>
+                    <span class="nav-tab-copy">配置 AI 厂商并让模型调用 wxrobot_api 工具</span>
+                </button>
+                <button class="nav-tab" type="button" data-tab="plugins">
+                    <span class="nav-tab-title">消息插件</span>
+                    <span class="nav-tab-copy">启停依赖消息的插件并维护配置</span>
+                </button>
+                <button class="nav-tab" type="button" data-tab="plugin-logs">
+                    <span class="nav-tab-title">插件日志</span>
+                    <span class="nav-tab-copy">查看插件输出并按插件筛选日志</span>
+                </button>
+                <button class="nav-tab" type="button" data-tab="settings">
+                    <span class="nav-tab-title">系统设置</span>
+                    <span class="nav-tab-copy">维护服务参数与运行策略</span>
+                </button>
+                <button class="nav-tab" type="button" data-tab="logs">
+                    <span class="nav-tab-title">日志中心</span>
+                    <span class="nav-tab-copy">查看最新日志与当前活动文件</span>
+                </button>
+            </nav>
+        </aside>
+
+        <main class="workspace">
+            <header class="workspace-header shell-card">
+                <div>
+                    <p class="workspace-eyebrow" id="activeTabLabel">仪表盘</p>
+                    <h2 class="workspace-title" id="pageTitle">运行概览</h2>
+                    <p class="workspace-copy" id="pageDescription">集中查看插件服务状态、消息积压和待处理变更。</p>
+                </div>
+                <div class="workspace-actions">
+                    <button class="button ghost" id="tabRefreshButton" type="button">刷新当前视图</button>
+                    <button class="button primary" id="reloadConfigButton" type="button">重载运行配置</button>
+                    <div class="status-pill" id="statusPill">等待初始化</div>
+                </div>
+            </header>
+
+            <section class="panel-group">
+                <section class="panel-shell shell-card tab-panel is-active" data-panel="dashboard">
+                    <section class="overview-grid" id="overviewGrid"></section>
+                </section>
+
+                <section class="panel-shell shell-card tab-panel" data-panel="messages">
+                    <div class="panel-toolbar">
+                        <div class="panel-actions">
+                            <button class="button secondary" id="refreshMessagesButton" type="button">刷新消息</button>
+                        </div>
+                    </div>
+                    <div class="split-layout">
+                        <div class="message-list" id="messageList"></div>
+                        <div class="detail-card" id="messageDetail"></div>
+                    </div>
+                </section>
+
+                <section class="panel-shell shell-card tab-panel" data-panel="users">
+                    <div class="panel-toolbar">
+                        <div class="panel-actions">
+                            <button class="button secondary" id="refreshUsersButton" type="button">刷新用户</button>
+                        </div>
+                    </div>
+                    <div class="user-grid" id="userGrid"></div>
+                </section>
+
+                <section class="panel-shell shell-card tab-panel" data-panel="features">
+                    <div class="panel-toolbar">
+                        <div class="panel-actions">
+                            <button class="button secondary" id="refreshFeaturePluginsButton" type="button">刷新功能插件</button>
+                        </div>
+                    </div>
+                    <div class="plugin-grid" id="featurePluginGrid"></div>
+                </section>
+
+                <section class="panel-shell shell-card tab-panel" data-panel="ai-assistant">
+                    <div class="panel-toolbar">
+                        <div class="panel-actions">
+                            <button class="button secondary" id="refreshAiAssistantButton" type="button">刷新智能插件</button>
+                            <button class="button secondary compact smart-toolbar-button" id="newAiAssistantConversationButton" type="button">新建对话</button>
+                            <button class="button ghost compact smart-toolbar-button" id="openAiAssistantConversationSwitcherButton" type="button">切换对话</button>
+                            <button class="button ghost" id="clearAiAssistantConversationButton" type="button">清空对话</button>
+                        </div>
+                    </div>
+                    <div class="smart-assistant-page">
+                        <div class="detail-card smart-chat-card">
+                            <div class="smart-chat-toolbar">
+                                <div class="smart-chat-toolbar-main">
+                                    <label class="field-group smart-inline-field">
+                                        <span class="field-label">AI 厂商</span>
+                                        <select class="smart-toolbar-select smart-toolbar-select-provider" id="aiAssistantProviderSelect"></select>
+                                    </label>
+                                    <label class="field-group smart-inline-field">
+                                        <span class="field-label">模型</span>
+                                        <select class="smart-toolbar-select smart-toolbar-select-model" id="aiAssistantModelSelect"></select>
+                                    </label>
+                                </div>
+                                <div class="panel-actions smart-chat-toolbar-actions">
+                                    <button class="button secondary compact smart-toolbar-button" id="toggleAiAssistantConfigButton" type="button">配置</button>
+                                    <button class="button ghost compact smart-toolbar-button" id="toggleAiAssistantToolsButton" type="button">工具列表</button>
+                                </div>
+                            </div>
+                            <div class="settings-alert" id="aiAssistantAlert"></div>
+                            <div class="badge-row" id="aiAssistantProviderBadgeRow"></div>
+                            <div class="detail-meta" id="aiAssistantConversationMeta">智能插件会优先使用 wxrobot_api 工具完成查询、发送和群管理等操作。</div>
+                            <div class="smart-chat-transcript" id="aiAssistantConversation"></div>
+                            <form class="settings-form smart-chat-form" id="aiAssistantPromptForm">
+                                <label class="field-group field-span-2">
+                                    <span class="field-label">指令</span>
+                                    <textarea class="config-editor smart-chat-input" id="aiAssistantPromptInput" placeholder="例如：查看当前登录的微信账号，并告诉我每个账号的 wxpid。"></textarea>
+                                </label>
+                                <div class="field-actions field-span-2">
+                                    <button class="button primary" id="sendAiAssistantPromptButton" type="submit">发送给智能插件</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel-shell shell-card tab-panel" data-panel="plugins">
+                    <div class="panel-toolbar">
+                        <div class="panel-actions">
+                            <button class="button secondary" id="refreshPluginsButton" type="button">刷新消息插件</button>
+                        </div>
+                    </div>
+                    <div class="plugin-grid" id="pluginGrid"></div>
+                </section>
+
+                <section class="panel-shell shell-card tab-panel" data-panel="plugin-logs">
+                    <div class="panel-toolbar">
+                        <div class="panel-actions log-actions">
+                            <select id="pluginLogFilter"></select>
+                            <select id="pluginLogLevelFilter"></select>
+                            <input class="plugin-log-keyword-input" id="pluginLogKeywordFilter" type="search" placeholder="输入关键词筛选插件日志">
+                            <button class="button secondary" id="refreshPluginLogsButton" type="button">刷新插件日志</button>
+                        </div>
+                    </div>
+                    <div class="log-meta" id="pluginLogMeta"></div>
+                    <div class="split-layout">
+                        <div class="message-list plugin-log-list" id="pluginLogList"></div>
+                        <div class="detail-card plugin-log-detail" id="pluginLogDetail"></div>
+                    </div>
+                </section>
+
+                <section class="panel-shell shell-card tab-panel" data-panel="settings">
+                    <div class="panel-toolbar">
+                        <div class="panel-actions">
+                            <button class="button secondary" id="refreshSettingsButton" type="button">刷新设置</button>
+                        </div>
+                    </div>
+                    <div class="settings-alert" id="settingsAlert"></div>
+                    <form class="settings-form" id="settingsForm">
+                        <label class="field-group">
+                            <span class="field-label">监听地址 host</span>
+                            <input name="host" type="text" required>
+                        </label>
+                        <label class="field-group">
+                            <span class="field-label">监听端口 port</span>
+                            <input name="port" type="number" min="1" max="65535" required>
+                        </label>
+                        <label class="field-group field-span-2">
+                            <span class="field-label">消息回调路径 callback_path</span>
+                            <input name="callback_path" type="text" required>
+                        </label>
+                        <label class="field-group field-span-2">
+                            <span class="field-label">主服务地址 api_base_url</span>
+                            <input name="api_base_url" type="url" required>
+                        </label>
+                        <label class="field-group">
+                            <span class="field-label">请求超时 request_timeout</span>
+                            <input name="request_timeout" type="number" min="0.1" step="0.1" required>
+                        </label>
+                        <label class="field-group">
+                            <span class="field-label">Worker 数量 worker_count</span>
+                            <input name="worker_count" type="number" min="1" max="32" required>
+                        </label>
+                        <label class="field-group">
+                            <span class="field-label">队列长度 queue_size</span>
+                            <input name="queue_size" type="number" min="1" max="100000" required>
+                        </label>
+                        <label class="field-group">
+                            <span class="field-label">心跳间隔 heartbeat_interval_seconds</span>
+                            <input name="heartbeat_interval_seconds" type="number" min="0" max="3600" required>
+                        </label>
+                        <div class="field-actions field-span-2">
+                            <button class="button primary" type="submit">保存系统设置</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section class="panel-shell shell-card tab-panel" data-panel="logs">
+                    <div class="panel-toolbar">
+                        <div class="panel-actions log-actions">
+                            <select id="logFileSelect"></select>
+                            <button class="button secondary" id="refreshLogsButton" type="button">刷新日志</button>
+                        </div>
+                    </div>
+                    <div class="log-filter-bar">
+                        <label class="log-filter-group">
+                            <span class="field-label">时间范围</span>
+                            <select id="logTimeRange">
+                                <option value="1h">最近一小时</option>
+                                <option value="6h">最近6小时</option>
+                                <option value="1d">最近一天</option>
+                                <option value="all" selected>全部</option>
+                            </select>
+                        </label>
+                        <label class="log-filter-group">
+                            <span class="field-label">日志级别</span>
+                            <select id="logLevelFilter">
+                                <option value="">全部级别</option>
+                                <option value="DEBUG">DEBUG</option>
+                                <option value="INFO">INFO</option>
+                                <option value="WARNING">WARNING</option>
+                                <option value="ERROR">ERROR</option>
+                                <option value="CRITICAL">CRITICAL</option>
+                            </select>
+                        </label>
+                        <label class="log-filter-group">
+                            <span class="field-label">模块或函数</span>
+                            <input id="logModuleFilter" type="text" placeholder="例如 api.runtime 或 main">
+                        </label>
+                        <label class="log-filter-group">
+                            <span class="field-label">日志关键词</span>
+                            <input id="logKeywordFilter" type="text" placeholder="输入关键词筛选日志内容">
+                        </label>
+                    </div>
+                    <div class="log-meta" id="logMeta"></div>
+                    <div class="log-viewer" id="logViewer"></div>
+                </section>
+            </section>
+        </main>
+    </div>
+
+    <div class="modal-backdrop" id="pluginConfigModal">
+        <div class="modal-card shell-card">
+            <div class="panel-head modal-head">
+                <div>
+                    <p class="panel-eyebrow">插件配置</p>
+                    <h3 class="panel-title" id="pluginConfigModalTitle">修改插件配置</h3>
+                </div>
+                <div class="panel-actions">
+                    <button class="button ghost" id="closePluginConfigButton" type="button">关闭</button>
+                </div>
+            </div>
+            <div class="detail-meta" id="pluginConfigMeta">插件配置会保存到 SQLite，并在支持的范围内立即热重载。</div>
+            <form class="settings-form plugin-config-form" id="pluginConfigForm" hidden></form>
+            <textarea class="config-editor modal-editor" id="pluginConfigEditor" hidden></textarea>
+            <div class="modal-actions">
+                <button class="button secondary" id="cancelPluginConfigButton" type="button">取消</button>
+                <button class="button primary" id="savePluginConfigButton" type="button">保存配置</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-backdrop" id="pluginExecuteModal">
+        <div class="modal-card shell-card">
+            <div class="panel-head modal-head">
+                <div>
+                    <p class="panel-eyebrow">执行插件</p>
+                    <h3 class="panel-title" id="pluginExecuteModalTitle">选择执行范围</h3>
+                </div>
+                <div class="panel-actions">
+                    <button class="button ghost" id="closePluginExecuteButton" type="button">关闭</button>
+                </div>
+            </div>
+            <div class="detail-meta" id="pluginExecuteMeta">执行前选择这次运行要作用的范围，本次选择不会覆盖已保存配置。</div>
+            <form class="settings-form plugin-config-form" id="pluginExecuteForm"></form>
+            <div class="modal-actions">
+                <button class="button secondary" id="cancelPluginExecuteButton" type="button">取消</button>
+                <button class="button primary" id="executePluginButton" type="button">执行插件</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-backdrop" id="aiAssistantConfigModal">
+        <div class="modal-card shell-card smart-assistant-modal-card">
+            <div class="panel-head modal-head">
+                <div>
+                    <p class="panel-eyebrow">智能插件配置</p>
+                    <h3 class="panel-title">智能插件配置</h3>
+                </div>
+                <div class="panel-actions">
+                    <button class="button ghost compact" id="closeAiAssistantConfigButton" type="button">关闭</button>
+                </div>
+            </div>
+            <div class="detail-meta">配置会保存在本地 SQLite，保存后会重新刷新模型列表。</div>
+            <form class="settings-form plugin-config-form smart-assistant-form" id="aiAssistantSettingsForm"></form>
+            <div class="modal-actions">
+                <button class="button secondary" id="cancelAiAssistantConfigButton" type="button">取消</button>
+                <button class="button primary" id="saveAiAssistantSettingsButton" type="submit" form="aiAssistantSettingsForm">保存配置</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-backdrop" id="aiAssistantToolsModal">
+        <div class="modal-card shell-card smart-assistant-modal-card smart-assistant-tools-modal-card">
+            <div class="panel-head modal-head">
+                <div>
+                    <p class="panel-eyebrow">MCP 工具</p>
+                    <h3 class="panel-title">可用 MCP 工具</h3>
+                </div>
+                <div class="panel-actions">
+                    <button class="button ghost compact" id="closeAiAssistantToolsButton" type="button">关闭</button>
+                </div>
+            </div>
+            <div class="detail-meta" id="aiAssistantToolMeta">尚未加载</div>
+            <div class="smart-assistant-modal-body">
+                <div class="smart-tool-grid smart-tool-modal-grid" id="aiAssistantToolGrid"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="button secondary" id="dismissAiAssistantToolsButton" type="button">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-backdrop" id="aiAssistantConversationModal">
+        <div class="modal-card shell-card smart-assistant-modal-card">
+            <div class="panel-head modal-head">
+                <div>
+                    <p class="panel-eyebrow">历史对话</p>
+                    <h3 class="panel-title">切换对话</h3>
+                </div>
+                <div class="panel-actions">
+                    <button class="button ghost compact" id="closeAiAssistantConversationModalButton" type="button">关闭</button>
+                </div>
+            </div>
+            <div class="detail-meta">历史对话会保存在 SQLite。选择任意一条即可切换回对应会话。</div>
+            <div class="smart-assistant-modal-body">
+                <div class="smart-conversation-list" id="aiAssistantConversationList"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="button secondary" id="dismissAiAssistantConversationModalButton" type="button">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/static/js/app.js?v=20260511-07"></script>
+</body>
+</html>
