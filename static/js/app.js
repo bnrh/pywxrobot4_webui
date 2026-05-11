@@ -1662,8 +1662,7 @@ function renderAiConversation() {
             : status === "failed"
                 ? "失败"
                 : (role === "assistant" ? "已完成" : "已发送");
-        const hasAssistantReply = role === "assistant" && Boolean(String(message.content || "").trim());
-        const showReasoning = Boolean(reasoningContent) && !hasAssistantReply;
+        const showReasoning = Boolean(reasoningContent);
         const messageBody = message.content || ((status === "running" || status === "stopped")
             ? (message.progress_message || (status === "running" ? "正在处理中..." : "本次对话已手动停止。"))
             : "无内容");
@@ -1679,13 +1678,13 @@ function renderAiConversation() {
                     <div class="detail-meta">${escapeHtml(formatStandardDateTime(message.updated_at) || message.updated_at || "")}</div>
                 </div>
                 ${message.progress_message ? `<div class="smart-chat-progress">${escapeHtml(message.progress_message)}</div>` : ""}
-                <div class="detail-text smart-chat-message-body">${escapeHtml(messageBody)}</div>
                 ${showReasoning ? `
                     <section class="smart-reasoning-block">
                         <div class="detail-meta">思考过程</div>
                         <pre class="code-block smart-reasoning-content">${escapeHtml(reasoningContent)}</pre>
                     </section>
                 ` : ""}
+                <div class="detail-text smart-chat-message-body">${escapeHtml(messageBody)}</div>
                 ${toolTraces.length ? `
                     <div class="smart-tool-trace-list">
                         ${toolTraces.map((trace) => {
