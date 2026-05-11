@@ -1,8 +1,9 @@
+import re
 from pathlib import Path
 
 from config import PROJECT_ROOT
 
-from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text, sleep
+from ._plugin_sdk import MESSAGE_TYPES, find_xml_tag_text, get_message_type, normalize_text, parse_xml_attributes, sleep
 
 
 name = "enter_room_tip"
@@ -11,6 +12,8 @@ event_filters = ["notice", "sysmsg"]
 NOTICE_DELAY_SECONDS = 3.0
 SYSMSG_DELAY_SECONDS = 1.0
 IMAGE_UPLOAD_DIR = "uploads/enter_room_tip"
+ENTER_ROOM_KEYWORD = "加入群聊"
+CONTENT_PREVIEW_LIMIT = 160
 config_schema = [
     {
         "key": "room_welcomes",
@@ -151,6 +154,71 @@ async def fetch_room_member_map(context, roomid, wxpid):
     return {str(member.get("username") or "").strip(): normalize_text(member.get("room_nick_name") or member.get("nick_name") or member.get("username") or "成员") for member in members if str(member.get("username") or "").strip()}
 
 
+def extract_sysmsg_xml(content):
+    text = str(content or "")
+    start_index = text.find("<sysmsg")
+    return text[start_index:] if start_index >= 0 else text
+
+
+def extract_xml_tag_values(xml_text, tag_name):
+    pattern = re.compile(
+        rf"<{re.escape(str(tag_name))}(?:\s[^>]*)?>\s*(?:<!\[CDATA\[(.*?)\]\]>|([^<]*))\s*</{re.escape(str(tag_name))}>",
+        re.I | re.S,
+    )
+    values: list[str] = []
+    for match in pattern.finditer(str(xml_text or "")):
+        value = normalize_text(match.group(1) or match.group(2) or "")
+        if value:
+            values.append(value)
+    return values
+
+
+def extract_xml_tag_block(xml_text, tag_name):
+    match = re.search(rf"<{re.escape(str(tag_name))}(?:\s[^>]*)?>([\s\S]*?)</{re.escape(str(tag_name))}>", str(xml_text or ""), re.I)
+    return match.group(1) if match else ""
+
+
+def find_first_xml_tag_value(xml_text, tag_name):
+    values = extract_xml_tag_values(xml_text, tag_name)
+    return values[0] if values else ""
+
+
+def inspect_enter_room_notice(content):
+    normalized_content = normalize_text(content)
+    xml_text = extract_sysmsg_xml(content)
+    sysmsg_type = normalize_text(parse_xml_attributes(xml_text).get("type")).lower()
+    delchatroommember_xml = extract_xml_tag_block(xml_text, "delchatroommember")
+    link_xml = extract_xml_tag_block(delchatroommember_xml, "link")
+    memberlist_xml = extract_xml_tag_block(link_xml, "memberlist")
+    notice_text = (
+        find_first_xml_tag_value(delchatroommember_xml, "plain")
+        or find_first_xml_tag_value(delchatroommember_xml, "text")
+        or normalized_content
+    )
+    return {
+        "matched": ENTER_ROOM_KEYWORD in notice_text,
+        "notice_text": notice_text,
+        "sysmsg_type": sysmsg_type,
+        "scene": find_first_xml_tag_value(link_xml, "scene") or find_xml_tag_text(xml_text, ["delchatroommember", "link", "scene"]),
+        "member_usernames": extract_xml_tag_values(memberlist_xml, "username") or extract_xml_tag_values(xml_text, "username"),
+        "content_preview": normalized_content[:CONTENT_PREVIEW_LIMIT],
+    }
+
+
+def build_notice_log_payload(event, roomid, type_code, notice_meta):
+    return {
+        "roomid": roomid,
+        "msgid": getattr(event, "normalized_msgid", "") or getattr(event, "msgid", ""),
+        "wxpid": getattr(event, "normalized_wxpid", None),
+        "type_code": type_code,
+        "type_name": "sysmsg" if type_code == MESSAGE_TYPES.SYSMSG else "notice",
+        "sysmsg_type": notice_meta.get("sysmsg_type", ""),
+        "scene": notice_meta.get("scene", ""),
+        "member_usernames": notice_meta.get("member_usernames", []),
+        "content_preview": notice_meta.get("content_preview", ""),
+    }
+
+
 async def warmup_room_members(context, wxpid):
     welcome_map = get_welcome_map(context.config)
     room_cache = context.state.namespace("room_members_cache")
@@ -181,13 +249,20 @@ async def handle_message(event, context):
         return {"handled": False, "detail": "当前群聊没有配置欢迎语"}
 
     content = str(event.normalized_content or getattr(event, "content", ""))
-    if "加入了群聊" not in content:
+    notice_meta = inspect_enter_room_notice(content)
+    log_payload = build_notice_log_payload(event, roomid, type_code, notice_meta)
+    if not notice_meta["matched"]:
+        context.logger.info("入群欢迎插件忽略了非入群通知消息", log_payload)
         return {"handled": False, "detail": "不是成员入群通知"}
+
+    context.logger.info("入群欢迎插件命中成员入群通知", {**log_payload, "notice_text": notice_meta["notice_text"]})
 
     room_cache = context.state.namespace("room_members_cache")
     old_members = room_cache.get(roomid)
     if not old_members:
-        room_cache.set(roomid, await fetch_room_member_map(context, roomid, event.normalized_wxpid))
+        initialized_members = await fetch_room_member_map(context, roomid, event.normalized_wxpid)
+        room_cache.set(roomid, initialized_members)
+        context.logger.info("入群欢迎插件已初始化群成员缓存", {**log_payload, "cached_member_count": len(initialized_members)})
         return {"handled": False, "detail": "已初始化群成员缓存，等待下一次通知"}
 
     await sleep((NOTICE_DELAY_SECONDS if type_code == MESSAGE_TYPES.NOTICE else SYSMSG_DELAY_SECONDS) * 1000)
@@ -195,11 +270,15 @@ async def handle_message(event, context):
     room_cache.set(roomid, new_members_map)
     new_members = [{"username": username, "nick_name": nickname} for username, nickname in new_members_map.items() if username not in old_members]
     if not new_members:
+        context.logger.info("入群欢迎插件未识别到新增成员", {**log_payload, "cached_member_count": len(old_members), "latest_member_count": len(new_members_map)})
         return {"handled": False, "detail": "没有识别到新增成员"}
+
+    context.logger.info("入群欢迎插件识别到新增成员", {**log_payload, "cached_member_count": len(old_members), "latest_member_count": len(new_members_map), "new_members": new_members})
 
     interval_ms = float(context.config.get("message_interval_seconds", 1.5) or 0) * 1000
     sent_count = 0
     message_text = str(welcome_entry.get("content") or "").strip()
+    context.logger.info("入群欢迎插件准备发送欢迎内容", {**log_payload, "member_count": len(new_members), "has_text": bool(message_text), "has_image": bool(welcome_entry.get("path")), "interval_ms": interval_ms})
     if message_text:
         atlist = ""
         if "@{nick_name}" in message_text:
@@ -222,5 +301,5 @@ async def handle_message(event, context):
     if sent_count <= 0:
         return {"handled": False, "detail": "欢迎规则存在，但文本和图片均不可用"}
 
-    context.logger.info("已发送入群欢迎语", {"roomid": roomid, "new_members": new_members})
+    context.logger.info("已发送入群欢迎语", {**log_payload, "new_members": new_members, "sent_count": sent_count})
     return {"handled": True, "detail": f"已向 {len(new_members)} 位新成员发送欢迎语", "data": {"roomid": roomid, "new_members": new_members}}
