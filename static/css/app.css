@@ -705,6 +705,17 @@ textarea {
     background: linear-gradient(135deg, rgba(76, 201, 255, 0.08), rgba(76, 201, 255, 0.02));
 }
 
+.smart-stop-button {
+    color: #ffd5dc;
+    border-color: rgba(255, 110, 127, 0.3);
+    background: linear-gradient(135deg, rgba(255, 110, 127, 0.18), rgba(255, 110, 127, 0.06));
+}
+
+.smart-stop-button:hover {
+    background: linear-gradient(135deg, rgba(255, 110, 127, 0.24), rgba(255, 110, 127, 0.1));
+    border-color: rgba(255, 110, 127, 0.42);
+}
+
 .smart-assistant-modal-card {
     width: min(980px, 100%);
 }

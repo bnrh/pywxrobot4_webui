@@ -79,10 +79,12 @@ AI_ASSISTANT_CONVERSATIONS_KEY = "ai_assistant_conversations"
 AI_ASSISTANT_CONVERSATION_LIMIT = 40
 AI_ASSISTANT_MESSAGE_LIMIT = 240
 AI_ASSISTANT_JOB_LIMIT = 80
-AI_ASSISTANT_JOB_TERMINAL_STATUSES = {"completed", "failed"}
+AI_ASSISTANT_JOB_TERMINAL_STATUSES = {"completed", "failed", "stopped"}
+AI_ASSISTANT_JOB_ACTIVE_STATUSES = {"queued", "running", "stopping"}
 ai_assistant_storage_lock = asyncio.Lock()
 ai_assistant_job_lock = asyncio.Lock()
 ai_assistant_jobs: dict[str, dict[str, Any]] = {}
+ai_assistant_job_tasks: dict[str, asyncio.Task[Any]] = {}
 
 
 class PluginToggleRequest(BaseModel):
@@ -187,7 +189,7 @@ def _normalize_ai_assistant_message_payload(message: Any) -> dict[str, Any]:
     created_at = str(payload.get("created_at") or "").strip() or _now_iso()
     updated_at = str(payload.get("updated_at") or "").strip() or created_at
     status = str(payload.get("status") or ("running" if role == "assistant" and payload.get("progress_message") else "completed")).strip().lower()
-    if status not in {"running", "completed", "failed"}:
+    if status not in {"running", "completed", "failed", "stopped"}:
         status = "completed"
     error_flag = bool(payload.get("error"))
     if error_flag and status == "completed":
@@ -446,6 +448,18 @@ async def _update_ai_assistant_message_payload(conversation_id: str, message_id:
     return _build_ai_assistant_conversation_payload(store)
 
 
+async def _get_ai_assistant_message_payload(conversation_id: str, message_id: str) -> dict[str, Any] | None:
+    normalized_conversation_id = str(conversation_id or "").strip()
+    normalized_message_id = str(message_id or "").strip()
+    async with ai_assistant_storage_lock:
+        store = _load_ai_assistant_conversation_store()
+    conversation = _get_ai_assistant_conversation(store, normalized_conversation_id)
+    if conversation is None:
+        return None
+    message = next((item for item in conversation.get("messages", []) if item.get("id") == normalized_message_id), None)
+    return deepcopy(message) if message is not None else None
+
+
 async def _get_ai_assistant_conversation_history(conversation_id: str) -> list[dict[str, Any]]:
     async with ai_assistant_storage_lock:
         store = _load_ai_assistant_conversation_store()
@@ -501,6 +515,71 @@ async def _get_ai_assistant_job(job_id: str) -> dict[str, Any] | None:
     async with ai_assistant_job_lock:
         job = ai_assistant_jobs.get(normalized_job_id)
         return deepcopy(job) if job is not None else None
+
+
+async def _set_ai_assistant_job_task(job_id: str, task: asyncio.Task[Any]) -> None:
+    normalized_job_id = str(job_id or "").strip()
+    async with ai_assistant_job_lock:
+        ai_assistant_job_tasks[normalized_job_id] = task
+
+
+async def _get_ai_assistant_job_task(job_id: str) -> asyncio.Task[Any] | None:
+    normalized_job_id = str(job_id or "").strip()
+    async with ai_assistant_job_lock:
+        return ai_assistant_job_tasks.get(normalized_job_id)
+
+
+async def _pop_ai_assistant_job_task(job_id: str) -> asyncio.Task[Any] | None:
+    normalized_job_id = str(job_id or "").strip()
+    async with ai_assistant_job_lock:
+        return ai_assistant_job_tasks.pop(normalized_job_id, None)
+
+
+async def _mark_ai_assistant_job_stopped(
+    job_id: str,
+    conversation_id: str,
+    assistant_message_id: str,
+    provider_key: str,
+    provider_config_id: str | None,
+    selected_model: str,
+    progress_message: str = "本次对话已手动停止。",
+) -> dict[str, Any]:
+    current_job = await _get_ai_assistant_job(job_id)
+    if current_job is not None and str(current_job.get("status") or "") == "stopped":
+        return current_job
+
+    current_message = await _get_ai_assistant_message_payload(conversation_id, assistant_message_id) or {}
+    preserved_content = str(current_message.get("content") or "").strip()
+    await _update_ai_assistant_message_payload(
+        conversation_id,
+        assistant_message_id,
+        {
+            "content": preserved_content or progress_message,
+            "reasoning_content": str(current_message.get("reasoning_content") or ""),
+            "tool_traces": current_message.get("tool_traces") if isinstance(current_message.get("tool_traces"), list) else [],
+            "progress_message": progress_message,
+            "status": "stopped",
+            "error": False,
+            "provider": str(current_message.get("provider") or provider_key),
+            "provider_label": str(current_message.get("provider_label") or PROVIDER_CATALOG.get(provider_key, {}).get("label", "")),
+            "provider_config_id": str(current_message.get("provider_config_id") or provider_config_id or ""),
+            "model": str(current_message.get("model") or selected_model),
+        },
+    )
+    return await _set_ai_assistant_job(
+        job_id,
+        {
+            "conversation_id": conversation_id,
+            "assistant_message_id": assistant_message_id,
+            "status": "stopped",
+            "stage": "stopped",
+            "progress_message": progress_message,
+            "error": "",
+            "provider": provider_key,
+            "provider_config_id": str(provider_config_id or ""),
+            "model": selected_model,
+        },
+    )
 
 
 def _format_local_datetime(value: datetime | None) -> str | None:
@@ -1559,6 +1638,16 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                     "model": final_model,
                 },
             )
+        except asyncio.CancelledError:
+            await _mark_ai_assistant_job_stopped(
+                job_id,
+                conversation_id,
+                assistant_message_id,
+                provider_key,
+                provider_config_id,
+                selected_model,
+            )
+            return
         except Exception as exc:
             error_message = str(exc)
             logger.exception("智能插件异步任务执行失败")
@@ -1590,6 +1679,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                     "model": selected_model,
                 },
             )
+        finally:
+            await _pop_ai_assistant_job_task(job_id)
 
     def build_log_payload(
         file_name: str | None = None,
@@ -1866,7 +1957,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 "created_at": _now_iso(),
             },
         )
-        asyncio.create_task(
+        task = asyncio.create_task(
             run_ai_assistant_chat_job(
                 job_id,
                 str(item.conversation_id or "").strip(),
@@ -1876,6 +1967,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 selected_model,
             )
         )
+        await _set_ai_assistant_job_task(job_id, task)
         return {
             "job": job,
             **conversation_payload,
@@ -1889,6 +1981,67 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         conversation_payload = await _ensure_ai_assistant_conversation_payload()
         return {
             "job": job,
+            **conversation_payload,
+        }
+
+    @app.post("/api/ai-assistant/chat-jobs/{job_id}/stop")
+    async def stop_ai_assistant_chat_job(job_id: str) -> dict:
+        job = await _get_ai_assistant_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="未找到指定智能插件任务")
+
+        job_status = str(job.get("status") or "").strip().lower()
+        if job_status in AI_ASSISTANT_JOB_TERMINAL_STATUSES:
+            raise HTTPException(status_code=400, detail="当前对话任务已经结束，无需停止")
+        if job_status not in AI_ASSISTANT_JOB_ACTIVE_STATUSES:
+            raise HTTPException(status_code=400, detail="当前对话任务不支持停止")
+
+        conversation_id = str(job.get("conversation_id") or "").strip()
+        assistant_message_id = str(job.get("assistant_message_id") or "").strip()
+        provider_key = str(job.get("provider") or "").strip().lower()
+        provider_config_id = str(job.get("provider_config_id") or "").strip()
+        selected_model = str(job.get("model") or "").strip()
+
+        if conversation_id and assistant_message_id:
+            await _update_ai_assistant_message_payload(
+                conversation_id,
+                assistant_message_id,
+                {
+                    "progress_message": "正在停止当前对话...",
+                    "status": "running",
+                    "error": False,
+                },
+            )
+
+        job = await _set_ai_assistant_job(
+            job_id,
+            {
+                "status": "stopping",
+                "stage": "stopping",
+                "progress_message": "正在停止当前对话...",
+                "error": "",
+            },
+        )
+
+        task = await _get_ai_assistant_job_task(job_id)
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.sleep(0)
+
+        current_job = await _get_ai_assistant_job(job_id)
+        if current_job is not None and str(current_job.get("status") or "") == "stopping" and conversation_id and assistant_message_id:
+            current_job = await _mark_ai_assistant_job_stopped(
+                job_id,
+                conversation_id,
+                assistant_message_id,
+                provider_key,
+                provider_config_id,
+                selected_model,
+            )
+
+        conversation_payload = await _ensure_ai_assistant_conversation_payload()
+        return {
+            "job": current_job or job,
             **conversation_payload,
         }
 

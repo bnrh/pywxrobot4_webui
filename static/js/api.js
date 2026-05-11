@@ -87,6 +87,11 @@ export const api = {
     getAiAssistantChatJob(jobId) {
         return requestJson(`/api/ai-assistant/chat-jobs/${encodeURIComponent(jobId)}`);
     },
+    stopAiAssistantChatJob(jobId) {
+        return requestJson(`/api/ai-assistant/chat-jobs/${encodeURIComponent(jobId)}/stop`, {
+            method: "POST",
+        });
+    },
     chatWithAiAssistant(messages = [], provider = "", providerConfigId = "", model = "") {
         return requestJson("/api/ai-assistant/chat", {
             method: "POST",

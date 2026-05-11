@@ -11,6 +11,8 @@ const OVERVIEW_POLL_INTERVAL_MS = 15000;
 const MESSAGE_POLL_INTERVAL_MS = 3000;
 const OVERVIEW_RENDER_TICK_MS = 1000;
 const AI_ASSISTANT_JOB_POLL_INTERVAL_MS = 1200;
+const AI_ASSISTANT_ACTIVE_JOB_STATUSES = new Set(["queued", "running", "stopping"]);
+const AI_ASSISTANT_TERMINAL_JOB_STATUSES = new Set(["completed", "failed", "stopped"]);
 
 const MESSAGE_TYPE_LABELS = {
     0x0: "朋友圈",
@@ -189,6 +191,7 @@ const elements = {
     aiAssistantPromptForm: document.getElementById("aiAssistantPromptForm"),
     aiAssistantPromptInput: document.getElementById("aiAssistantPromptInput"),
     sendAiAssistantPromptButton: document.getElementById("sendAiAssistantPromptButton"),
+    stopAiAssistantChatButton: document.getElementById("stopAiAssistantChatButton"),
     pluginGrid: document.getElementById("pluginGrid"),
     refreshPluginsButton: document.getElementById("refreshPluginsButton"),
     pluginLogFilter: document.getElementById("pluginLogFilter"),
@@ -1570,6 +1573,18 @@ function getAiAssistantCurrentConversationId() {
     return String(state.aiAssistant?.active_conversation_id || getAiAssistantCurrentConversation()?.id || "");
 }
 
+function normalizeAiAssistantJobStatus(status) {
+    return String(status || "").trim().toLowerCase();
+}
+
+function isAiAssistantJobActive(job) {
+    return AI_ASSISTANT_ACTIVE_JOB_STATUSES.has(normalizeAiAssistantJobStatus(job?.status));
+}
+
+function isAiAssistantJobTerminal(job) {
+    return AI_ASSISTANT_TERMINAL_JOB_STATUSES.has(normalizeAiAssistantJobStatus(job?.status));
+}
+
 function applyAiAssistantPayload(payload, preserveSelection = true) {
     if (!payload || typeof payload !== "object") {
         return;
@@ -1637,15 +1652,19 @@ function renderAiConversation() {
         const status = String(message.status || (message.error ? "failed" : "completed")).trim().toLowerCase();
         const statusTone = message.error || status === "failed"
             ? "bad"
-            : status === "running"
+            : (status === "running" || status === "stopped")
                 ? "warn"
                 : (role === "assistant" ? "good" : "");
         const statusLabel = status === "running"
             ? "处理中"
+            : status === "stopped"
+                ? "已停止"
             : status === "failed"
                 ? "失败"
                 : (role === "assistant" ? "已完成" : "已发送");
-        const messageBody = message.content || (status === "running" ? (message.progress_message || "正在处理中...") : "无内容");
+        const messageBody = message.content || ((status === "running" || status === "stopped")
+            ? (message.progress_message || (status === "running" ? "正在处理中..." : "本次对话已手动停止。"))
+            : "无内容");
         return `
             <article class="smart-chat-message ${role === "assistant" ? "is-assistant" : "is-user"} ${message.error || status === "failed" ? "is-error" : ""}">
                 <div class="smart-chat-message-head">
@@ -2115,9 +2134,10 @@ function renderAiAssistant() {
     const currentConversation = getAiAssistantCurrentConversation();
     const currentConversationTitle = currentConversation?.title || "未命名对话";
     const currentJob = state.aiActiveChatJob || {};
-    const currentConversationJobRunning = currentJob.status === "running"
+    const currentConversationJobActive = isAiAssistantJobActive(currentJob)
         && currentConversation?.id
         && currentJob.conversation_id === currentConversation.id;
+    const currentConversationJobStopping = currentConversationJobActive && normalizeAiAssistantJobStatus(currentJob.status) === "stopping";
     const {
         provider: selectedProvider,
         providerSettings: selectedProviderSettings,
@@ -2178,6 +2198,11 @@ function renderAiAssistant() {
 
     if (elements.clearAiAssistantConversationButton) {
         elements.clearAiAssistantConversationButton.disabled = state.aiRequestInFlight || !currentConversation?.id;
+    }
+
+    if (elements.stopAiAssistantChatButton) {
+        elements.stopAiAssistantChatButton.disabled = !currentConversationJobActive || currentConversationJobStopping;
+        elements.stopAiAssistantChatButton.textContent = currentConversationJobStopping ? "停止中..." : "停止对话";
     }
 
     if (elements.aiAssistantSettingsForm) {
@@ -2273,7 +2298,7 @@ function renderAiAssistant() {
 
     if (elements.aiAssistantConversationMeta) {
         elements.aiAssistantConversationMeta.textContent = selectedProvider
-            ? `${currentConversationTitle} · ${selectedProvider.label}${selectedConfig?.name ? ` / ${selectedConfig.name}` : ""} 当前会话模型：${selectedModel || selectedProvider.default_model || "未设置"}。${currentConversationJobRunning ? `当前任务：${currentJob.progress_message || "处理中..."}` : (selectedConfigMeta?.model_fetch_error ? "模型列表自动获取失败，已回退到默认模型。" : `当前共可选 ${modelOptions.length} 个模型选项。`)}`
+            ? `${currentConversationTitle} · ${selectedProvider.label}${selectedConfig?.name ? ` / ${selectedConfig.name}` : ""} 当前会话模型：${selectedModel || selectedProvider.default_model || "未设置"}。${currentConversationJobActive ? `当前任务：${currentJob.progress_message || "处理中..."}` : (selectedConfigMeta?.model_fetch_error ? "模型列表自动获取失败，已回退到默认模型。" : `当前共可选 ${modelOptions.length} 个模型选项。`)}`
             : "请先配置并启用一个 AI 厂商。";
     }
 
@@ -2479,6 +2504,28 @@ async function clearAiAssistantConversation() {
     renderAiAssistantConversationList();
 }
 
+async function stopAiAssistantChatJob() {
+    const currentConversation = getAiAssistantCurrentConversation();
+    const currentJob = state.aiActiveChatJob || {};
+    const jobId = String(currentJob.id || state.aiActiveChatJobId || "").trim();
+    if (!jobId || !isAiAssistantJobActive(currentJob)) {
+        throw new Error("当前没有可停止的智能插件对话");
+    }
+    if (currentConversation?.id && currentJob.conversation_id && currentJob.conversation_id !== currentConversation.id) {
+        throw new Error("当前对话没有正在运行的智能插件任务");
+    }
+
+    const payload = await api.stopAiAssistantChatJob(jobId);
+    applyAiAssistantPayload(payload, true);
+    if (isAiAssistantJobTerminal(payload.job) && normalizeAiAssistantJobStatus(payload.job?.status) === "stopped") {
+        state.aiRequestInFlight = false;
+        state.aiActiveChatJobId = "";
+        state.aiActiveChatJob = payload.job || null;
+    }
+    renderAiAssistant();
+    renderAiAssistantConversationList();
+}
+
 async function pollAiAssistantChatJob(jobId) {
     state.aiActiveChatJobId = jobId;
     while (state.aiActiveChatJobId === jobId) {
@@ -2487,7 +2534,8 @@ async function pollAiAssistantChatJob(jobId) {
         renderAiAssistant();
         renderAiAssistantConversationList();
         const job = payload.job || {};
-        if (job.status === "completed") {
+        const jobStatus = normalizeAiAssistantJobStatus(job.status);
+        if (jobStatus === "completed") {
             state.aiRequestInFlight = false;
             state.aiActiveChatJobId = "";
             state.aiActiveChatJob = job;
@@ -2497,7 +2545,15 @@ async function pollAiAssistantChatJob(jobId) {
             renderAiAssistant();
             return;
         }
-        if (job.status === "failed") {
+        if (jobStatus === "stopped") {
+            state.aiRequestInFlight = false;
+            state.aiActiveChatJobId = "";
+            state.aiActiveChatJob = job;
+            setStatus("智能插件已停止");
+            renderAiAssistant();
+            return;
+        }
+        if (jobStatus === "failed") {
             state.aiRequestInFlight = false;
             state.aiActiveChatJobId = "";
             state.aiActiveChatJob = job;
@@ -2787,6 +2843,18 @@ elements.clearAiAssistantConversationButton.addEventListener("click", async () =
         setStatus("当前对话已清空", "good");
     } catch (error) {
         setStatus(`清空对话失败：${error.message}`, "bad");
+    }
+});
+
+elements.stopAiAssistantChatButton?.addEventListener("click", async () => {
+    try {
+        setStatus("正在停止智能插件对话...");
+        await stopAiAssistantChatJob();
+        if (!state.aiRequestInFlight && normalizeAiAssistantJobStatus(state.aiActiveChatJob?.status) === "stopped") {
+            setStatus("智能插件已停止");
+        }
+    } catch (error) {
+        setStatus(`停止智能插件对话失败：${error.message}`, "bad");
     }
 });
 
