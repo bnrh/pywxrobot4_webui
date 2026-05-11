@@ -2,6 +2,7 @@ import asyncio
 import ast
 import inspect
 import json
+from datetime import datetime
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
@@ -1376,6 +1377,24 @@ def _normalize_message_content(value: Any) -> str:
     return str(value).strip()
 
 
+def _build_current_time_prompt() -> str:
+    now = datetime.now().astimezone()
+    weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    weekday_name = weekday_names[now.weekday()]
+    timezone_name = now.tzname() or "本地时区"
+    offset = now.strftime("%z")
+    if len(offset) == 5:
+        offset = f"{offset[:3]}:{offset[3:]}"
+    return (
+        "时间上下文："
+        f"当前本地时间为 {now.strftime('%Y-%m-%d %H:%M:%S')}，{weekday_name}，"
+        f"时区 {timezone_name} ({offset})。"
+        f"ISO 8601 时间：{now.isoformat(timespec='seconds')}。"
+        "当用户提到今天、昨天、明天、最近几小时、截至目前等相对时间时，"
+        "以上述当前时间为准进行理解、推理和回答。"
+    )
+
+
 def _normalize_reasoning_content(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -1895,8 +1914,10 @@ async def run_ai_assistant(
         raise RuntimeError("请先输入要交给智能插件处理的问题")
 
     contextual_tool_routing_prompt = _build_contextual_tool_routing_prompt(history[-1].get("content") or "")
+    current_time_prompt = _build_current_time_prompt()
     request_messages: list[dict[str, Any]] = [
         {"role": "system", "content": normalized_settings["system_prompt"]},
+        {"role": "system", "content": current_time_prompt},
         {"role": "system", "content": INTERNAL_TOOL_ROUTING_PROMPT},
         *(
             [{"role": "system", "content": contextual_tool_routing_prompt}]
