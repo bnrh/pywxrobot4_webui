@@ -30,6 +30,28 @@ PATH_LIKE_KEYS = {
     "includepattern",
 }
 
+PROMPT_SCOPE_RULES = [
+    (("智能插件", "ai assistant", "mcp", "ai"), "智能插件"),
+    (("enter_room_tip", "入群欢迎", "欢迎语", "群欢迎"), "enter_room_tip"),
+    (("invite_to_toom", "关键词进群", "进群规则"), "invite_to_toom"),
+    (("watch_wechat_processes", "getwxpids", "微信进程"), "watch_wechat_processes"),
+    (("用户管理", "昵称", "微信号", "用户1"), "用户管理"),
+    (("copilot", "hook", "钩子", "commit", "提交消息", "提交标题", "审批", "自动接受编辑", ".vscode"), "工作流"),
+    (("settings", "settings.json", "工作区设置"), "工作区"),
+]
+
+FILE_SCOPE_RULES = [
+    ((".vscode/settings.json",), "工作区"),
+    ((".github/hooks/", ".github/copilot-instructions.md", ".gitignore"), "仓库"),
+    (("plugins/enter_room_tip.py",), "enter_room_tip"),
+    (("plugins/invite_to_toom.py",), "invite_to_toom"),
+    (("plugins/watch_wechat_processes.py",), "watch_wechat_processes"),
+    (("ai_assistant.py",), "智能插件"),
+    (("server.py",), "服务端"),
+    (("static/js/", "frontend/"), "前端"),
+    (("static/css/",), "界面"),
+]
+
 
 def read_stdin_json() -> dict:
     try:
@@ -220,28 +242,115 @@ def list_staged_files(repo_root: Path, files: list[str]) -> list[str]:
     return [line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()]
 
 
+def contains_any(text: str, keywords: tuple[str, ...] | list[str]) -> bool:
+    return any(keyword for keyword in keywords if keyword and keyword in text)
+
+
+def infer_action(prompt: str, files: list[str]) -> str:
+    prompt_text = prompt.strip().lower()
+    normalized_files = [item.replace("\\", "/").lower() for item in files]
+    file_text = "\n".join(normalized_files)
+
+    if contains_any(prompt_text, ("修复", "解决", "错误", "异常", "失败", "bug")):
+        return "修复"
+    if contains_any(prompt_text, ("重构", "改造", "重新设计", "重写")):
+        return "重构"
+    if ".github/" in file_text or ".vscode/" in file_text or contains_any(prompt_text, ("配置", "settings", "hook", "钩子", "审批", "自动接受", "commit")):
+        return "配置"
+    if contains_any(prompt_text, ("优化", "调整", "改进", "细化", "美观")):
+        return "优化"
+    if contains_any(prompt_text, ("新增", "增加", "添加", "补上", "支持")):
+        return "新增"
+    return "更新"
+
+
+def infer_scope(prompt: str, files: list[str]) -> str:
+    prompt_text = prompt.strip().lower()
+    normalized_files = [item.replace("\\", "/") for item in files]
+    lowered_files = [item.lower() for item in normalized_files]
+    file_text = "\n".join(lowered_files)
+
+    if ".vscode/settings.json" in lowered_files and any(path.startswith(".github/") for path in lowered_files):
+        return "工作流"
+
+    for keywords, scope in PROMPT_SCOPE_RULES:
+        if contains_any(prompt_text, keywords):
+            return scope
+
+    for path_markers, scope in FILE_SCOPE_RULES:
+        if any(marker.lower() in file_text for marker in path_markers):
+            return scope
+
+    if all(item.endswith(".css") for item in lowered_files if item):
+        return "界面"
+    if any(item.endswith(".js") for item in lowered_files):
+        return "前端"
+    if any(item.endswith(".py") for item in lowered_files):
+        return "后端"
+    return "项目"
+
+
+def build_summary_from_prompt(prompt: str, files: list[str]) -> str:
+    prompt_text = prompt.strip().lower()
+    normalized_files = [item.replace("\\", "/").lower() for item in files]
+    file_text = "\n".join(normalized_files)
+    summary_parts: list[str] = []
+    has_workspace_settings_request = ".vscode/settings.json" in normalized_files or contains_any(
+        prompt_text,
+        ("自动接受编辑", "auto accept", "autoaccept", "审批", "approval", "settings.json", "工作区设置"),
+    )
+    has_commit_title_request = contains_any(prompt_text, ("提交标题", "提交消息", "commit message", "中文提交"))
+
+    if has_workspace_settings_request and has_commit_title_request:
+        return "补充工作区设置并细化中文提交标题"
+
+    if has_workspace_settings_request:
+        summary_parts.append("启用编辑自动接受并减少审批提示")
+    if has_commit_title_request:
+        summary_parts.append("细化中文提交标题生成")
+    elif ".github/hooks/" in file_text or contains_any(prompt_text, ("hook", "钩子", "自动提交")):
+        summary_parts.append("更新自动提交钩子")
+    if ".github/copilot-instructions.md" in normalized_files or contains_any(prompt_text, ("copilot instruction", "仓库指令", "custom instructions")):
+        summary_parts.append("同步 Copilot 仓库指令")
+    if ".gitignore" in normalized_files or contains_any(prompt_text, ("gitignore", ".gitignore", "忽略")):
+        summary_parts.append("调整仓库忽略规则")
+
+    if contains_any(prompt_text, ("enter_room_tip", "入群欢迎", "欢迎语", "群欢迎")):
+        summary_parts.append("调整入群欢迎配置")
+    if contains_any(prompt_text, ("invite_to_toom", "关键词进群", "进群规则")):
+        summary_parts.append("调整进群规则配置")
+    if contains_any(prompt_text, ("watch_wechat_processes", "getwxpids", "微信进程")):
+        summary_parts.append("切换微信进程接口逻辑")
+    if contains_any(prompt_text, ("用户管理", "昵称", "微信号", "用户1")):
+        summary_parts.append("精简用户信息展示")
+    if contains_any(prompt_text, ("智能插件", "ai assistant", "mcp", "deepseek", "minimax", "智谱")):
+        summary_parts.append("完善智能插件能力")
+
+    unique_parts = list(dict.fromkeys(summary_parts))
+    if unique_parts:
+        return "并".join(unique_parts[:2])
+
+    if all(item.endswith(".css") for item in normalized_files if item):
+        return "调整页面样式"
+    if any(item.endswith(".css") for item in normalized_files) and any(item.endswith(".js") for item in normalized_files):
+        return "调整前端交互与样式"
+    if any(item.endswith(".js") for item in normalized_files) and any(item.endswith(".py") for item in normalized_files):
+        return "同步前后端功能逻辑"
+    if any(item.endswith(".js") for item in normalized_files):
+        return "更新前端交互逻辑"
+    if any(item.endswith(".py") for item in normalized_files):
+        return "更新后端功能逻辑"
+    if any(item.endswith(".md") or item.endswith(".json") for item in normalized_files):
+        return "更新仓库配置与说明"
+    return "更新项目代码"
+
+
 def build_commit_message(prompt: str, files: list[str]) -> str:
     normalized_files = [item.replace("\\", "/") for item in files]
-    file_text = "\n".join(normalized_files)
-    prompt_text = prompt.strip().lower()
-
-    if ".github/hooks/" in file_text or "钩子" in prompt or "hook" in prompt_text:
-        return "自动提交：更新仓库自动提交钩子"
-    if ".github/copilot-instructions.md" in file_text or "指令" in prompt or "instruction" in prompt_text:
-        return "自动提交：更新 Copilot 仓库指令"
-    if all(item.endswith(".css") for item in normalized_files if item):
-        return "自动提交：调整界面样式"
-    if any(item.endswith(".css") for item in normalized_files) and any(item.endswith(".js") for item in normalized_files):
-        return "自动提交：调整前端交互与样式"
-    if any(item.endswith(".js") for item in normalized_files) and any(item.endswith(".py") for item in normalized_files):
-        return "自动提交：更新前后端功能逻辑"
-    if any(item.endswith(".js") for item in normalized_files):
-        return "自动提交：更新前端交互逻辑"
-    if any(item.endswith(".py") for item in normalized_files):
-        return "自动提交：更新后端功能逻辑"
-    if any(item.endswith(".md") or item.endswith(".json") for item in normalized_files):
-        return "自动提交：更新仓库配置与说明"
-    return "自动提交：更新项目代码"
+    action = infer_action(prompt, normalized_files)
+    scope = infer_scope(prompt, normalized_files)
+    summary = build_summary_from_prompt(prompt, normalized_files)
+    return f"{action}({scope})：{summary}"
 
 
 def handle_user_prompt_submit(repo_root: Path, payload: dict) -> dict:
