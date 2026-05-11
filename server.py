@@ -1394,6 +1394,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         users_payload = await runtime.api_client.get_logged_in_users()
         users = users_payload if isinstance(users_payload, list) else []
         wxpids: list[int] = []
+        wxpid_options: list[dict[str, Any]] = []
         seen_wxpids: set[int] = set()
         for item in users:
             wxpid = normalize_wxpid(item.get("wxpid"))
@@ -1401,6 +1402,17 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 continue
             seen_wxpids.add(wxpid)
             wxpids.append(wxpid)
+            wxid = str(item.get("wxid") or "").strip()
+            wxh = str(item.get("wxh") or item.get("alias") or "").strip()
+            nickname = str(item.get("nickname") or item.get("remarks") or wxh or wxid or f"微信进程 {wxpid}").strip()
+            search_parts = [nickname, wxh, wxid, str(wxpid)]
+            wxpid_options.append(
+                {
+                    "label": f"{nickname}({wxpid})",
+                    "search_text": " ".join(part for part in search_parts if part),
+                    "value": wxpid,
+                }
+            )
 
         room_options: list[dict[str, Any]] = []
         label_options: list[dict[str, Any]] = []
@@ -1447,6 +1459,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
         return {
             "default_wxpid": wxpids[0] if wxpids else None,
+            "wxpid_options": sort_option_items(wxpid_options),
             "room_options": sort_option_items(room_options),
             "label_options": sort_option_items(label_options),
         }

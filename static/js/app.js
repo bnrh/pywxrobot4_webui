@@ -623,16 +623,17 @@ function needsPluginTargets(plugin) {
     if (scopeTargets.includes("rooms") || scopeTargets.includes("friend_labels")) {
         return true;
     }
+    const dynamicOptionSources = new Set(["room_options", "label_options", "wxpid_options"]);
     const schema = Array.isArray(plugin?.config_schema) ? plugin.config_schema : [];
     return schema.some((field) => {
         if (!field || typeof field !== "object") {
             return false;
         }
-        if (field.options_source === "room_options" || field.options_source === "label_options") {
+        if (dynamicOptionSources.has(field.options_source)) {
             return true;
         }
         return Array.isArray(field.columns)
-            && field.columns.some((column) => column && typeof column === "object" && (column.options_source === "room_options" || column.options_source === "label_options"));
+            && field.columns.some((column) => column && typeof column === "object" && dynamicOptionSources.has(column.options_source));
     });
 }
 
@@ -642,6 +643,9 @@ function resolveTargetOptionsBySource(optionsSource, currentValues) {
     }
     if (optionsSource === "label_options") {
         return Array.isArray(state.pluginTargets?.label_options) ? [...state.pluginTargets.label_options] : [];
+    }
+    if (optionsSource === "wxpid_options") {
+        return mergeOptionsWithCurrentValues(state.pluginTargets?.wxpid_options || [], currentValues);
     }
     return [];
 }
