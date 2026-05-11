@@ -1111,366 +1111,306 @@ async def _emit_progress(progress_callback: Any, payload: dict[str, Any]) -> Non
         await callback_result
 
 
-async def _execute_tool_call(api_client: WxRobotApiClient, tool_name: str, arguments: dict[str, Any]) -> Any:
-    if tool_name == "introduction":
-        return await api_client.get_json("/introduction")
-    if tool_name == "get_users":
-        return await api_client.get_logged_in_users()
-    if tool_name == "get_labels":
-        return await api_client.get_labels(_coerce_optional_int(arguments.get("wxpid")))
-    if tool_name == "get_wx_pids":
-        return await api_client.get_wx_pids()
-    if tool_name == "hook":
-        return await api_client.hook()
-    if tool_name == "get_user_list":
-        return await api_client.get_user_list(_coerce_optional_int(arguments.get("wxpid")))
-    if tool_name == "get_user_list_summary":
-        return _summarize_contacts(await api_client.get_user_list(_coerce_optional_int(arguments.get("wxpid"))))
-    if tool_name == "search_user_list":
-        friends = await api_client.get_user_list(_coerce_optional_int(arguments.get("wxpid")))
-        return _search_items(friends, _coerce_text(arguments.get("query")), ["wxid", "wxh", "nickname", "remarks", "signature", "province", "city", "labels"], _clamp_limit(arguments.get("limit")))
-    if tool_name == "get_room_list":
-        return await api_client.get_room_list(_coerce_optional_int(arguments.get("wxpid")))
-    if tool_name == "get_room_list_summary":
-        return _summarize_contacts(await api_client.get_room_list(_coerce_optional_int(arguments.get("wxpid"))))
-    if tool_name == "search_room_list":
-        rooms = await api_client.get_room_list(_coerce_optional_int(arguments.get("wxpid")))
-        return _search_items(rooms, _coerce_text(arguments.get("query")), ["wxid", "wxh", "nickname", "remarks", "signature", "province", "city", "labels"], _clamp_limit(arguments.get("limit")))
-    if tool_name == "get_biz_list":
-        return await api_client.get_biz_list(_coerce_optional_int(arguments.get("wxpid")))
-    if tool_name == "get_biz_list_summary":
-        return _summarize_contacts(await api_client.get_biz_list(_coerce_optional_int(arguments.get("wxpid"))))
-    if tool_name == "search_biz_list":
-        biz_list = await api_client.get_biz_list(_coerce_optional_int(arguments.get("wxpid")))
-        return _search_items(biz_list, _coerce_text(arguments.get("query")), ["wxid", "wxh", "nickname", "remarks", "signature", "province", "city", "labels"], _clamp_limit(arguments.get("limit")))
-    if tool_name == "get_chat_msg":
-        return await api_client.post_json(
-            "/other/chatmsg",
-            api_client._with_optional_wxpid(
-                {"msgid": _coerce_text(arguments.get("msgid")), "wxid": _coerce_text(arguments.get("wxid"))},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "get_chat_msgs":
-        return await api_client.get_chat_messages(
-            wxid=_coerce_text(arguments.get("wxid")),
-            start_time=arguments.get("start_time"),
-            end_time=arguments.get("end_time"),
-            max_count=_clamp_int(arguments.get("max_count"), 500, 1, 2000),
-            wxpid=_coerce_optional_int(arguments.get("wxpid")),
-        )
-    if tool_name == "get_room_members":
-        return await api_client.get_room_members(_coerce_text(arguments.get("roomid")), _coerce_optional_int(arguments.get("wxpid")))
-    if tool_name == "get_room_members_summary":
-        return _summarize_room_members(await api_client.get_room_members(_coerce_text(arguments.get("roomid")), _coerce_optional_int(arguments.get("wxpid"))))
-    if tool_name == "search_room_members":
-        members = await api_client.get_room_members(_coerce_text(arguments.get("roomid")), _coerce_optional_int(arguments.get("wxpid")))
-        return _search_items(members, _coerce_text(arguments.get("query")), ["username", "alias", "nick_name", "room_nick_name", "remarks", "signature", "province", "city"], _clamp_limit(arguments.get("limit")))
-    if tool_name == "get_user_info":
-        return await api_client.get_user_info(
-            _coerce_text(arguments.get("wxid")),
-            _coerce_text(arguments.get("roomid")),
-            _coerce_optional_int(arguments.get("wxpid")),
-        )
-    if tool_name == "get_user_sns_permission":
-        return await api_client.post_json(
-            "/user/snspermission",
-            api_client._with_optional_wxpid(
-                {"wxid": _coerce_text(arguments.get("wxid")), "roomid": _coerce_text(arguments.get("roomid"))},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "check_user_state":
-        return await api_client.check_user_state(_coerce_text(arguments.get("wxid")), _coerce_optional_int(arguments.get("wxpid")))
-    if tool_name == "get_resource_path":
-        return await api_client.get_resource_path(
-            _coerce_text(arguments.get("msgid")),
-            _coerce_text(arguments.get("wxid")),
-            _clamp_int(arguments.get("local_type"), 0, 0, 2**31 - 1),
-            _coerce_optional_int(arguments.get("wxpid")),
-        )
-    if tool_name == "cdn_download_image":
-        return await api_client.download_cdn_image(
-            msgid=_coerce_text(arguments.get("msgid")),
-            wxid=_coerce_text(arguments.get("wxid")),
-            wxpid=_coerce_optional_int(arguments.get("wxpid")),
-            flag=_clamp_int(arguments.get("flag"), 1, 1, 3),
-            wait=_coerce_bool(arguments.get("wait"), False),
-            timeout=_clamp_int(arguments.get("timeout"), 5, 1, 60),
-        )
-    if tool_name == "cdn_download_video":
-        return await api_client.download_cdn_video(
-            msgid=_coerce_text(arguments.get("msgid")),
-            wxid=_coerce_text(arguments.get("wxid")),
-            wxpid=_coerce_optional_int(arguments.get("wxpid")),
-            wait=_coerce_bool(arguments.get("wait"), False),
-            timeout=_clamp_int(arguments.get("timeout"), 5, 1, 60),
-        )
-    if tool_name == "cdn_download_file":
-        return await api_client.download_cdn_file(
-            msgid=_coerce_text(arguments.get("msgid")),
-            wxid=_coerce_text(arguments.get("wxid")),
-            wxpid=_coerce_optional_int(arguments.get("wxpid")),
-            wait=_coerce_bool(arguments.get("wait"), False),
-            timeout=_clamp_int(arguments.get("timeout"), 5, 1, 60),
-        )
-    if tool_name == "add_label":
-        return await api_client.add_label(_coerce_text(arguments.get("label_name")), _coerce_optional_int(arguments.get("wxpid")))
-    if tool_name in {"set_label", "set_labels"}:
-        return await api_client.set_labels(
-            _coerce_text(arguments.get("wxid")),
-            _coerce_string_sequence(arguments.get("labels")),
-            _coerce_optional_int(arguments.get("wxpid")),
-        )
-    if tool_name in {"delete_label", "delete_labels"}:
-        return await api_client.delete_labels(_coerce_string_sequence(arguments.get("labels")), _coerce_optional_int(arguments.get("wxpid")))
-    if tool_name == "send_text":
-        return await api_client.send_text(
-            wxid=_coerce_text(arguments.get("wxid")),
-            content=_coerce_text(arguments.get("content")),
-            atlist=_coerce_text(arguments.get("atlist")),
-            wxpid=_coerce_optional_int(arguments.get("wxpid")),
-            wait=_coerce_bool(arguments.get("wait"), False),
-            timeout=_clamp_int(arguments.get("timeout"), 3, 1, 30),
-        )
-    if tool_name == "send_image":
-        return await api_client.send_image(
-            wxid=_coerce_text(arguments.get("wxid")),
-            path=_coerce_text(arguments.get("path")),
-            wxpid=_coerce_optional_int(arguments.get("wxpid")),
-            wait=_coerce_bool(arguments.get("wait"), False),
-            timeout=_clamp_int(arguments.get("timeout"), 3, 1, 30),
-        )
-    if tool_name == "send_file":
-        return await api_client.send_file(
-            wxid=_coerce_text(arguments.get("wxid")),
-            path=_coerce_text(arguments.get("path")),
-            wxpid=_coerce_optional_int(arguments.get("wxpid")),
-            wait=_coerce_bool(arguments.get("wait"), False),
-            timeout=_clamp_int(arguments.get("timeout"), 3, 1, 30),
-        )
-    if tool_name == "send_video":
-        return await api_client.send_video(
-            wxid=_coerce_text(arguments.get("wxid")),
-            path=_coerce_text(arguments.get("path")),
-            wxpid=_coerce_optional_int(arguments.get("wxpid")),
-            wait=_coerce_bool(arguments.get("wait"), False),
-            timeout=_clamp_int(arguments.get("timeout"), 3, 1, 30),
-        )
-    if tool_name == "send_gif":
-        return await api_client.send_gif(
-            wxid=_coerce_text(arguments.get("wxid")),
-            path=_coerce_text(arguments.get("path")),
-            wxpid=_coerce_optional_int(arguments.get("wxpid")),
-            wait=_coerce_bool(arguments.get("wait"), False),
-            timeout=_clamp_int(arguments.get("timeout"), 3, 1, 30),
-        )
-    if tool_name == "send_card":
-        return await api_client.post_json(
-            "/send/card",
-            api_client._with_optional_wxpid(
-                {
-                    "wxid": _coerce_text(arguments.get("wxid")),
-                    "card_wxid": _coerce_text(arguments.get("card_wxid")),
-                    "nickname": _coerce_text(arguments.get("nickname")),
-                    "bigheadimgurl": _coerce_text(arguments.get("bigheadimgurl")),
-                    "smallheadimgurl": _coerce_text(arguments.get("smallheadimgurl")),
-                    "sex": _coerce_text(arguments.get("sex")),
-                    "fullpy": _coerce_text(arguments.get("fullpy")),
-                    "alias": _coerce_text(arguments.get("alias")),
-                    "province": _coerce_text(arguments.get("province")),
-                    "city": _coerce_text(arguments.get("city")),
-                    "wait": _coerce_bool(arguments.get("wait"), False),
-                    "timeout": _clamp_int(arguments.get("timeout"), 3, 1, 30),
+MCP_PROTOCOL_VERSION = "2025-03-26"
+MCP_CLIENT_INFO = {
+    "name": "wxrobot_webui_ai_assistant",
+    "version": "0.0.0.1",
+}
+
+
+class _McpSessionExpiredError(RuntimeError):
+    pass
+
+
+def _build_mcp_endpoint(base_url: str) -> str:
+    return f"{str(base_url or '').rstrip('/')}/mcp"
+
+
+def _parse_mcp_sse_messages(response_text: str) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    data_lines: list[str] = []
+
+    def flush_event() -> None:
+        nonlocal data_lines
+        if not data_lines:
+            return
+        data = "\n".join(data_lines)
+        data_lines = []
+        try:
+            payload = json.loads(data)
+        except json.JSONDecodeError:
+            return
+        if isinstance(payload, list):
+            messages.extend(item for item in payload if isinstance(item, dict))
+        elif isinstance(payload, dict):
+            messages.append(payload)
+
+    for raw_line in response_text.splitlines():
+        line = raw_line.rstrip("\r")
+        if not line:
+            flush_event()
+            continue
+        if line.startswith(":"):
+            continue
+        field, separator, value = line.partition(":")
+        if not separator:
+            continue
+        if value.startswith(" "):
+            value = value[1:]
+        if field == "data":
+            data_lines.append(value)
+    flush_event()
+    return messages
+
+
+def _parse_mcp_http_messages(response_text: str, content_type: str) -> list[dict[str, Any]]:
+    normalized_text = str(response_text or "").strip()
+    if not normalized_text:
+        return []
+    if "text/event-stream" in str(content_type or "").lower():
+        return _parse_mcp_sse_messages(normalized_text)
+    try:
+        payload = json.loads(normalized_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"MCP 接口返回了非 JSON 响应: {normalized_text}") from exc
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        return [payload]
+    raise RuntimeError(f"MCP 接口返回格式异常: {payload}")
+
+
+def _extract_mcp_jsonrpc_result(messages: list[dict[str, Any]], request_id: int, request_name: str) -> Any:
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("id")) != str(request_id):
+            continue
+        error_payload = message.get("error") if isinstance(message.get("error"), dict) else None
+        if error_payload is not None:
+            detail = str(error_payload.get("message") or "MCP 请求失败").strip() or "MCP 请求失败"
+            error_data = error_payload.get("data")
+            if error_data not in (None, "", {}, []):
+                detail = f"{detail}: {_safe_trim_string(json.dumps(error_data, ensure_ascii=False, default=str))}"
+            raise RuntimeError(f"{request_name} 失败: {detail}")
+        return message.get("result")
+    raise RuntimeError(f"{request_name} 未返回结果")
+
+
+def _maybe_parse_json_text(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    try:
+        return json.loads(normalized)
+    except json.JSONDecodeError:
+        return value
+
+
+def _decode_mcp_content_item(item: Any) -> Any:
+    if not isinstance(item, dict):
+        return item
+    item_type = str(item.get("type") or "").strip().lower()
+    if item_type == "text":
+        return _maybe_parse_json_text(item.get("text"))
+    if item_type == "resource":
+        resource = item.get("resource") if isinstance(item.get("resource"), dict) else {}
+        if "text" not in resource:
+            return resource or item
+        parsed_text = _maybe_parse_json_text(resource.get("text"))
+        if len(resource) == 1:
+            return parsed_text
+        return {**resource, "text": parsed_text}
+    return item
+
+
+def _decode_mcp_tool_result(result: Any) -> Any:
+    if not isinstance(result, dict):
+        return result
+    if "structuredContent" in result:
+        return result.get("structuredContent")
+    content = result.get("content")
+    if not isinstance(content, list):
+        return result
+    items = [_decode_mcp_content_item(item) for item in content]
+    if not items:
+        return {}
+    if len(items) == 1:
+        return items[0]
+    if all(isinstance(item, str) for item in items):
+        return "\n\n".join(item for item in items if item)
+    return items
+
+
+def _format_mcp_tool_error(result: Any) -> str:
+    decoded = _decode_mcp_tool_result(result)
+    if isinstance(decoded, str):
+        return decoded or "MCP 工具执行失败"
+    if decoded in (None, {}, []):
+        return "MCP 工具执行失败"
+    return _safe_trim_string(json.dumps(decoded, ensure_ascii=False, default=str))
+
+
+class _McpHttpToolExecutor:
+    def __init__(self, api_client: WxRobotApiClient):
+        self._endpoint = _build_mcp_endpoint(api_client.base_url)
+        self._base_timeout = max(float(api_client.timeout or 0) if api_client.timeout else 0.0, 1.0)
+        self._session_id: str | None = None
+        self._request_id = 0
+        self._initialized = False
+
+    def _next_request_id(self) -> int:
+        self._request_id += 1
+        return self._request_id
+
+    def _resolve_tool_timeout(self, arguments: dict[str, Any]) -> float:
+        request_timeout = self._base_timeout
+        if not _coerce_bool(arguments.get("wait"), False):
+            return request_timeout
+        try:
+            operation_timeout = float(arguments.get("timeout"))
+        except (TypeError, ValueError):
+            return request_timeout
+        if operation_timeout <= 0:
+            return request_timeout
+        return max(request_timeout, operation_timeout + 2.0)
+
+    def _request_sync(
+        self,
+        method: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        effective_timeout = timeout if isinstance(timeout, (int, float)) and timeout and timeout > 0 else self._base_timeout
+        headers = {
+            "Accept": "application/json, text/event-stream",
+        }
+        if session_id:
+            headers["Mcp-Session-Id"] = session_id
+        request_body = None
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+            request_body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = request.Request(self._endpoint, data=request_body, headers=headers, method=method)
+        try:
+            with request.urlopen(req, timeout=effective_timeout) as response:
+                response_text = response.read().decode("utf-8")
+                response_content_type = response.headers.get("Content-Type", "")
+                response_session_id = response.headers.get("Mcp-Session-Id") or response.headers.get("mcp-session-id")
+        except TimeoutError as exc:
+            raise RuntimeError(f"调用 MCP {self._endpoint} 超时({effective_timeout:.1f}s)") from exc
+        except error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="ignore")
+            if exc.code == 404 and session_id:
+                raise _McpSessionExpiredError() from exc
+            raise RuntimeError(f"调用 MCP {self._endpoint} 失败，HTTP {exc.code}: {detail}") from exc
+        except error.URLError as exc:
+            raise RuntimeError(f"调用 MCP {self._endpoint} 失败: {exc.reason}") from exc
+
+        return {
+            "messages": _parse_mcp_http_messages(response_text, response_content_type),
+            "session_id": response_session_id,
+        }
+
+    def _reset_session(self) -> None:
+        self._session_id = None
+        self._initialized = False
+
+    async def _initialize(self) -> None:
+        if self._initialized:
+            return
+        request_id = self._next_request_id()
+        response = await asyncio.to_thread(
+            self._request_sync,
+            "POST",
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": MCP_CLIENT_INFO,
                 },
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
+            },
+            session_id=None,
+            timeout=self._base_timeout,
         )
-    if tool_name == "send_article":
-        return await api_client.post_json(
-            "/send/article",
-            api_client._with_optional_wxpid(
+        if response.get("session_id"):
+            self._session_id = str(response["session_id"])
+        initialize_result = _extract_mcp_jsonrpc_result(response["messages"], request_id, "MCP initialize")
+        if not isinstance(initialize_result, dict):
+            raise RuntimeError("MCP initialize 返回格式异常")
+        await asyncio.to_thread(
+            self._request_sync,
+            "POST",
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+            },
+            session_id=self._session_id,
+            timeout=self._base_timeout,
+        )
+        self._initialized = True
+
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        await self._initialize()
+        request_timeout = self._resolve_tool_timeout(arguments)
+
+        async def do_call() -> Any:
+            request_id = self._next_request_id()
+            response = await asyncio.to_thread(
+                self._request_sync,
+                "POST",
                 {
-                    "wxid": _coerce_text(arguments.get("wxid")),
-                    "title": _coerce_text(arguments.get("title")),
-                    "url": _coerce_text(arguments.get("url")),
-                    "cover": _coerce_text(arguments.get("cover")),
-                    "ghid": _coerce_text(arguments.get("ghid")),
-                    "nickname": _coerce_text(arguments.get("nickname")),
-                    "desc": _coerce_text(arguments.get("desc")),
-                    "wait": _coerce_bool(arguments.get("wait"), False),
-                    "timeout": _clamp_int(arguments.get("timeout"), 3, 1, 30),
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/call",
+                    "params": {
+                        "name": tool_name,
+                        "arguments": arguments,
+                    },
                 },
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "send_quote":
-        return await api_client.post_json(
-            "/send/quote",
-            api_client._with_optional_wxpid(
-                {
-                    "wxid": _coerce_text(arguments.get("wxid")),
-                    "msgid": _coerce_text(arguments.get("msgid")),
-                    "content": _coerce_text(arguments.get("content")),
-                    "atlist": _coerce_text(arguments.get("atlist")),
-                    "wait": _coerce_bool(arguments.get("wait"), False),
-                    "timeout": _clamp_int(arguments.get("timeout"), 3, 1, 30),
-                },
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "send_revoke":
-        return await api_client.post_json(
-            "/send/revoke",
-            api_client._with_optional_wxpid(
-                {"wxid": _coerce_text(arguments.get("wxid")), "msgid": _coerce_text(arguments.get("msgid"))},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "forward_msg":
-        return await api_client.post_json(
-            "/send/forward",
-            api_client._with_optional_wxpid(
-                {
-                    "msgid": _coerce_text(arguments.get("msgid")),
-                    "msg_wxid": _coerce_text(arguments.get("msg_wxid")),
-                    "wxid": _coerce_text(arguments.get("wxid")),
-                },
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "set_remarks":
-        return await api_client.set_remarks(
-            _coerce_text(arguments.get("wxid")),
-            _coerce_text(arguments.get("remarks")),
-            _coerce_optional_int(arguments.get("wxpid")),
-        )
-    if tool_name in {"del_user", "delete_user"}:
-        return await api_client.delete_user(_coerce_text(arguments.get("wxid")), _coerce_optional_int(arguments.get("wxpid")))
-    if tool_name == "receive_notify":
-        return await api_client.receive_notify(
-            _coerce_text(arguments.get("wxid")),
-            _coerce_bool(arguments.get("notify"), True),
-            _coerce_optional_int(arguments.get("wxpid")),
-        )
-    if tool_name == "agree_friend_request":
-        return await api_client.agree_friend_request(
-            wxid=_coerce_text(arguments.get("wxid")),
-            v4=_coerce_text(arguments.get("v4")),
-            remarks=_coerce_text(arguments.get("remarks")),
-            labels=_coerce_text(arguments.get("labels")),
-            sns_permissions=_clamp_int(arguments.get("sns_permissions"), 1, 0, 10),
-            add_type=_clamp_int(arguments.get("add_type"), 1, 0, 10),
-            wxpid=_coerce_optional_int(arguments.get("wxpid")),
-        )
-    if tool_name == "create_room":
-        return await api_client.post_json(
-            "/room/create",
-            api_client._with_optional_wxpid(
-                {"wxids": _coerce_text(arguments.get("wxids"))},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "quit_room":
-        return await api_client.post_json(
-            "/room/quit",
-            api_client._with_optional_wxpid(
-                {"roomid": _coerce_text(arguments.get("roomid")), "keep_msg": _coerce_bool(arguments.get("keep_msg"), False)},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "agree_room_invite":
-        return await api_client.post_json(
-            "/room/agreeinvite",
-            api_client._with_optional_wxpid(
-                {"wxid": _coerce_text(arguments.get("wxid")), "msgid": _coerce_text(arguments.get("msgid"))},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name in {"invite_members", "invite_room_members"}:
-        return await api_client.invite_room_members(
-            _coerce_text(arguments.get("roomid")),
-            _coerce_string_sequence(arguments.get("wxids")),
-            _coerce_optional_int(arguments.get("wxpid")),
-        )
-    if tool_name in {"add_members", "add_room_members"}:
-        return await api_client.add_room_members(
-            _coerce_text(arguments.get("roomid")),
-            _coerce_string_sequence(arguments.get("wxids")),
-            _coerce_optional_int(arguments.get("wxpid")),
-        )
-    if tool_name in {"delete_members", "delete_room_members"}:
-        return await api_client.delete_room_members(
-            _coerce_text(arguments.get("roomid")),
-            _coerce_string_sequence(arguments.get("wxids")),
-            _coerce_optional_int(arguments.get("wxpid")),
-        )
-    if tool_name == "add_room_member":
-        return await api_client.add_room_member(
-            wxid=_coerce_text(arguments.get("wxid")),
-            roomid=_coerce_text(arguments.get("roomid")),
-            remarks=_coerce_text(arguments.get("remarks")),
-            content=_coerce_text(arguments.get("content")),
-            sns_permissions=_clamp_int(arguments.get("sns_permissions"), 0, 0, 10),
-            wxpid=_coerce_optional_int(arguments.get("wxpid")),
-        )
-    if tool_name == "set_top_message":
-        return await api_client.post_json(
-            "/room/settopmessage",
-            api_client._with_optional_wxpid(
-                {"msgid": _coerce_text(arguments.get("msgid")), "roomid": _coerce_text(arguments.get("roomid"))},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "remove_top_message":
-        return await api_client.post_json(
-            "/room/removetopmessage",
-            api_client._with_optional_wxpid(
-                {"msgid": _coerce_text(arguments.get("msgid")), "roomid": _coerce_text(arguments.get("roomid"))},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "recv_transfer":
-        return await api_client.post_json(
-            "/other/recvtransfer",
-            api_client._with_optional_wxpid(
-                {"wxid": _coerce_text(arguments.get("wxid")), "msgid": _coerce_text(arguments.get("msgid"))},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "refund_transfer":
-        return await api_client.post_json(
-            "/other/refundtransfer",
-            api_client._with_optional_wxpid(
-                {"wxid": _coerce_text(arguments.get("wxid")), "msgid": _coerce_text(arguments.get("msgid"))},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "open_single_window":
-        return await api_client.post_json(
-            "/other/opensinglewindow",
-            api_client._with_optional_wxpid(
-                {"wxid": _coerce_text(arguments.get("wxid")), "nickname": _coerce_text(arguments.get("nickname"))},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "mm_decrypt":
-        return await api_client.post_json(
-            "/other/mmdecrypt",
-            api_client._with_optional_wxpid(
-                {"input_path": _coerce_text(arguments.get("input_path")), "output_path": _coerce_text(arguments.get("output_path"))},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    if tool_name == "dont_revoke":
-        return await api_client.post_json(
-            "/other/dontrevoke",
-            api_client._with_optional_wxpid(
-                {"revoke": _coerce_bool(arguments.get("revoke"), True)},
-                _coerce_optional_int(arguments.get("wxpid")),
-            ),
-        )
-    raise RuntimeError(f"暂不支持工具 {tool_name}")
+                session_id=self._session_id,
+                timeout=request_timeout,
+            )
+            if response.get("session_id"):
+                self._session_id = str(response["session_id"])
+            result = _extract_mcp_jsonrpc_result(response["messages"], request_id, f"MCP 工具 {tool_name}")
+            if isinstance(result, dict) and result.get("isError"):
+                raise RuntimeError(_format_mcp_tool_error(result))
+            return _decode_mcp_tool_result(result)
+
+        try:
+            return await do_call()
+        except _McpSessionExpiredError:
+            self._reset_session()
+            await self._initialize()
+            return await do_call()
+
+    async def aclose(self) -> None:
+        if not self._session_id:
+            return
+        session_id = self._session_id
+        self._reset_session()
+        try:
+            await asyncio.to_thread(
+                self._request_sync,
+                "DELETE",
+                None,
+                session_id=session_id,
+                timeout=self._base_timeout,
+            )
+        except Exception:
+            return
+
+
+async def _execute_tool_call(tool_executor: _McpHttpToolExecutor, tool_name: str, arguments: dict[str, Any]) -> Any:
+    return await tool_executor.call_tool(tool_name, arguments)
 
 
 async def run_ai_assistant(
@@ -1511,148 +1451,152 @@ async def run_ai_assistant(
     trace_entries: list[dict[str, Any]] = []
     max_tool_rounds = normalized_settings["max_tool_rounds"]
     selected_model = str(model_override or provider_meta["default_model"] or "").strip() or provider_meta["default_model"]
+    tool_executor = _McpHttpToolExecutor(api_client)
 
-    for _ in range(max_tool_rounds + 1):
-        await _emit_progress(
-            progress_callback,
-            {
-                "status": "running",
-                "stage": "thinking",
-                "progress_message": "模型思考中...",
-                "content": "",
-                "reasoning_content": "",
-                "tool_traces": deepcopy(trace_entries),
-            },
-        )
-        request_payload = {
-            "model": selected_model,
-            "messages": request_messages,
-            "tools": tool_schemas,
-            "tool_choice": "auto",
-            "temperature": normalized_settings["temperature"],
-        }
-        request_payload = _merge_provider_extra_body(selected_provider, request_payload)
-
-        headers = _build_provider_request_headers(selected_provider, str(selected_provider_config["api_key"]))
-
-        response_payload = await asyncio.to_thread(
-            _request_provider_json,
-            _build_provider_url(
-                _get_provider_runtime_base_url(selected_provider, selected_provider_config),
-                provider_meta["chat_path"],
-            ),
-            request_payload,
-            headers,
-        )
-        choices = response_payload.get("choices") if isinstance(response_payload, dict) else None
-        if not isinstance(choices, list) or not choices:
-            raise RuntimeError(f"AI 接口返回异常：{response_payload}")
-
-        choice = choices[0] if isinstance(choices[0], dict) else {}
-        message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
-        assistant_content = _normalize_message_content(message.get("content"))
-        assistant_reasoning_content = _normalize_reasoning_content(message.get("reasoning_content"))
-        tool_calls = _normalize_tool_calls(message)
-
-        await _emit_progress(
-            progress_callback,
-            {
-                "status": "running" if tool_calls else "completed",
-                "stage": "tool-pending" if tool_calls else "completed",
-                "progress_message": f"模型准备调用 {len(tool_calls)} 个工具" if tool_calls else "模型已生成最终回复",
-                "content": assistant_content or "",
-                "reasoning_content": assistant_reasoning_content,
-                "tool_traces": deepcopy(trace_entries),
-            },
-        )
-
-        if not tool_calls:
+    try:
+        for _ in range(max_tool_rounds + 1):
             await _emit_progress(
                 progress_callback,
                 {
-                    "status": "completed",
-                    "stage": "completed",
-                    "progress_message": "已生成最终回复",
-                    "content": assistant_content or "已完成，但 AI 没有返回可展示的文本。",
-                    "reasoning_content": assistant_reasoning_content,
+                    "status": "running",
+                    "stage": "thinking",
+                    "progress_message": "模型思考中...",
+                    "content": "",
+                    "reasoning_content": "",
                     "tool_traces": deepcopy(trace_entries),
                 },
             )
-            return {
-                "provider": selected_provider,
-                "provider_label": provider_meta["label"],
-                "provider_config_id": selected_provider_config["id"],
-                "provider_config_name": selected_provider_config["name"],
+            request_payload = {
                 "model": selected_model,
-                "reply": assistant_content or "已完成，但 AI 没有返回可展示的文本。",
-                "reasoning_content": assistant_reasoning_content,
-                "tool_traces": trace_entries,
-                "usage": response_payload.get("usage") if isinstance(response_payload.get("usage"), dict) else {},
+                "messages": request_messages,
+                "tools": tool_schemas,
+                "tool_choice": "auto",
+                "temperature": normalized_settings["temperature"],
             }
+            request_payload = _merge_provider_extra_body(selected_provider, request_payload)
 
-        assistant_message_payload: dict[str, Any] = {
-            "role": "assistant",
-            "content": assistant_content or "",
-            "tool_calls": [
-                {
-                    "id": item["id"],
-                    "type": "function",
-                    "function": item["function"],
-                }
-                for item in tool_calls
-            ],
-        }
-        if include_reasoning_content and assistant_reasoning_content:
-            assistant_message_payload["reasoning_content"] = assistant_reasoning_content
-        request_messages.append(assistant_message_payload)
+            headers = _build_provider_request_headers(selected_provider, str(selected_provider_config["api_key"]))
 
-        for tool_call in tool_calls:
-            tool_name = tool_call["function"]["name"]
-            arguments = tool_call["arguments"]
-            trace_entry = {
-                "id": tool_call["id"],
-                "name": tool_name,
-                "arguments": arguments,
-                "status": "ok",
-                "error": "",
-            }
-            await _emit_progress(
-                progress_callback,
-                {
-                    "status": "running",
-                    "stage": "tool-running",
-                    "progress_message": f"正在调用工具 {tool_name}",
-                    "content": assistant_content or "",
-                    "reasoning_content": assistant_reasoning_content,
-                    "tool_traces": deepcopy([*trace_entries, trace_entry]),
-                },
+            response_payload = await asyncio.to_thread(
+                _request_provider_json,
+                _build_provider_url(
+                    _get_provider_runtime_base_url(selected_provider, selected_provider_config),
+                    provider_meta["chat_path"],
+                ),
+                request_payload,
+                headers,
             )
-            try:
-                raw_result = await _execute_tool_call(api_client, tool_name, arguments)
-                compact_result = _compact_tool_result(raw_result)
-                tool_content = json.dumps({"ok": True, "result": compact_result}, ensure_ascii=False)
-            except Exception as exc:
-                trace_entry["status"] = "error"
-                trace_entry["error"] = str(exc)
-                tool_content = json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
-            trace_entries.append(trace_entry)
+            choices = response_payload.get("choices") if isinstance(response_payload, dict) else None
+            if not isinstance(choices, list) or not choices:
+                raise RuntimeError(f"AI 接口返回异常：{response_payload}")
+
+            choice = choices[0] if isinstance(choices[0], dict) else {}
+            message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+            assistant_content = _normalize_message_content(message.get("content"))
+            assistant_reasoning_content = _normalize_reasoning_content(message.get("reasoning_content"))
+            tool_calls = _normalize_tool_calls(message)
+
             await _emit_progress(
                 progress_callback,
                 {
-                    "status": "running",
-                    "stage": "tool-result",
-                    "progress_message": f"工具 {tool_name} {'执行成功' if trace_entry['status'] == 'ok' else '执行失败'}",
+                    "status": "running" if tool_calls else "completed",
+                    "stage": "tool-pending" if tool_calls else "completed",
+                    "progress_message": f"模型准备调用 {len(tool_calls)} 个工具" if tool_calls else "模型已生成最终回复",
                     "content": assistant_content or "",
                     "reasoning_content": assistant_reasoning_content,
                     "tool_traces": deepcopy(trace_entries),
                 },
             )
-            request_messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call["id"],
-                    "content": tool_content,
-                }
-            )
 
-    raise RuntimeError("AI 工具调用轮数超过限制，请缩小问题范围后重试")
+            if not tool_calls:
+                await _emit_progress(
+                    progress_callback,
+                    {
+                        "status": "completed",
+                        "stage": "completed",
+                        "progress_message": "已生成最终回复",
+                        "content": assistant_content or "已完成，但 AI 没有返回可展示的文本。",
+                        "reasoning_content": assistant_reasoning_content,
+                        "tool_traces": deepcopy(trace_entries),
+                    },
+                )
+                return {
+                    "provider": selected_provider,
+                    "provider_label": provider_meta["label"],
+                    "provider_config_id": selected_provider_config["id"],
+                    "provider_config_name": selected_provider_config["name"],
+                    "model": selected_model,
+                    "reply": assistant_content or "已完成，但 AI 没有返回可展示的文本。",
+                    "reasoning_content": assistant_reasoning_content,
+                    "tool_traces": trace_entries,
+                    "usage": response_payload.get("usage") if isinstance(response_payload.get("usage"), dict) else {},
+                }
+
+            assistant_message_payload: dict[str, Any] = {
+                "role": "assistant",
+                "content": assistant_content or "",
+                "tool_calls": [
+                    {
+                        "id": item["id"],
+                        "type": "function",
+                        "function": item["function"],
+                    }
+                    for item in tool_calls
+                ],
+            }
+            if include_reasoning_content and assistant_reasoning_content:
+                assistant_message_payload["reasoning_content"] = assistant_reasoning_content
+            request_messages.append(assistant_message_payload)
+
+            for tool_call in tool_calls:
+                tool_name = tool_call["function"]["name"]
+                arguments = tool_call["arguments"]
+                trace_entry = {
+                    "id": tool_call["id"],
+                    "name": tool_name,
+                    "arguments": arguments,
+                    "status": "ok",
+                    "error": "",
+                }
+                await _emit_progress(
+                    progress_callback,
+                    {
+                        "status": "running",
+                        "stage": "tool-running",
+                        "progress_message": f"正在调用工具 {tool_name}",
+                        "content": assistant_content or "",
+                        "reasoning_content": assistant_reasoning_content,
+                        "tool_traces": deepcopy([*trace_entries, trace_entry]),
+                    },
+                )
+                try:
+                    raw_result = await _execute_tool_call(tool_executor, tool_name, arguments)
+                    compact_result = _compact_tool_result(raw_result)
+                    tool_content = json.dumps({"ok": True, "result": compact_result}, ensure_ascii=False)
+                except Exception as exc:
+                    trace_entry["status"] = "error"
+                    trace_entry["error"] = str(exc)
+                    tool_content = json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
+                trace_entries.append(trace_entry)
+                await _emit_progress(
+                    progress_callback,
+                    {
+                        "status": "running",
+                        "stage": "tool-result",
+                        "progress_message": f"工具 {tool_name} {'执行成功' if trace_entry['status'] == 'ok' else '执行失败'}",
+                        "content": assistant_content or "",
+                        "reasoning_content": assistant_reasoning_content,
+                        "tool_traces": deepcopy(trace_entries),
+                    },
+                )
+                request_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": tool_content,
+                    }
+                )
+
+        raise RuntimeError("AI 工具调用轮数超过限制，请缩小问题范围后重试")
+    finally:
+        await tool_executor.aclose()
