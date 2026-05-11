@@ -1,6 +1,12 @@
+import os
 from csv import writer
 from io import StringIO
 from pathlib import Path
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 from ._plugin_sdk import normalize_text, to_string_list
 
@@ -26,7 +32,30 @@ category = "functional"
 message_dependent = False
 
 
-DEFAULT_EXPORT_DIR = Path.home() / "Downloads"
+WINDOWS_DOWNLOADS_FOLDER_GUID = "{374DE290-123F-4565-9164-39C4925E467B}"
+WINDOWS_DOWNLOADS_REGISTRY_KEYS = (
+    r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
+    r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
+)
+
+
+def get_default_export_dir():
+    if winreg is not None:
+        for registry_key in WINDOWS_DOWNLOADS_REGISTRY_KEYS:
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_key) as key:
+                    value, _ = winreg.QueryValueEx(key, WINDOWS_DOWNLOADS_FOLDER_GUID)
+            except OSError:
+                continue
+
+            resolved_value = normalize_text(os.path.expandvars(str(value)))
+            if resolved_value:
+                return Path(resolved_value).expanduser()
+
+    return Path.home() / "Downloads"
+
+
+DEFAULT_EXPORT_DIR = get_default_export_dir()
 
 
 config_schema = [
@@ -87,7 +116,7 @@ def normalize_wxpid(value):
 
 def resolve_export_dir(config):
     configured_dir = normalize_text(config.get("export_dir") or config.get("save_path") or "")
-    return configured_dir or str(DEFAULT_EXPORT_DIR)
+    return configured_dir or str(get_default_export_dir())
 
 
 def normalize_room_entries(config):
