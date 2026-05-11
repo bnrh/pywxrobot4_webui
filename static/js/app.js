@@ -1662,29 +1662,22 @@ function renderAiConversation() {
             : status === "failed"
                 ? "失败"
                 : (role === "assistant" ? "已完成" : "已发送");
-        const messageBody = message.content || ((status === "running" || status === "stopped")
-            ? (message.progress_message || (status === "running" ? "正在处理中..." : "本次对话已手动停止。"))
-            : "无内容");
-        return `
-            <article class="smart-chat-message ${role === "assistant" ? "is-assistant" : "is-user"} ${message.error || status === "failed" ? "is-error" : ""}">
-                <div class="smart-chat-message-head">
-                    <div class="badge-row">
-                        <span class="badge ${statusTone}">${escapeHtml(roleLabel)}</span>
-                        <span class="badge ${statusTone}">${escapeHtml(statusLabel)}</span>
-                        ${message.provider_label ? `<span class="badge">${escapeHtml(message.provider_label)}</span>` : ""}
-                        ${message.model ? `<span class="badge">${escapeHtml(message.model)}</span>` : ""}
-                    </div>
-                    <div class="detail-meta">${escapeHtml(formatStandardDateTime(message.updated_at) || message.updated_at || "")}</div>
-                </div>
-                ${message.progress_message ? `<div class="smart-chat-progress">${escapeHtml(message.progress_message)}</div>` : ""}
-                <div class="detail-text smart-chat-message-body">${escapeHtml(messageBody)}</div>
-                ${reasoningContent ? `
+        const messageBody = String(message.content || "").trim()
+            || (status === "stopped"
+                ? "本次对话已手动停止。"
+                : (status === "running"
+                    ? ""
+                    : "无内容"));
+        const messageBodyMarkup = messageBody
+            ? `${role === "assistant" && (toolTraces.length || reasoningContent) && status !== "running" ? '<div class="detail-meta">最终回复</div>' : ""}<div class="detail-text smart-chat-message-body">${escapeHtml(messageBody)}</div>`
+            : "";
+        const reasoningMarkup = reasoningContent ? `
                     <section class="smart-reasoning-block">
                         <div class="detail-meta">思考过程</div>
                         <pre class="code-block smart-reasoning-content">${escapeHtml(reasoningContent)}</pre>
                     </section>
-                ` : ""}
-                ${toolTraces.length ? `
+                ` : "";
+        const toolTraceMarkup = toolTraces.length ? `
                     <div class="smart-tool-trace-list">
                         ${toolTraces.map((trace) => {
                             const traceStatus = String(trace.status || "ok").toLowerCase();
@@ -1705,7 +1698,23 @@ function renderAiConversation() {
                             `;
                         }).join("")}
                     </div>
-                ` : ""}
+                ` : "";
+        const assistantDetailMarkup = role === "assistant" && (toolTraces.length || reasoningContent)
+            ? `${reasoningMarkup}${toolTraceMarkup}${messageBodyMarkup}`
+            : `${messageBodyMarkup}${reasoningMarkup}${toolTraceMarkup}`;
+        return `
+            <article class="smart-chat-message ${role === "assistant" ? "is-assistant" : "is-user"} ${message.error || status === "failed" ? "is-error" : ""}">
+                <div class="smart-chat-message-head">
+                    <div class="badge-row">
+                        <span class="badge ${statusTone}">${escapeHtml(roleLabel)}</span>
+                        <span class="badge ${statusTone}">${escapeHtml(statusLabel)}</span>
+                        ${message.provider_label ? `<span class="badge">${escapeHtml(message.provider_label)}</span>` : ""}
+                        ${message.model ? `<span class="badge">${escapeHtml(message.model)}</span>` : ""}
+                    </div>
+                    <div class="detail-meta">${escapeHtml(formatStandardDateTime(message.updated_at) || message.updated_at || "")}</div>
+                </div>
+                ${message.progress_message ? `<div class="smart-chat-progress">${escapeHtml(message.progress_message)}</div>` : ""}
+                ${assistantDetailMarkup}
             </article>
         `;
     }).join("");
