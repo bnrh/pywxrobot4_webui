@@ -1684,7 +1684,6 @@ function renderAiConversation() {
                         <pre class="code-block smart-reasoning-content">${escapeHtml(reasoningContent)}</pre>
                     </section>
                 ` : ""}
-                <div class="detail-text smart-chat-message-body">${escapeHtml(messageBody)}</div>
                 ${toolTraces.length ? `
                     <div class="smart-tool-trace-list">
                         ${toolTraces.map((trace) => {
@@ -1707,6 +1706,7 @@ function renderAiConversation() {
                         }).join("")}
                     </div>
                 ` : ""}
+                <div class="detail-text smart-chat-message-body">${escapeHtml(messageBody)}</div>
             </article>
         `;
     }).join("");
