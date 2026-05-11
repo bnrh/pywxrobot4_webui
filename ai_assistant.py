@@ -1123,7 +1123,10 @@ class _McpSessionExpiredError(RuntimeError):
 
 
 def _build_mcp_endpoint(base_url: str) -> str:
-    return f"{str(base_url or '').rstrip('/')}/mcp"
+    normalized_base = str(base_url or "").rstrip("/")
+    if normalized_base.endswith("/mcp"):
+        return f"{normalized_base}/"
+    return f"{normalized_base}/mcp/"
 
 
 def _parse_mcp_sse_messages(response_text: str) -> list[dict[str, Any]]:
