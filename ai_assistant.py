@@ -1412,8 +1412,10 @@ def _decode_mcp_content_item(item: Any) -> Any:
 def _decode_mcp_tool_result(result: Any) -> Any:
     if not isinstance(result, dict):
         return result
+    if set(result.keys()) == {"result"}:
+        return result.get("result")
     if "structuredContent" in result:
-        return result.get("structuredContent")
+        return _decode_mcp_tool_result(result.get("structuredContent"))
     content = result.get("content")
     if not isinstance(content, list):
         return result
@@ -1421,7 +1423,10 @@ def _decode_mcp_tool_result(result: Any) -> Any:
     if not items:
         return {}
     if len(items) == 1:
-        return items[0]
+        single_item = items[0]
+        if isinstance(single_item, dict) and set(single_item.keys()) == {"result"}:
+            return single_item.get("result")
+        return single_item
     if all(isinstance(item, str) for item in items):
         return "\n\n".join(item for item in items if item)
     return items
