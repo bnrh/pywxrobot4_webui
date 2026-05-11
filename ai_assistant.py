@@ -20,6 +20,7 @@ MAX_TOOL_RESULT_STRING_LENGTH = 1600
 DEFAULT_SYSTEM_PROMPT = (
     "你是 wxrobot_api 的智能插件助手。"
     "当用户提出微信自动化或查询需求时，优先使用提供给你的 wxrobot_api 工具完成任务。"
+    "当任务依赖当前时间、日期、星期或相对时间窗口时，不要猜测当前时刻，优先调用 current_datetime 获取精确时间。"
     "如果信息不足以安全执行写操作（例如发送消息、修改标签、邀请进群、删除成员），先向用户索取必要参数，"
     "不要臆造 wxid、roomid、wxpid、文件路径或消息内容。"
     "对于只读查询，尽量先调用工具获取事实，再给出简洁结论。"
@@ -28,6 +29,8 @@ DEFAULT_SYSTEM_PROMPT = (
 
 INTERNAL_TOOL_ROUTING_PROMPT = (
     "工具选择规则："
+    "当用户问题涉及现在几点、今天/昨天/明天、最近几小时、截至目前、本周、本月或其他相对时间判断时，"
+    "优先调用 current_datetime 获取精确当前时间，再决定是否调用其他工具。"
     "当用户询问两个群聊是否有重复成员、共同成员、相同成员、重叠成员或群成员交集时，"
     "优先调用 count_shared_room_members 或 list_shared_room_members。"
     "对于这类问题，不要先调用 get_room_members 或 get_room_members_summary 这类全量列表工具，"
@@ -410,6 +413,10 @@ TOOL_REGISTRY = {
 
 
 LOCAL_TOOL_REGISTRY = {
+    "current_datetime": _build_tool_schema(
+        "current_datetime",
+        "返回当前本地日期时间、星期、时区和 Unix 时间戳。适合在涉及今天、昨天、明天、最近几小时、截至目前等时间敏感任务时先获取精确当前时间。",
+    ),
     "count_shared_room_members": _build_tool_schema(
         "count_shared_room_members",
         "精确统计两个群聊之间有多少重复成员。该工具会在服务端完成群成员交集计算，避免把两份完整群成员列表交给模型。",
@@ -1261,6 +1268,8 @@ async def _execute_local_tool_call(
     first_roomid = _coerce_text(arguments.get("first_roomid") or arguments.get("roomid_a") or arguments.get("roomid1"))
     second_roomid = _coerce_text(arguments.get("second_roomid") or arguments.get("roomid_b") or arguments.get("roomid2"))
     wxpid = _coerce_optional_int(arguments.get("wxpid"))
+    if tool_name == "current_datetime":
+        return _get_current_datetime_payload()
     if tool_name in {"count_room_friend_members", "list_room_friend_members"} and not roomid:
         raise RuntimeError("roomid 不能为空")
     if tool_name in {"count_shared_room_members", "list_shared_room_members"} and (not first_roomid or not second_roomid):
@@ -1377,7 +1386,7 @@ def _normalize_message_content(value: Any) -> str:
     return str(value).strip()
 
 
-def _build_current_time_prompt() -> str:
+def _get_current_datetime_payload() -> dict[str, Any]:
     now = datetime.now().astimezone()
     weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     weekday_name = weekday_names[now.weekday()]
@@ -1385,11 +1394,26 @@ def _build_current_time_prompt() -> str:
     offset = now.strftime("%z")
     if len(offset) == 5:
         offset = f"{offset[:3]}:{offset[3:]}"
+    return {
+        "current_datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "iso_datetime": now.isoformat(timespec="seconds"),
+        "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M:%S"),
+        "weekday": weekday_name,
+        "timezone_name": timezone_name,
+        "timezone_offset": offset,
+        "unix_timestamp": int(now.timestamp()),
+        "is_complete": True,
+    }
+
+
+def _build_current_time_prompt() -> str:
+    payload = _get_current_datetime_payload()
     return (
         "时间上下文："
-        f"当前本地时间为 {now.strftime('%Y-%m-%d %H:%M:%S')}，{weekday_name}，"
-        f"时区 {timezone_name} ({offset})。"
-        f"ISO 8601 时间：{now.isoformat(timespec='seconds')}。"
+        f"当前本地时间为 {payload['current_datetime']}，{payload['weekday']}，"
+        f"时区 {payload['timezone_name']} ({payload['timezone_offset']})。"
+        f"ISO 8601 时间：{payload['iso_datetime']}。"
         "当用户提到今天、昨天、明天、最近几小时、截至目前等相对时间时，"
         "以上述当前时间为准进行理解、推理和回答。"
     )
@@ -1432,6 +1456,35 @@ def _build_contextual_tool_routing_prompt(latest_user_message: str) -> str:
     normalized_text = str(latest_user_message or "").strip().lower()
     if not normalized_text:
         return ""
+
+    time_keywords = [
+        "现在",
+        "当前时间",
+        "几点",
+        "几号",
+        "周几",
+        "星期几",
+        "今天",
+        "昨天",
+        "明天",
+        "最近",
+        "截至目前",
+        "到目前",
+        "到现在",
+        "此刻",
+        "本周",
+        "本月",
+        "小时",
+        "分钟",
+        "秒",
+        "deadline",
+        "ddl",
+    ]
+    if any(keyword in normalized_text for keyword in time_keywords):
+        return (
+            "当前问题涉及当前时间、日期或相对时间范围判断。"
+            "优先先调用 current_datetime 获取精确当前时间，再决定是否调用其他工具或给出结论。"
+        )
 
     contains_room = any(token in normalized_text for token in ["群", "群聊", "chatroom", "@chatroom", "roomid"])
     overlap_keywords = ["重复成员", "共同成员", "相同成员", "重叠成员", "交集", "重复的群成员", "重复群成员", "重合成员"]
