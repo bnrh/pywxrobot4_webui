@@ -392,6 +392,36 @@ TOOL_REGISTRY = {
 }
 
 
+LOCAL_TOOL_REGISTRY = {
+    "count_room_friend_members": _build_tool_schema(
+        "count_room_friend_members",
+        "精确统计指定群聊里有多少成员已经是你的好友。该工具会在服务端完成交集计算，避免把整份好友和群成员列表交给模型。",
+        {
+            "roomid": {"type": "string", "description": "群聊 ID，例如 123456@chatroom。"},
+            "wxpid": {"type": ["integer", "null"], "description": "微信进程 ID，可选。"},
+            "sample_limit": {"type": "integer", "minimum": 1, "maximum": 20, "description": "返回前几条匹配样例，默认 10。"},
+        },
+        ["roomid"],
+    ),
+    "list_room_friend_members": _build_tool_schema(
+        "list_room_friend_members",
+        "分页列出指定群聊中已经是你的好友的成员。适合人数较多时分批查看，不需要把整份列表交给模型。",
+        {
+            "roomid": {"type": "string", "description": "群聊 ID，例如 123456@chatroom。"},
+            "wxpid": {"type": ["integer", "null"], "description": "微信进程 ID，可选。"},
+            "offset": {"type": "integer", "minimum": 0, "description": "分页起始偏移量，默认 0。"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 40, "description": "单页返回条数，默认 20，最大 40。"},
+            "query": {"type": "string", "description": "可选，按群昵称、好友昵称、备注、wxid 过滤。"},
+        },
+        ["roomid"],
+    ),
+}
+
+
+def _merge_tool_registry(base_registry: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {**base_registry, **LOCAL_TOOL_REGISTRY}
+
+
 def _get_mcp_server_source_path() -> Path | None:
     for path in MCP_SERVER_SOURCE_CANDIDATES:
         if path.exists():
@@ -528,11 +558,11 @@ def _parse_mcp_tool_registry(source_text: str) -> dict[str, dict[str, Any]]:
 def get_tool_registry() -> dict[str, dict[str, Any]]:
     source_path = _get_mcp_server_source_path()
     if source_path is None:
-        return TOOL_REGISTRY
+        return _merge_tool_registry(TOOL_REGISTRY)
     try:
-        return _parse_mcp_tool_registry(source_path.read_text(encoding="utf-8")) or TOOL_REGISTRY
+        return _merge_tool_registry(_parse_mcp_tool_registry(source_path.read_text(encoding="utf-8")) or TOOL_REGISTRY)
     except Exception:
-        return TOOL_REGISTRY
+        return _merge_tool_registry(TOOL_REGISTRY)
 
 
 def _merge_model_names(*values: Any) -> list[str]:
@@ -979,6 +1009,156 @@ def _summarize_room_members(members: list[dict[str, Any]]) -> list[dict[str, Any
     ]
 
 
+def _normalize_contact_wxid(item: dict[str, Any]) -> str:
+    return str(item.get("wxid") or item.get("username") or "").strip()
+
+
+def _normalize_room_member_wxid(item: dict[str, Any]) -> str:
+    return str(item.get("username") or item.get("wxid") or "").strip()
+
+
+def _build_room_friend_match_items(room_members: list[dict[str, Any]], friends: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, int]:
+    friend_lookup = {
+        wxid: item
+        for item in friends if isinstance(item, dict)
+        for wxid in [_normalize_contact_wxid(item)]
+        if wxid
+    }
+
+    valid_room_member_count = 0
+    matched_items: list[dict[str, Any]] = []
+    for member in room_members if isinstance(room_members, list) else []:
+        if not isinstance(member, dict):
+            continue
+        member_wxid = _normalize_room_member_wxid(member)
+        if not member_wxid:
+            continue
+        valid_room_member_count += 1
+        friend = friend_lookup.get(member_wxid)
+        if friend is None:
+            continue
+
+        room_nick_name = str(member.get("room_nick_name") or "").strip()
+        nick_name = str(member.get("nick_name") or member.get("nickname") or "").strip()
+        alias = str(member.get("alias") or "").strip()
+        remarks = str(member.get("remarks") or "").strip()
+        friend_nickname = str(friend.get("nickname") or "").strip()
+        friend_remarks = str(friend.get("remarks") or "").strip()
+        matched_items.append(
+            {
+                "wxid": member_wxid,
+                "display_name": room_nick_name or nick_name or friend_remarks or friend_nickname or member_wxid,
+                "room_nick_name": room_nick_name,
+                "nick_name": nick_name,
+                "alias": alias,
+                "remarks": remarks,
+                "friend_nickname": friend_nickname,
+                "friend_remarks": friend_remarks,
+                "wxh": str(friend.get("wxh") or friend.get("alias") or "").strip(),
+            }
+        )
+
+    return matched_items, valid_room_member_count, len(friend_lookup)
+
+
+def _filter_room_friend_match_items(items: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
+    normalized_query = str(query or "").strip().lower()
+    if not normalized_query:
+        return list(items)
+    filtered_items: list[dict[str, Any]] = []
+    for item in items:
+        searchable_text = "\n".join(
+            str(item.get(field) or "")
+            for field in [
+                "wxid",
+                "display_name",
+                "room_nick_name",
+                "nick_name",
+                "alias",
+                "remarks",
+                "friend_nickname",
+                "friend_remarks",
+                "wxh",
+            ]
+        ).lower()
+        if normalized_query in searchable_text:
+            filtered_items.append(item)
+    return filtered_items
+
+
+async def _collect_room_friend_matches(
+    tool_executor: "_McpHttpToolExecutor",
+    roomid: str,
+    wxpid: int | None,
+) -> tuple[list[dict[str, Any]], int, int]:
+    friend_arguments: dict[str, Any] = {}
+    room_arguments: dict[str, Any] = {"roomid": roomid}
+    if wxpid is not None:
+        friend_arguments["wxpid"] = wxpid
+        room_arguments["wxpid"] = wxpid
+
+    friends, room_members = await asyncio.gather(
+        tool_executor.call_tool("get_user_list", friend_arguments),
+        tool_executor.call_tool("get_room_members", room_arguments),
+    )
+    if not isinstance(friends, list):
+        raise RuntimeError("get_user_list 返回格式异常")
+    if not isinstance(room_members, list):
+        raise RuntimeError("get_room_members 返回格式异常")
+    return _build_room_friend_match_items(room_members, friends)
+
+
+async def _execute_local_tool_call(
+    tool_executor: "_McpHttpToolExecutor",
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> Any:
+    roomid = _coerce_text(arguments.get("roomid"))
+    wxpid = _coerce_optional_int(arguments.get("wxpid"))
+    if tool_name in {"count_room_friend_members", "list_room_friend_members"} and not roomid:
+        raise RuntimeError("roomid 不能为空")
+
+    if tool_name == "count_room_friend_members":
+        sample_limit = _clamp_int(arguments.get("sample_limit"), 10, 1, 20)
+        matched_items, total_room_members, total_friends = await _collect_room_friend_matches(tool_executor, roomid, wxpid)
+        return {
+            "roomid": roomid,
+            "wxpid": wxpid,
+            "total_room_members": total_room_members,
+            "total_friends": total_friends,
+            "matched_friend_count": len(matched_items),
+            "unmatched_room_member_count": max(0, total_room_members - len(matched_items)),
+            "sample_limit": sample_limit,
+            "sample_items": matched_items[:sample_limit],
+            "is_complete": True,
+        }
+
+    if tool_name == "list_room_friend_members":
+        offset = _clamp_int(arguments.get("offset"), 0, 0, 1000000)
+        limit = _clamp_int(arguments.get("limit"), 20, 1, 40)
+        query = _coerce_text(arguments.get("query"))
+        matched_items, total_room_members, total_friends = await _collect_room_friend_matches(tool_executor, roomid, wxpid)
+        filtered_items = _filter_room_friend_match_items(matched_items, query)
+        page_items = filtered_items[offset:offset + limit]
+        next_offset = offset + len(page_items)
+        return {
+            "roomid": roomid,
+            "wxpid": wxpid,
+            "query": query,
+            "offset": offset,
+            "limit": limit,
+            "total_room_members": total_room_members,
+            "total_friends": total_friends,
+            "total_count": len(filtered_items),
+            "has_more": next_offset < len(filtered_items),
+            "next_offset": next_offset if next_offset < len(filtered_items) else None,
+            "items": page_items,
+            "is_complete": True,
+        }
+
+    raise RuntimeError(f"暂不支持本地工具 {tool_name}")
+
+
 def _normalize_message_content(value: Any) -> str:
     if isinstance(value, str):
         return value.strip()
@@ -1413,6 +1593,8 @@ class _McpHttpToolExecutor:
 
 
 async def _execute_tool_call(tool_executor: _McpHttpToolExecutor, tool_name: str, arguments: dict[str, Any]) -> Any:
+    if tool_name in LOCAL_TOOL_REGISTRY:
+        return await _execute_local_tool_call(tool_executor, tool_name, arguments)
     return await tool_executor.call_tool(tool_name, arguments)
 
 
