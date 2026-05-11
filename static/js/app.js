@@ -1700,7 +1700,6 @@ function renderAiConversation() {
                                     </div>
                                     <div class="detail-meta">参数</div>
                                     <pre class="code-block">${escapeHtml(formatJson(trace.arguments || {}))}</pre>
-                                    ${trace.result !== undefined && trace.result !== null ? `<div class="detail-meta">结果</div><pre class="code-block">${escapeHtml(formatJson(trace.result))}</pre>` : ""}
                                     ${trace.error ? `<div class="detail-text">${escapeHtml(trace.error)}</div>` : ""}
                                 </section>
                             `;

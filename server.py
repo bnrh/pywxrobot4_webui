@@ -176,7 +176,6 @@ def _normalize_ai_assistant_tool_trace_payload(item: Any) -> dict[str, Any]:
         "name": str(payload.get("name") or "unknown_tool"),
         "arguments": payload.get("arguments") if isinstance(payload.get("arguments"), dict) else {},
         "status": status,
-        "result": payload.get("result"),
         "error": str(payload.get("error") or ""),
     }
 

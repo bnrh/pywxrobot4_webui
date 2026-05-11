@@ -1614,7 +1614,6 @@ async def run_ai_assistant(
                 "name": tool_name,
                 "arguments": arguments,
                 "status": "ok",
-                "result": None,
                 "error": "",
             }
             await _emit_progress(
@@ -1631,7 +1630,6 @@ async def run_ai_assistant(
             try:
                 raw_result = await _execute_tool_call(api_client, tool_name, arguments)
                 compact_result = _compact_tool_result(raw_result)
-                trace_entry["result"] = compact_result
                 tool_content = json.dumps({"ok": True, "result": compact_result}, ensure_ascii=False)
             except Exception as exc:
                 trace_entry["status"] = "error"
