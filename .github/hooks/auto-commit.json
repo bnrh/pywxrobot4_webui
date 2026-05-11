@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "python .github/hooks/scripts/copilot_auto_commit.py UserPromptSubmit",
+        "windows": "python .github\\hooks\\scripts\\copilot_auto_commit.py UserPromptSubmit",
+        "cwd": ".",
+        "timeout": 15
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "python .github/hooks/scripts/copilot_auto_commit.py PostToolUse",
+        "windows": "python .github\\hooks\\scripts\\copilot_auto_commit.py PostToolUse",
+        "cwd": ".",
+        "timeout": 20
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python .github/hooks/scripts/copilot_auto_commit.py Stop",
+        "windows": "python .github\\hooks\\scripts\\copilot_auto_commit.py Stop",
+        "cwd": ".",
+        "timeout": 30
+      }
+    ]
+  }
+}
