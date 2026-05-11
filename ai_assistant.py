@@ -27,6 +27,12 @@ DEFAULT_SYSTEM_PROMPT = (
 
 INTERNAL_TOOL_ROUTING_PROMPT = (
     "工具选择规则："
+    "当用户询问两个群聊是否有重复成员、共同成员、相同成员、重叠成员或群成员交集时，"
+    "优先调用 count_shared_room_members 或 list_shared_room_members。"
+    "对于这类问题，不要先调用 get_room_members 或 get_room_members_summary 这类全量列表工具，"
+    "除非上述聚合工具不可用或执行失败。"
+    "如果用户只问有没有、多少或统计结果，先用 count_shared_room_members；"
+    "如果用户要名单、明细或继续翻页，优先用 list_shared_room_members。"
     "当用户询问某个群里有多少成员是其好友、某个群里哪些成员是其好友、统计群好友数量、分页列出群好友时，"
     "优先调用 count_room_friend_members 或 list_room_friend_members。"
     "对于这类问题，不要先调用 get_user_list、get_room_members、get_user_list_summary、get_room_members_summary，"
@@ -403,6 +409,30 @@ TOOL_REGISTRY = {
 
 
 LOCAL_TOOL_REGISTRY = {
+    "count_shared_room_members": _build_tool_schema(
+        "count_shared_room_members",
+        "精确统计两个群聊之间有多少重复成员。该工具会在服务端完成群成员交集计算，避免把两份完整群成员列表交给模型。",
+        {
+            "first_roomid": {"type": "string", "description": "第一个群聊 ID，例如 123456@chatroom。"},
+            "second_roomid": {"type": "string", "description": "第二个群聊 ID，例如 654321@chatroom。"},
+            "wxpid": {"type": ["integer", "null"], "description": "微信进程 ID，可选。"},
+            "sample_limit": {"type": "integer", "minimum": 1, "maximum": 20, "description": "返回前几条重复成员样例，默认 10。"},
+        },
+        ["first_roomid", "second_roomid"],
+    ),
+    "list_shared_room_members": _build_tool_schema(
+        "list_shared_room_members",
+        "分页列出两个群聊之间重复出现的成员。适合人数较多时分批查看，不需要把两份完整群成员列表交给模型。",
+        {
+            "first_roomid": {"type": "string", "description": "第一个群聊 ID，例如 123456@chatroom。"},
+            "second_roomid": {"type": "string", "description": "第二个群聊 ID，例如 654321@chatroom。"},
+            "wxpid": {"type": ["integer", "null"], "description": "微信进程 ID，可选。"},
+            "offset": {"type": "integer", "minimum": 0, "description": "分页起始偏移量，默认 0。"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 40, "description": "单页返回条数，默认 20，最大 40。"},
+            "query": {"type": "string", "description": "可选，按群昵称、好友昵称、备注、wxid 过滤。"},
+        },
+        ["first_roomid", "second_roomid"],
+    ),
     "count_room_friend_members": _build_tool_schema(
         "count_room_friend_members",
         "精确统计指定群聊里有多少成员已经是你的好友。该工具会在服务端完成交集计算，避免把整份好友和群成员列表交给模型。",
@@ -1071,6 +1101,60 @@ def _build_room_friend_match_items(room_members: list[dict[str, Any]], friends: 
     return matched_items, valid_room_member_count, len(friend_lookup)
 
 
+def _build_room_member_lookup(room_members: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], int]:
+    room_member_lookup: dict[str, dict[str, Any]] = {}
+    valid_room_member_count = 0
+    for member in room_members if isinstance(room_members, list) else []:
+        if not isinstance(member, dict):
+            continue
+        member_wxid = _normalize_room_member_wxid(member)
+        if not member_wxid:
+            continue
+        valid_room_member_count += 1
+        room_member_lookup.setdefault(member_wxid, member)
+    return room_member_lookup, valid_room_member_count
+
+
+def _build_shared_room_member_items(
+    first_room_members: list[dict[str, Any]],
+    second_room_members: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int, int]:
+    first_lookup, total_first_room_members = _build_room_member_lookup(first_room_members)
+    second_lookup, total_second_room_members = _build_room_member_lookup(second_room_members)
+
+    shared_items: list[dict[str, Any]] = []
+    for member_wxid, first_member in first_lookup.items():
+        second_member = second_lookup.get(member_wxid)
+        if second_member is None:
+            continue
+
+        first_room_nick_name = str(first_member.get("room_nick_name") or "").strip()
+        second_room_nick_name = str(second_member.get("room_nick_name") or "").strip()
+        first_nick_name = str(first_member.get("nick_name") or first_member.get("nickname") or "").strip()
+        second_nick_name = str(second_member.get("nick_name") or second_member.get("nickname") or "").strip()
+        first_alias = str(first_member.get("alias") or "").strip()
+        second_alias = str(second_member.get("alias") or "").strip()
+        first_remarks = str(first_member.get("remarks") or "").strip()
+        second_remarks = str(second_member.get("remarks") or "").strip()
+
+        shared_items.append(
+            {
+                "wxid": member_wxid,
+                "display_name": first_room_nick_name or second_room_nick_name or first_nick_name or second_nick_name or member_wxid,
+                "first_room_nick_name": first_room_nick_name,
+                "second_room_nick_name": second_room_nick_name,
+                "first_nick_name": first_nick_name,
+                "second_nick_name": second_nick_name,
+                "first_alias": first_alias,
+                "second_alias": second_alias,
+                "first_remarks": first_remarks,
+                "second_remarks": second_remarks,
+            }
+        )
+
+    return shared_items, total_first_room_members, total_second_room_members
+
+
 def _filter_room_friend_match_items(items: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
     normalized_query = str(query or "").strip().lower()
     if not normalized_query:
@@ -1089,6 +1173,32 @@ def _filter_room_friend_match_items(items: list[dict[str, Any]], query: str) -> 
                 "friend_nickname",
                 "friend_remarks",
                 "wxh",
+            ]
+        ).lower()
+        if normalized_query in searchable_text:
+            filtered_items.append(item)
+    return filtered_items
+
+
+def _filter_shared_room_member_items(items: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
+    normalized_query = str(query or "").strip().lower()
+    if not normalized_query:
+        return list(items)
+    filtered_items: list[dict[str, Any]] = []
+    for item in items:
+        searchable_text = "\n".join(
+            str(item.get(field) or "")
+            for field in [
+                "wxid",
+                "display_name",
+                "first_room_nick_name",
+                "second_room_nick_name",
+                "first_nick_name",
+                "second_nick_name",
+                "first_alias",
+                "second_alias",
+                "first_remarks",
+                "second_remarks",
             ]
         ).lower()
         if normalized_query in searchable_text:
@@ -1118,15 +1228,93 @@ async def _collect_room_friend_matches(
     return _build_room_friend_match_items(room_members, friends)
 
 
+async def _collect_shared_room_members(
+    tool_executor: "_McpHttpToolExecutor",
+    first_roomid: str,
+    second_roomid: str,
+    wxpid: int | None,
+) -> tuple[list[dict[str, Any]], int, int]:
+    first_room_arguments: dict[str, Any] = {"roomid": first_roomid}
+    second_room_arguments: dict[str, Any] = {"roomid": second_roomid}
+    if wxpid is not None:
+        first_room_arguments["wxpid"] = wxpid
+        second_room_arguments["wxpid"] = wxpid
+
+    first_room_members, second_room_members = await asyncio.gather(
+        tool_executor.call_tool("get_room_members", first_room_arguments),
+        tool_executor.call_tool("get_room_members", second_room_arguments),
+    )
+    if not isinstance(first_room_members, list):
+        raise RuntimeError("第一个群的 get_room_members 返回格式异常")
+    if not isinstance(second_room_members, list):
+        raise RuntimeError("第二个群的 get_room_members 返回格式异常")
+    return _build_shared_room_member_items(first_room_members, second_room_members)
+
+
 async def _execute_local_tool_call(
     tool_executor: "_McpHttpToolExecutor",
     tool_name: str,
     arguments: dict[str, Any],
 ) -> Any:
     roomid = _coerce_text(arguments.get("roomid"))
+    first_roomid = _coerce_text(arguments.get("first_roomid") or arguments.get("roomid_a") or arguments.get("roomid1"))
+    second_roomid = _coerce_text(arguments.get("second_roomid") or arguments.get("roomid_b") or arguments.get("roomid2"))
     wxpid = _coerce_optional_int(arguments.get("wxpid"))
     if tool_name in {"count_room_friend_members", "list_room_friend_members"} and not roomid:
         raise RuntimeError("roomid 不能为空")
+    if tool_name in {"count_shared_room_members", "list_shared_room_members"} and (not first_roomid or not second_roomid):
+        raise RuntimeError("first_roomid 和 second_roomid 不能为空")
+
+    if tool_name == "count_shared_room_members":
+        sample_limit = _clamp_int(arguments.get("sample_limit"), 10, 1, 20)
+        shared_items, total_first_room_members, total_second_room_members = await _collect_shared_room_members(
+            tool_executor,
+            first_roomid,
+            second_roomid,
+            wxpid,
+        )
+        return {
+            "first_roomid": first_roomid,
+            "second_roomid": second_roomid,
+            "wxpid": wxpid,
+            "total_first_room_members": total_first_room_members,
+            "total_second_room_members": total_second_room_members,
+            "shared_member_count": len(shared_items),
+            "first_room_unique_member_count": max(0, total_first_room_members - len(shared_items)),
+            "second_room_unique_member_count": max(0, total_second_room_members - len(shared_items)),
+            "sample_limit": sample_limit,
+            "sample_items": shared_items[:sample_limit],
+            "is_complete": True,
+        }
+
+    if tool_name == "list_shared_room_members":
+        offset = _clamp_int(arguments.get("offset"), 0, 0, 1000000)
+        limit = _clamp_int(arguments.get("limit"), 20, 1, 40)
+        query = _coerce_text(arguments.get("query"))
+        shared_items, total_first_room_members, total_second_room_members = await _collect_shared_room_members(
+            tool_executor,
+            first_roomid,
+            second_roomid,
+            wxpid,
+        )
+        filtered_items = _filter_shared_room_member_items(shared_items, query)
+        page_items = filtered_items[offset:offset + limit]
+        next_offset = offset + len(page_items)
+        return {
+            "first_roomid": first_roomid,
+            "second_roomid": second_roomid,
+            "wxpid": wxpid,
+            "query": query,
+            "offset": offset,
+            "limit": limit,
+            "total_first_room_members": total_first_room_members,
+            "total_second_room_members": total_second_room_members,
+            "total_count": len(filtered_items),
+            "has_more": next_offset < len(filtered_items),
+            "next_offset": next_offset if next_offset < len(filtered_items) else None,
+            "items": page_items,
+            "is_complete": True,
+        }
 
     if tool_name == "count_room_friend_members":
         sample_limit = _clamp_int(arguments.get("sample_limit"), 10, 1, 20)
@@ -1227,6 +1415,33 @@ def _build_contextual_tool_routing_prompt(latest_user_message: str) -> str:
         return ""
 
     contains_room = any(token in normalized_text for token in ["群", "群聊", "chatroom", "@chatroom", "roomid"])
+    overlap_keywords = ["重复成员", "共同成员", "相同成员", "重叠成员", "交集", "重复的群成员", "重复群成员", "重合成员"]
+    dual_room_keywords = ["两个群", "两群", "两个群聊", "2个群", "两个群里", "两个群聊里"]
+    overlap_count_keywords = ["有没有", "是否有", "有无", "多少", "几个", "几位", "统计", "数量", "占比"]
+    if contains_room and (
+        any(keyword in normalized_text for keyword in overlap_keywords)
+        or any(keyword in normalized_text for keyword in dual_room_keywords)
+    ):
+        list_keywords = ["哪些", "名单", "列出", "明细", "都有谁", "分别是", "翻页", "分页"]
+        if any(keyword in normalized_text for keyword in list_keywords):
+            return (
+                "当前问题是在查询两个群聊之间哪些成员重复出现或查看交集名单。"
+                "优先先调用 list_shared_room_members，不要先调用 get_room_members 这类全量列表工具。"
+                "如果还需要总数，可再调用 count_shared_room_members。"
+            )
+
+        if any(keyword in normalized_text for keyword in overlap_count_keywords):
+            return (
+                "当前问题是在统计两个群聊之间是否有重复成员或有多少重复成员。"
+                "优先先调用 count_shared_room_members，不要先调用 get_room_members 这类全量列表工具。"
+                "如果用户后续要求查看名单，再调用 list_shared_room_members。"
+            )
+
+        return (
+            "当前问题与两个群聊的成员交集分析有关。"
+            "优先使用 count_shared_room_members 或 list_shared_room_members，避免先调用全量列表工具。"
+        )
+
     contains_friend = "好友" in normalized_text
     if not (contains_room and contains_friend):
         return ""
