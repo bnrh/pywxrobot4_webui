@@ -56,11 +56,11 @@ config_schema = [
         "type": "object-list",
         "display_mode": "table",
         "default": [],
-        "meaningful_keys": ["roomid", "mode", "message_types"],
+        "meaningful_keys": ["roomid", "mode", "message_types", "whitelist_members"],
         "unique_by": ["roomid"],
         "unique_message": "同一个群聊只能保留一条禁言规则",
         "empty_text": "暂无群聊禁言规则，点击“新增”后为目标群聊设置消息类型限制。",
-        "description": "每个群聊可单独设置规则模式。若选择“仅允许以下类型”，未勾选的类型都会被视为违规。",
+        "description": "每个群聊可单独设置规则模式。若选择“仅允许以下类型”，未勾选的类型都会被视为违规。白名单成员不受该群规则限制。",
         "columns": [
             {
                 "key": "roomid",
@@ -97,6 +97,14 @@ config_schema = [
                 "options": MESSAGE_KIND_OPTIONS,
                 "width": "wide",
             },
+            {
+                "key": "whitelist_members",
+                "label": "白名单成员",
+                "type": "string-list",
+                "rows": 3,
+                "placeholder": "每行一个成员 wxid、群昵称或展示名",
+                "width": "wide",
+            },
         ],
     },
 ]
@@ -112,6 +120,15 @@ def normalize_message_kinds(value):
     for item in unique_strings(value):
         normalized = normalize_text(item).lower()
         if normalized in MESSAGE_KIND_LABELS and normalized not in normalized_items:
+            normalized_items.append(normalized)
+    return normalized_items
+
+
+def normalize_whitelist_members(value):
+    normalized_items: list[str] = []
+    for item in unique_strings(value):
+        normalized = normalize_text(item)
+        if normalized and normalized not in normalized_items:
             normalized_items.append(normalized)
     return normalized_items
 
@@ -132,6 +149,9 @@ def normalize_room_rules(config):
             "roomid": roomid,
             "mode": normalize_rule_mode(item.get("mode") or item.get("rule_mode")),
             "message_types": message_types,
+            "whitelist_members": normalize_whitelist_members(
+                item.get("whitelist_members") if item.get("whitelist_members") is not None else item.get("whitelist")
+            ),
         }
     return rules
 
@@ -153,6 +173,33 @@ def is_message_blocked(rule, message_kind):
     if rule.get("mode") == RULE_MODE_BLOCK:
         return message_kind in configured_types
     return message_kind not in configured_types
+
+
+def get_event_display_candidate(event, field_name):
+    first_non_empty = getattr(event, "first_non_empty", None)
+    if callable(first_non_empty):
+        return normalize_text(first_non_empty(field_name))
+    return normalize_text(getattr(event, field_name, ""))
+
+
+def build_sender_whitelist_candidates(event, sender_wxid, sender_name=""):
+    return unique_strings(
+        [
+            normalize_text(sender_wxid),
+            normalize_text(sender_name),
+            get_event_display_candidate(event, "room_sender_display_name"),
+            get_event_display_candidate(event, "sender_display_name"),
+            get_event_display_candidate(event, "room_sender"),
+            get_event_display_candidate(event, "sender"),
+        ]
+    )
+
+
+def is_sender_whitelisted(rule, sender_identifiers):
+    whitelist_members = {normalize_text(item) for item in rule.get("whitelist_members") or [] if normalize_text(item)}
+    if not whitelist_members:
+        return False
+    return bool(whitelist_members & {normalize_text(item) for item in sender_identifiers if normalize_text(item)})
 
 
 def get_active_pending_kick(pending_state, pending_key):
@@ -237,6 +284,7 @@ def build_log_payload(event, roomid, sender_wxid, sender_name, rule, message_kin
         "type_code": type_code,
         "rule_mode": rule.get("mode"),
         "configured_types": [MESSAGE_KIND_LABELS.get(item, item) for item in rule.get("message_types") or []],
+        "whitelist_members": rule.get("whitelist_members") or [],
     }
 
 
@@ -263,11 +311,36 @@ async def handle_message(event, context):
     if self_wxid and sender_wxid == self_wxid:
         return {"handled": False, "detail": "忽略当前账号自己发送的群消息"}
 
+    whitelist_candidates = build_sender_whitelist_candidates(event, sender_wxid)
+    if is_sender_whitelisted(room_rule, whitelist_candidates):
+        context.logger.info(
+            "群聊禁言插件白名单成员已放行",
+            {
+                "roomid": roomid,
+                "sender_wxid": sender_wxid,
+                "sender_identifiers": whitelist_candidates,
+                "whitelist_members": room_rule.get("whitelist_members") or [],
+            },
+        )
+        return {"handled": False, "detail": "当前发送者在白名单中"}
+
     message_kind = get_message_kind(type_code)
     if not is_message_blocked(room_rule, message_kind):
         return {"handled": False, "detail": "当前消息类型允许发送"}
 
     sender_name = await resolve_sender_name(event, context, roomid, sender_wxid)
+    if is_sender_whitelisted(room_rule, build_sender_whitelist_candidates(event, sender_wxid, sender_name)):
+        context.logger.info(
+            "群聊禁言插件白名单成员已放行",
+            {
+                "roomid": roomid,
+                "sender_wxid": sender_wxid,
+                "sender_name": sender_name,
+                "whitelist_members": room_rule.get("whitelist_members") or [],
+            },
+        )
+        return {"handled": False, "detail": "当前发送者在白名单中"}
+
     room_name = resolve_room_name(event, roomid)
     message_type_name = describe_message_kind(message_kind, type_code)
     warning_text = render_warning_text(context.config.get("warning_template"), sender_name, message_type_name, room_name)
