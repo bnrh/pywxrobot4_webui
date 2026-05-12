@@ -254,6 +254,8 @@ def build_duplicate_rows(group_name, members_by_room, room_lookup):
     for roomid, members in members_by_room.items():
         room_name = normalize_text(room_lookup.get(roomid, {}).get("nickname") or roomid) or roomid
         for member in members if isinstance(members, list) else []:
+            if member.get("is_owner"):
+                continue
             wxid = normalize_text(member.get("username") or member.get("wxid"))
             if not wxid:
                 continue
