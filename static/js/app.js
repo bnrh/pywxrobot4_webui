@@ -758,6 +758,104 @@ async function loadPluginTargets(force = false) {
 
 const WXPID_OPTION_DEFAULT = "__default_first__";
 const WXPID_OPTION_ALL = "__all__";
+const ROOM_MSG_SUMMARY_PLUGIN_KEY = "room_msg_summary";
+
+function isRoomMsgSummaryPlugin(plugin) {
+    const name = normalizeInlineText(plugin?.name || "").toLowerCase();
+    const moduleName = normalizeInlineText(plugin?.module || "").toLowerCase();
+    return name === ROOM_MSG_SUMMARY_PLUGIN_KEY || moduleName.endsWith(`.${ROOM_MSG_SUMMARY_PLUGIN_KEY}`) || moduleName === ROOM_MSG_SUMMARY_PLUGIN_KEY;
+}
+
+function getRoomMsgSummaryLookbackSeconds(rangeKey) {
+    const rangeMap = {
+        "2h": 2 * 60 * 60,
+        "6h": 6 * 60 * 60,
+        "12h": 12 * 60 * 60,
+        "1d": 24 * 60 * 60,
+        "3d": 3 * 24 * 60 * 60,
+        "1y": 365 * 24 * 60 * 60,
+    };
+    return rangeMap[normalizeInlineText(rangeKey).toLowerCase()] || rangeMap["2h"];
+}
+
+function parseStructuredFieldValue(rawValue) {
+    const normalized = normalizeInlineText(rawValue);
+    if (!normalized) {
+        return "";
+    }
+    try {
+        return JSON.parse(normalized);
+    } catch {
+        return normalized;
+    }
+}
+
+function formatLocalDateTime(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+        return "";
+    }
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
+}
+
+function buildRoomMsgSummaryTimeWindow(rangeKey) {
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - getRoomMsgSummaryLookbackSeconds(rangeKey) * 1000);
+    return {
+        startTime: formatLocalDateTime(startDate),
+        endTime: formatLocalDateTime(endDate),
+    };
+}
+
+function normalizeRoomMsgSummaryRenderConfig(config = {}) {
+    const nextConfig = { ...config };
+    const normalizedFileType = normalizeInlineText(nextConfig.file_type || nextConfig.output_format).toLowerCase();
+    if (!normalizedFileType || normalizedFileType === "txt") {
+        nextConfig.file_type = "jsonl";
+    }
+    const currentTimeRange = normalizeInlineText(nextConfig.time_range).toLowerCase() || "2h";
+    const { startTime, endTime } = buildRoomMsgSummaryTimeWindow(currentTimeRange);
+    if (!normalizeInlineText(nextConfig.start_time)) {
+        nextConfig.start_time = startTime;
+    }
+    if (!normalizeInlineText(nextConfig.end_time)) {
+        nextConfig.end_time = endTime;
+    }
+    return nextConfig;
+}
+
+function getPluginModuleNameForForm(formElement) {
+    if (formElement === elements.pluginConfigForm) {
+        return state.pluginConfigModule;
+    }
+    if (formElement === elements.pluginExecuteForm) {
+        return state.pluginExecuteModule;
+    }
+    return "";
+}
+
+function syncRoomMsgSummaryTimeFields(formElement, { force = false } = {}) {
+    const moduleName = getPluginModuleNameForForm(formElement);
+    const plugin = moduleName ? getPluginByModule(moduleName) : null;
+    if (!isRoomMsgSummaryPlugin(plugin)) {
+        return;
+    }
+
+    const timeRangeInput = formElement.querySelector('[data-config-key="time_range"]');
+    const startInput = formElement.querySelector('[data-config-key="start_time"]');
+    const endInput = formElement.querySelector('[data-config-key="end_time"]');
+    if (!(timeRangeInput instanceof HTMLSelectElement) || !(startInput instanceof HTMLInputElement) || !(endInput instanceof HTMLInputElement)) {
+        return;
+    }
+
+    const timeRangeValue = parseStructuredFieldValue(timeRangeInput.value) || "2h";
+    const { startTime, endTime } = buildRoomMsgSummaryTimeWindow(timeRangeValue);
+    if (force || !normalizeInlineText(startInput.value)) {
+        startInput.value = startTime;
+    }
+    if (force || !normalizeInlineText(endInput.value)) {
+        endInput.value = endTime;
+    }
+}
 
 function buildWxpidFieldSchema(field, currentValue, description = "") {
     return {
@@ -834,17 +932,21 @@ function getWxpidFieldOptions(currentValue) {
 }
 
 function buildPluginConfigRenderModel(plugin) {
-    if (!plugin || !Array.isArray(plugin.config_schema)) {
-        return plugin;
+    const sourcePlugin = isRoomMsgSummaryPlugin(plugin)
+        ? { ...plugin, config: normalizeRoomMsgSummaryRenderConfig(plugin?.config || {}) }
+        : plugin;
+
+    if (!sourcePlugin || !Array.isArray(sourcePlugin.config_schema)) {
+        return sourcePlugin;
     }
 
     return {
-        ...plugin,
-        config_schema: plugin.config_schema.map((field) => {
+        ...sourcePlugin,
+        config_schema: sourcePlugin.config_schema.map((field) => {
             if (!field || typeof field !== "object") {
                 return field;
             }
-            const currentValue = plugin.config?.[field.key];
+            const currentValue = sourcePlugin.config?.[field.key];
             let nextField = hydrateDynamicFieldOptions(field, currentValue);
             if (nextField.key === "wxpid") {
                 nextField = buildWxpidFieldSchema(nextField, currentValue);
@@ -862,8 +964,8 @@ function buildPluginConfigRenderModel(plugin) {
             }
             return nextField;
         }).concat(
-            plugin.message_dependent
-                ? buildPluginScopeFields(plugin).filter((field) => !plugin.config_schema.some((item) => item?.key === field.key))
+            sourcePlugin.message_dependent
+                ? buildPluginScopeFields(sourcePlugin).filter((field) => !sourcePlugin.config_schema.some((item) => item?.key === field.key))
                 : []
         ),
     };
@@ -932,6 +1034,7 @@ async function openPluginConfigModal(moduleName) {
         elements.pluginConfigForm.hidden = false;
         elements.pluginConfigEditor.hidden = true;
         renderPluginConfigFields(elements.pluginConfigForm, renderPlugin);
+        syncRoomMsgSummaryTimeFields(elements.pluginConfigForm);
         initializeSearchableChoiceFilters(elements.pluginConfigForm);
         syncScopeFieldVisibility(elements.pluginConfigForm);
     } else {
@@ -983,6 +1086,7 @@ async function openPluginExecuteModal(moduleName) {
     elements.pluginExecuteModalTitle.textContent = `${plugin.name} 执行范围`;
     elements.pluginExecuteMeta.textContent = "执行前选择这次运行要作用的微信进程、群聊、好友标签或公众号。本次选择不会覆盖已保存配置。";
     renderPluginConfigFields(elements.pluginExecuteForm, renderPlugin);
+    syncRoomMsgSummaryTimeFields(elements.pluginExecuteForm);
     initializeSearchableChoiceFilters(elements.pluginExecuteForm);
     syncScopeFieldVisibility(elements.pluginExecuteForm);
     elements.pluginExecuteModal.classList.add("is-visible");
@@ -3364,6 +3468,9 @@ async function handleProjectFilePick(button, formElement) {
             const fieldKey = target?.getAttribute?.("data-config-key") || "";
             if (fieldKey === "_scope_room_mode" || fieldKey === "_scope_friend_mode") {
                 syncScopeFieldVisibility(formElement);
+            }
+            if (fieldKey === "time_range") {
+                syncRoomMsgSummaryTimeFields(formElement, { force: true });
             }
         });
     });

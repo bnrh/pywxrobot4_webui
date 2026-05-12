@@ -11,16 +11,14 @@ category = "functional"
 message_dependent = False
 scope_targets = ["rooms"]
 config_schema = [
-    {"key": "export_dir", "aliases": ["save_path"], "label": "导出目录", "type": "text", "default": "", "description": "群消息文件会输出到这个目录。"},
     {"key": "wxpid", "label": "微信进程", "type": "number", "full_width": False},
-    {"key": "max_count", "label": "最多导出消息数", "type": "number", "default": 500, "min": 1, "max": 20000, "step": 1, "full_width": False},
-    {"key": "file_type", "aliases": ["output_format"], "label": "输出格式", "type": "select", "default": "txt", "full_width": False, "options": [{"label": "TXT(JSONL 每行一条)", "value": "txt"}, {"label": "JSONL", "value": "jsonl"}, {"label": "JSON", "value": "json"}]},
-    {"key": "time_range", "label": "默认时间范围", "type": "select", "default": "2h", "full_width": False, "description": "如果未手动填写开始和结束时间，就按这里的范围导出。", "options": [{"label": "最近 2 小时", "value": "2h"}, {"label": "最近 6 小时", "value": "6h"}, {"label": "最近 12 小时", "value": "12h"}, {"label": "最近 1 天", "value": "1d"}, {"label": "最近 3 天", "value": "3d"}, {"label": "最近 1 年", "value": "1y"}]},
+    {"key": "max_count", "label": "最多导出消息数", "type": "number", "default": 500, "min": 1, "max": 10000, "step": 1, "full_width": False},
+    {"key": "file_type", "aliases": ["output_format"], "label": "输出格式", "type": "select", "default": "jsonl", "full_width": False, "options": [{"label": "JSONL", "value": "jsonl"}, {"label": "JSON", "value": "json"}]},
+    {"key": "time_range", "label": "默认时间范围", "type": "select", "default": "2h", "full_width": False, "description": "选择后会同步更新下方开始时间和结束时间。", "options": [{"label": "最近 2 小时", "value": "2h"}, {"label": "最近 6 小时", "value": "6h"}, {"label": "最近 12 小时", "value": "12h"}, {"label": "最近 1 天", "value": "1d"}, {"label": "最近 3 天", "value": "3d"}, {"label": "最近 1 年", "value": "1y"}]},
     {"key": "start_time", "label": "开始时间", "type": "text", "default": "", "full_width": False, "placeholder": "yyyy-MM-dd HH:mm:ss"},
     {"key": "end_time", "label": "结束时间", "type": "text", "default": "", "full_width": False, "placeholder": "yyyy-MM-dd HH:mm:ss"},
-    {"key": "run_on_startup", "label": "启动时导出", "type": "checkbox", "default": True, "full_width": False},
-    {"key": "run_on_reload", "label": "热重载时导出", "type": "checkbox", "default": True, "full_width": False},
     {"key": "rooms", "label": "导出群列表", "type": "object-list", "default": [], "meaningful_keys": ["roomid", "room_name"], "description": "可按群ID或群名称匹配。", "columns": [{"key": "roomid", "label": "群ID", "type": "text", "placeholder": "123456@chatroom"}, {"key": "room_name", "label": "群名称", "type": "text", "placeholder": "可选，用于按名称匹配"}, {"key": "wxpid", "label": "微信进程ID", "type": "number", "placeholder": "可选"}]},
+    {"key": "export_dir", "aliases": ["save_path"], "label": "导出目录", "type": "text", "default": "", "description": "群消息文件会输出到这个目录。"},
 ]
 
 
@@ -115,7 +113,11 @@ async def export_room_messages(context, reason):
     room_lookup_cache = {}
     start_time, end_time = resolve_time_window(context.config)
     max_count = max(1, int(context.config.get("max_count", 500) or 500))
-    extension = normalize_text(context.config.get("file_type") or context.config.get("output_format") or "txt").lower() or "txt"
+    extension = normalize_text(context.config.get("file_type") or context.config.get("output_format") or "jsonl").lower() or "jsonl"
+    if extension == "txt":
+        extension = "jsonl"
+    if extension not in {"jsonl", "json"}:
+        extension = "jsonl"
     reports = []
     if not default_target_wxpids and default_wxpid_selection not in (None, ""):
         context.logger.warning("群消息汇总插件当前没有可用的微信进程", {"reason": reason, "wxpid_selection": default_wxpid_selection})
@@ -146,22 +148,6 @@ async def export_room_messages(context, reason):
     payload = {"reason": reason, "wxpid_selection": default_wxpid_selection, "target_wxpids": default_target_wxpids, "exported_count": len(reports), "rooms": reports, "start_time": start_time, "end_time": end_time}
     context.state.namespace("room_msg_summary").set("last_report", payload)
     return payload
-
-
-async def startup(context):
-    if context.config.get("run_on_startup") is False:
-        return
-    report = await export_room_messages(context, "startup")
-    if report.get("exported_count"):
-        context.logger.info("群消息汇总导出已完成", report)
-
-
-async def on_hot_reload(hot_reload, context):
-    if hot_reload.get("changed") and context.config.get("run_on_reload") is not False:
-        report = await export_room_messages(context, "hot-reload")
-        if report.get("exported_count"):
-            context.logger.info("群消息汇总导出已完成", report)
-
 
 async def execute(context):
     report = await export_room_messages(context, "manual-execute")
