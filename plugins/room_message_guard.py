@@ -1,6 +1,6 @@
 from time import time
 
-from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text, random_between, sleep, unique_strings
+from ._plugin_sdk import MESSAGE_TYPES, find_xml_tag_text, get_message_type, normalize_text, random_between, sleep, unique_strings
 
 
 name = "room_message_guard"
@@ -15,22 +15,58 @@ DEFAULT_WARNING_TEMPLATE = "当前群不允许发送这类消息，请遵守群�
 MESSAGE_KIND_DEFINITIONS = [
     {"key": "text", "label": "文本", "codes": [MESSAGE_TYPES.TEXT]},
     {"key": "image", "label": "图片", "codes": [MESSAGE_TYPES.IMAGE]},
-    {"key": "emoji", "label": "表情/标签消息", "codes": [47]},
     {"key": "voice", "label": "语音", "codes": [34]},
-    {"key": "video", "label": "视频", "codes": [MESSAGE_TYPES.VIDEO]},
-    {"key": "file", "label": "文件", "codes": [MESSAGE_TYPES.FILE]},
-    {"key": "card", "label": "名片", "codes": [42]},
-    {"key": "location", "label": "位置", "codes": [48]},
-    {"key": "xml", "label": "链接/小程序/引用/分享", "codes": [MESSAGE_TYPES.XML]},
-    {"key": "unknown", "label": "其他未知类型", "codes": []},
+    {"key": "video", "label": "视频", "codes": [MESSAGE_TYPES.VIDEO, 0x3E]},
+    {"key": "emoji", "label": "表情", "codes": [47]},
+    {"key": "attachment", "label": "名片/位置/链接/文件/公众号名片", "codes": [42, 48, 0x1100000031, 0x2A0000031, 0x500000031, MESSAGE_TYPES.FILE]},
+    {"key": "channels", "label": "视频号/视频号卡片", "codes": [0x330000031, 0x3F0000031]},
+    {"key": "mini_program", "label": "小程序", "codes": [0x210000031]},
+    {"key": "merged", "label": "合并消息/聊天记录消息", "codes": [0x280000031, 0x1300000031]},
+    {"key": "other", "label": "其他类型", "codes": []},
 ]
 
 MESSAGE_KIND_LABELS = {item["key"]: item["label"] for item in MESSAGE_KIND_DEFINITIONS}
 MESSAGE_KIND_OPTIONS = [{"label": item["label"], "value": item["key"]} for item in MESSAGE_KIND_DEFINITIONS]
-TYPE_CODE_TO_MESSAGE_KIND = {
+EXACT_TYPE_CODE_TO_MESSAGE_KIND = {
     int(code): item["key"]
     for item in MESSAGE_KIND_DEFINITIONS
     for code in item["codes"]
+}
+APPMSG_SUBTYPE_TO_MESSAGE_KIND = {
+    5: "attachment",
+    6: "attachment",
+    17: "attachment",
+    19: "merged",
+    33: "mini_program",
+    40: "merged",
+    42: "attachment",
+    51: "channels",
+    63: "channels",
+}
+IGNORED_TYPE_CODES = {
+    MESSAGE_TYPES.ADDFRIEND,
+    MESSAGE_TYPES.NOTICE,
+    MESSAGE_TYPES.SYSMSG,
+    0x33,
+    0x34,
+    0x35,
+    0x3900000031,
+    0x4A00000031,
+    0x570000031,
+    0x7D000000031,
+}
+IGNORED_APPMSG_SUBTYPES = {
+    57,
+    74,
+    87,
+    2000,
+}
+LEGACY_MESSAGE_KIND_ALIASES = {
+    "card": ["attachment"],
+    "location": ["attachment"],
+    "file": ["attachment"],
+    "xml": ["attachment", "channels", "mini_program", "merged", "other"],
+    "unknown": ["other"],
 }
 
 config_schema = [
@@ -122,8 +158,10 @@ def normalize_message_kinds(value):
     normalized_items: list[str] = []
     for item in unique_strings(value):
         normalized = normalize_text(item).lower()
-        if normalized in MESSAGE_KIND_LABELS and normalized not in normalized_items:
-            normalized_items.append(normalized)
+        resolved_items = LEGACY_MESSAGE_KIND_ALIASES.get(normalized, [normalized])
+        for resolved_item in resolved_items:
+            if resolved_item in MESSAGE_KIND_LABELS and resolved_item not in normalized_items:
+                normalized_items.append(resolved_item)
     return normalized_items
 
 
@@ -149,14 +187,62 @@ def normalize_room_rules(config):
 
 def get_message_kind(type_code):
     if type_code is None:
-        return "unknown"
-    return TYPE_CODE_TO_MESSAGE_KIND.get(int(type_code), "unknown")
+        return "other"
+    return EXACT_TYPE_CODE_TO_MESSAGE_KIND.get(int(type_code), "other")
+
+
+def extract_appmsg_subtype(content):
+    subtype_text = find_xml_tag_text(content, ["appmsg", "type"])
+    if not subtype_text:
+        return None
+    try:
+        return int(subtype_text)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_appmsg_subtype(type_code, content):
+    if type_code is not None:
+        try:
+            normalized_type_code = int(type_code)
+        except (TypeError, ValueError):
+            normalized_type_code = None
+        if normalized_type_code is not None and normalized_type_code > 0xFFFFFFFF and normalized_type_code & 0xFFFFFFFF == MESSAGE_TYPES.XML:
+            return normalized_type_code >> 32
+    return extract_appmsg_subtype(content)
+
+
+def inspect_message_kind(event):
+    type_code = get_message_type(event)
+    if type_code is None:
+        return {"type_code": None, "appmsg_subtype": None, "message_kind": "other", "ignored": True}
+
+    content = getattr(event, "content", "") or getattr(event, "normalized_content", "")
+    appmsg_subtype = get_appmsg_subtype(type_code, content)
+
+    if int(type_code) in IGNORED_TYPE_CODES or appmsg_subtype in IGNORED_APPMSG_SUBTYPES:
+        return {
+            "type_code": int(type_code),
+            "appmsg_subtype": appmsg_subtype,
+            "message_kind": "",
+            "ignored": True,
+        }
+
+    message_kind = EXACT_TYPE_CODE_TO_MESSAGE_KIND.get(int(type_code))
+    if message_kind is None and appmsg_subtype is not None:
+        message_kind = APPMSG_SUBTYPE_TO_MESSAGE_KIND.get(appmsg_subtype)
+    return {
+        "type_code": int(type_code),
+        "appmsg_subtype": appmsg_subtype,
+        "message_kind": message_kind or "other",
+        "ignored": False,
+    }
 
 
 def describe_message_kind(type_key, type_code):
     if type_key in MESSAGE_KIND_LABELS:
         return MESSAGE_KIND_LABELS[type_key]
-    return f"未知类型({type_code})" if type_code is not None else "未知类型"
+    return f"其他类型({hex(int(type_code))})" if type_code is not None else "其他类型"
 
 
 def is_message_blocked(rule, message_kind):
@@ -256,6 +342,7 @@ def render_warning_text(template, sender_name, message_type_name, room_name):
 
 
 def build_log_payload(event, roomid, sender_wxid, sender_name, rule, message_kind, type_code):
+    appmsg_subtype = get_appmsg_subtype(type_code, getattr(event, "content", "") or event.normalized_content)
     return {
         "roomid": roomid,
         "sender_wxid": sender_wxid,
@@ -265,6 +352,7 @@ def build_log_payload(event, roomid, sender_wxid, sender_name, rule, message_kin
         "message_kind": message_kind,
         "message_type": describe_message_kind(message_kind, type_code),
         "type_code": type_code,
+        "appmsg_subtype": appmsg_subtype,
         "rule_mode": rule.get("mode"),
         "configured_types": [MESSAGE_KIND_LABELS.get(item, item) for item in rule.get("message_types") or []],
     }
@@ -279,10 +367,9 @@ async def handle_message(event, context):
     if not room_rule:
         return {"handled": False, "detail": ""}
 
-    type_code = get_message_type(event)
-    if type_code in {MESSAGE_TYPES.NOTICE, MESSAGE_TYPES.SYSMSG, MESSAGE_TYPES.ADDFRIEND}:
-        return {"handled": False, "detail": ""}
-    if type_code is None:
+    message_meta = inspect_message_kind(event)
+    type_code = message_meta.get("type_code")
+    if message_meta.get("ignored"):
         return {"handled": False, "detail": ""}
 
     sender_wxid = normalize_text(event.sender_wxid)
@@ -307,7 +394,7 @@ async def handle_message(event, context):
     if is_default_whitelist_member(sender_member):
         return {"handled": False, "detail": ""}
 
-    message_kind = get_message_kind(type_code)
+    message_kind = str(message_meta.get("message_kind") or "other")
     if not is_message_blocked(room_rule, message_kind):
         return {"handled": False, "detail": ""}
 
