@@ -1,12 +1,28 @@
 async function extractErrorDetail(response) {
-    let detail = response.statusText;
+    const fallbackDetail = response.statusText || `HTTP ${response.status}`;
+    let detail = fallbackDetail;
     try {
-        const payload = await response.json();
-        detail = payload.detail || JSON.stringify(payload);
+        const rawText = await response.text();
+        const trimmedText = rawText.trim();
+        const contentType = (response.headers.get("Content-Type") || "").toLowerCase();
+        if (!trimmedText) {
+            return fallbackDetail;
+        }
+
+        if (contentType.includes("text/html") || trimmedText.startsWith("<!DOCTYPE") || trimmedText.startsWith("<html")) {
+            return fallbackDetail;
+        }
+
+        try {
+            const payload = JSON.parse(trimmedText);
+            detail = payload.detail || JSON.stringify(payload);
+        } catch {
+            detail = trimmedText;
+        }
     } catch {
-        detail = await response.text();
+        detail = fallbackDetail;
     }
-    return detail || `HTTP ${response.status}`;
+    return detail || fallbackDetail;
 }
 
 async function requestJson(url, options = {}) {
