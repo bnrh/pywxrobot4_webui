@@ -105,7 +105,7 @@ async def handle_message(event, context):
     type_code = get_message_type(event)
     keyword_room_pairs = resolve_keyword_room_pairs(context.config)
     if not keyword_room_pairs:
-        return {"handled": False, "detail": "没有配置拉群关键词规则"}
+        return {"handled": False, "detail": ""}
 
     pending_invites = context.state.namespace("pending_invites")
     if type_code == MESSAGE_TYPES.ADDFRIEND:
@@ -114,10 +114,10 @@ async def handle_message(event, context):
         friend_wxid = normalize_text(payload.get("fromusername"))
         nickname = normalize_text(payload.get("fromnickname"))
         if not friend_wxid or not verification or verification == f"我是{nickname}":
-            return {"handled": False, "detail": "好友请求没有可用于拉群的验证信息"}
+            return {"handled": False, "detail": ""}
         matched = find_keyword_room(keyword_room_pairs, verification)
         if not matched:
-            return {"handled": False, "detail": "好友请求验证词未匹配到群聊规则"}
+            return {"handled": False, "detail": ""}
         if pending_invites.has(friend_wxid):
             return {"handled": False, "detail": f"好友请求仍在处理中: {friend_wxid}"}
         pending_invites.set(friend_wxid, {"verification": verification, "roomid": matched["roomid"], "keyword": matched["keyword"], "full_match": bool(matched.get("full_match"))})
@@ -126,25 +126,25 @@ async def handle_message(event, context):
     if type_code == MESSAGE_TYPES.NOTICE:
         notice_text = normalize_text(event.normalized_content or getattr(event, "content", ""))
         if "现在可以开始聊天了" not in notice_text:
-            return {"handled": False, "detail": "不是好友通过后的聊天通知"}
+            return {"handled": False, "detail": ""}
         friend_wxid = normalize_text(getattr(event, "sender", "") or event.sender_wxid or "")
         pending = pending_invites.get(friend_wxid)
         if not pending:
-            return {"handled": False, "detail": "没有待处理的进群邀请记录"}
+            return {"handled": False, "detail": ""}
         pending_invites.delete(friend_wxid)
         matched = pending if pending.get("roomid") and pending.get("keyword") else find_keyword_room(keyword_room_pairs, pending.get("verification"))
         if not matched:
-            return {"handled": False, "detail": "好友请求验证词未匹配到群聊规则"}
+            return {"handled": False, "detail": ""}
         return await invite_to_room(friend_wxid, matched["roomid"], matched["keyword"], context, event)
 
     if type_code == MESSAGE_TYPES.TEXT and not event.is_group_message:
         content = normalize_text(event.normalized_content or getattr(event, "content", ""))
         matched = find_keyword_room(keyword_room_pairs, content)
         if not matched:
-            return {"handled": False, "detail": "文本消息未匹配拉群关键词"}
+            return {"handled": False, "detail": ""}
         friend_wxid = normalize_text(event.sender_wxid or getattr(event, "sender", "") or event.conversation_wxid)
         if not friend_wxid:
             return {"handled": False, "detail": "无法确定当前好友 wxid"}
         return await invite_to_room(friend_wxid, matched["roomid"], matched["keyword"], context, event)
 
-    return {"handled": False, "detail": "不是自动拉群相关消息"}
+    return {"handled": False, "detail": ""}

@@ -45,19 +45,19 @@ def strip_room_sender_prefix(content, room_sender):
 
 async def handle_message(event, context):
     if get_message_type(event) != MESSAGE_TYPES.TEXT:
-        return {"handled": False, "detail": "不是文本消息"}
+        return {"handled": False, "detail": ""}
 
     target_roomid = normalize_text(context.config.get("chatroom_wxid") or "")
     webhook_url = normalize_text(context.config.get("webhook_url") or "")
     if not target_roomid or not webhook_url:
-        return {"handled": False, "detail": "缺少 chatroom_wxid 或 webhook_url 配置"}
+        return {"handled": False, "detail": ""}
     if normalize_text(event.conversation_wxid) != target_roomid:
-        return {"handled": False, "detail": "当前消息不在目标群聊中"}
+        return {"handled": False, "detail": ""}
 
     room_sender = normalize_text(getattr(event, "room_sender", "") or event.sender_wxid or "")
     whitelist = to_string_set(context.config.get("member_whitelist"))
     if whitelist and room_sender not in whitelist:
-        return {"handled": False, "detail": f"群成员 {room_sender} 不在白名单中"}
+        return {"handled": False, "detail": ""}
 
     payload = build_event_payload(event)
     payload.update(

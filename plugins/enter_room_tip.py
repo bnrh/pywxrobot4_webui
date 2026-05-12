@@ -262,19 +262,18 @@ async def on_hot_reload(hot_reload, context):
 async def handle_message(event, context):
     type_code = get_message_type(event)
     if type_code not in {MESSAGE_TYPES.NOTICE, MESSAGE_TYPES.SYSMSG}:
-        return {"handled": False, "detail": "不是入群通知相关消息"}
+        return {"handled": False, "detail": ""}
 
     roomid = normalize_text(event.conversation_wxid)
     welcome_entry = get_welcome_map(context.config).get(roomid) or {}
     if not roomid or not roomid.endswith("@chatroom") or not (welcome_entry.get("content") or welcome_entry.get("path")):
-        return {"handled": False, "detail": "当前群聊没有配置欢迎语"}
+        return {"handled": False, "detail": ""}
 
     content = str(event.normalized_content or getattr(event, "content", ""))
     notice_meta = inspect_enter_room_notice(content)
     log_payload = build_notice_log_payload(event, roomid, type_code, notice_meta)
     if not notice_meta["matched"]:
-        context.logger.info("入群欢迎插件忽略了非入群通知消息", log_payload)
-        return {"handled": False, "detail": "不是成员入群通知"}
+        return {"handled": False, "detail": ""}
 
     context.logger.info("入群欢迎插件命中成员入群通知", {**log_payload, "notice_text": notice_meta["notice_text"]})
 

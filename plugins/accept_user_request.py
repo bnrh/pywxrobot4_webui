@@ -282,7 +282,6 @@ async def handle_message(event, context):
     pending_requests = context.state.namespace("pending_requests")
     now_ms = now_milliseconds()
     cleanup_stale_pending_requests(pending_requests, context.logger, now_ms)
-    context.logger.debug("accept_user_request 收到消息", build_event_debug_payload(event))
 
     if type_code == MESSAGE_TYPES.ADDFRIEND:
         payload = parse_xml_attributes(event.normalized_content or getattr(event, "content", ""))
@@ -327,8 +326,7 @@ async def handle_message(event, context):
         keyword_result = evaluate_keyword_rules(verification, context.config)
         context.logger.info("好友请求关键词匹配结果", {"friend_wxid": friend_wxid, "verification": verification, "matched_keywords": keyword_result["matched_keywords"], "matched_label_names": keyword_result["matched_label_names"], "keywords_only": is_truthy(context.config.get("keywords_only_bool"))})
         if is_truthy(context.config.get("keywords_only_bool")) and not keyword_result["matched_rules"]:
-            context.logger.info("好友请求未命中关键词规则，已跳过自动同意", {"friend_wxid": friend_wxid, "nickname": nickname, "verification": verification})
-            return {"handled": False, "detail": "好友请求未命中关键词策略"}
+            return {"handled": False, "detail": ""}
 
         label_result = {"labels": "", "missing_labels": []}
         if is_truthy(context.config.get("classify_label_bool")):
@@ -383,13 +381,12 @@ async def handle_message(event, context):
     if type_code == MESSAGE_TYPES.NOTICE:
         content = normalize_text(event.normalized_content or getattr(event, "content", ""))
         if "现在可以开始聊天了" not in content:
-            return {"handled": False, "detail": "不是好友请求完成通知"}
+            return {"handled": False, "detail": ""}
 
         notice_match = find_pending_request_for_notice(event, content, pending_requests)
         pending = notice_match["pending"]
         if not pending:
-            context.logger.warning("收到好友添加完成通知，但没有匹配到挂起记录", {**build_event_debug_payload(event, content), "notice_display_name": notice_match["notice_display_name"], "sender_candidates": notice_match["sender_candidates"], "pending_keys": pending_requests.keys()[:10]})
-            return {"handled": False, "detail": "没有待处理的好友请求记录"}
+            return {"handled": False, "detail": ""}
 
         pending_key = notice_match["key"]
         friend_wxid = pending.get("friend_wxid") or pending_key
@@ -417,4 +414,4 @@ async def handle_message(event, context):
         context.logger.info("好友请求后续动作已完成", {"friend_wxid": friend_wxid, "sent_greetings": sent_greetings, "disturb": is_truthy(context.config.get("disturb_bool")), "matched_keywords": pending.get("matched_keywords", [])})
         return {"handled": True, "detail": f"好友 {friend_wxid} 的后续动作已完成", "data": {"friend_wxid": friend_wxid, "sent_greetings": sent_greetings, "matched_keywords": pending.get("matched_keywords", [])}}
 
-    return {"handled": False, "detail": "不是好友请求相关消息"}
+    return {"handled": False, "detail": ""}

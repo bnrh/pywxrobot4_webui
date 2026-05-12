@@ -1175,12 +1175,13 @@ class PluginRuntime:
                     processed_at=self._now_iso(),
                     plugin_results=results,
                 )
-                logger.debug(
-                    "worker={} msgid={} plugins={}",
-                    index,
-                    event.normalized_msgid,
-                    results,
-                )
+                if results:
+                    logger.debug(
+                        "worker={} msgid={} plugins={}",
+                        index,
+                        event.normalized_msgid,
+                        results,
+                    )
             except Exception as exc:
                 if queued_item is not None:
                     self._patch_message(

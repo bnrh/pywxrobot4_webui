@@ -59,7 +59,7 @@ def resolve_operations(type_code, rules):
 async def handle_message(event, context):
     type_code = get_message_type(event)
     if type_code not in {MESSAGE_TYPES.VIDEO, MESSAGE_TYPES.FILE}:
-        return {"handled": False, "detail": "不是可下载资源消息"}
+        return {"handled": False, "detail": ""}
 
     msgid = normalize_text(event.normalized_msgid)
     wxid = normalize_text(event.conversation_wxid)
@@ -68,7 +68,7 @@ async def handle_message(event, context):
 
     operations = resolve_operations(type_code, resolve_rules(context.config, event))
     if not operations:
-        return {"handled": False, "detail": "当前会话没有匹配到资源下载规则"}
+        return {"handled": False, "detail": ""}
 
     wait = bool(context.config.get("wait", True))
     timeout = int(context.config.get("timeout", context.settings.image_download_timeout or 15))

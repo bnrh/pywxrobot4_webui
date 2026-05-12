@@ -301,55 +301,37 @@ def build_log_payload(event, roomid, sender_wxid, sender_name, rule, message_kin
 async def handle_message(event, context):
     roomid = normalize_text(event.conversation_wxid)
     if not roomid or not roomid.endswith("@chatroom"):
-        return {"handled": False, "detail": "不是群聊消息"}
+        return {"handled": False, "detail": ""}
 
     room_rule = normalize_room_rules(context.config).get(roomid)
     if not room_rule:
-        return {"handled": False, "detail": "当前群聊没有配置禁言规则"}
+        return {"handled": False, "detail": ""}
 
     type_code = get_message_type(event)
     if type_code in {MESSAGE_TYPES.NOTICE, MESSAGE_TYPES.SYSMSG, MESSAGE_TYPES.ADDFRIEND}:
-        return {"handled": False, "detail": "忽略通知或系统消息"}
+        return {"handled": False, "detail": ""}
     if type_code is None:
-        return {"handled": False, "detail": "无法识别当前消息类型"}
+        return {"handled": False, "detail": ""}
 
     sender_wxid = normalize_text(event.sender_wxid)
     if not sender_wxid:
-        return {"handled": False, "detail": "当前消息缺少发送者 wxid"}
+        return {"handled": False, "detail": ""}
 
     self_wxid = await resolve_self_wxid(context, event.normalized_wxpid)
     if self_wxid and sender_wxid == self_wxid:
-        return {"handled": False, "detail": "忽略当前账号自己发送的群消息"}
+        return {"handled": False, "detail": ""}
 
     whitelist_candidates = build_sender_whitelist_candidates(event, sender_wxid)
     if is_sender_whitelisted(room_rule, whitelist_candidates):
-        context.logger.info(
-            "群聊禁言插件白名单成员已放行",
-            {
-                "roomid": roomid,
-                "sender_wxid": sender_wxid,
-                "sender_identifiers": whitelist_candidates,
-                "whitelist_members": room_rule.get("whitelist_members") or [],
-            },
-        )
-        return {"handled": False, "detail": "当前发送者在白名单中"}
+        return {"handled": False, "detail": ""}
 
     message_kind = get_message_kind(type_code)
     if not is_message_blocked(room_rule, message_kind):
-        return {"handled": False, "detail": "当前消息类型允许发送"}
+        return {"handled": False, "detail": ""}
 
     sender_name = await resolve_sender_name(event, context, roomid, sender_wxid)
     if is_sender_whitelisted(room_rule, build_sender_whitelist_candidates(event, sender_wxid, sender_name)):
-        context.logger.info(
-            "群聊禁言插件白名单成员已放行",
-            {
-                "roomid": roomid,
-                "sender_wxid": sender_wxid,
-                "sender_name": sender_name,
-                "whitelist_members": room_rule.get("whitelist_members") or [],
-            },
-        )
-        return {"handled": False, "detail": "当前发送者在白名单中"}
+        return {"handled": False, "detail": ""}
 
     room_name = resolve_room_name(event, roomid)
     message_type_name = describe_message_kind(message_kind, type_code)
@@ -360,7 +342,7 @@ async def handle_message(event, context):
     pending_state = context.state.namespace("pending_kicks")
     pending_key = f"{roomid}::{sender_wxid}"
     if kick_after_warning and get_active_pending_kick(pending_state, pending_key):
-        context.logger.info("群聊禁言插件忽略重复违规消息，成员已在待移出队列中", log_payload)
+        context.logger.info("群聊禁言插件检测到重复违规，成员仍在待移出队列中", log_payload)
         return {"handled": True, "detail": "该成员已在待移出队列中", "data": log_payload}
 
     if kick_after_warning:

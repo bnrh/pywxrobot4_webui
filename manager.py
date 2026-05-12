@@ -705,15 +705,16 @@ class PluginManager:
                 logger.exception("插件 {} 处理消息失败", plugin.name)
                 result = PluginResult.skipped(str(exc))
 
-            results.append(
-                {
-                    "plugin": plugin.name,
-                    "handled": result.handled,
-                    "stop_processing": result.stop_processing,
-                    "detail": result.detail,
-                    "data": result.data,
-                }
-            )
+            if result.handled or result.stop_processing or result.detail or result.data:
+                results.append(
+                    {
+                        "plugin": plugin.name,
+                        "handled": result.handled,
+                        "stop_processing": result.stop_processing,
+                        "detail": result.detail,
+                        "data": result.data,
+                    }
+                )
             if result.stop_processing:
                 break
         return results
