@@ -24,6 +24,18 @@ wxrobot_webui 是面向 wxrobot_api 的 Web 控制台与插件运行时。它提
 
 ![仪表盘](docs/assets/screenshots/dashboard.png)
 
+### 消息中心
+
+![消息中心](docs/assets/screenshots/message-center.png)
+
+### 用户管理
+
+![用户管理](docs/assets/screenshots/user-management.png)
+
+### 功能插件
+
+![功能插件](docs/assets/screenshots/feature-plugins.png)
+
 ### 智能插件
 
 ![智能插件](docs/assets/screenshots/ai-assistant.png)
@@ -31,3 +43,15 @@ wxrobot_webui 是面向 wxrobot_api 的 Web 控制台与插件运行时。它提
 ### 消息插件
 
 ![消息插件](docs/assets/screenshots/message-plugins.png)
+
+### 插件日志
+
+![插件日志](docs/assets/screenshots/plugin-logs.png)
+
+### 系统设置
+
+![系统设置](docs/assets/screenshots/system-settings.png)
+
+### 日志中心
+
+![日志中心](docs/assets/screenshots/log-center.png)
