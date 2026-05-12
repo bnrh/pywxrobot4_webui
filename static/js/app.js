@@ -759,11 +759,20 @@ async function loadPluginTargets(force = false) {
 const WXPID_OPTION_DEFAULT = "__default_first__";
 const WXPID_OPTION_ALL = "__all__";
 const MESSAGE_SUMMARY_PLUGIN_KEYS = new Set(["room_msg_summary", "user_msg_summary"]);
+const DIRECT_EXECUTE_PLUGIN_KEYS = new Set(["room_msg_summary", "user_msg_summary", "export_contacts"]);
 
-function isMessageSummaryPlugin(plugin) {
+function isPluginInSet(plugin, pluginKeys) {
     const name = normalizeInlineText(plugin?.name || "").toLowerCase();
     const moduleName = normalizeInlineText(plugin?.module || "").toLowerCase();
-    return [...MESSAGE_SUMMARY_PLUGIN_KEYS].some((pluginKey) => name === pluginKey || moduleName.endsWith(`.${pluginKey}`) || moduleName === pluginKey);
+    return [...pluginKeys].some((pluginKey) => name === pluginKey || moduleName.endsWith(`.${pluginKey}`) || moduleName === pluginKey);
+}
+
+function isMessageSummaryPlugin(plugin) {
+    return isPluginInSet(plugin, MESSAGE_SUMMARY_PLUGIN_KEYS);
+}
+
+function isDirectExecutePlugin(plugin) {
+    return isPluginInSet(plugin, DIRECT_EXECUTE_PLUGIN_KEYS);
 }
 
 function getRoomMsgSummaryLookbackSeconds(rangeKey) {
@@ -1079,7 +1088,7 @@ async function openPluginExecuteModal(moduleName) {
         setStatus("未找到指定功能插件", "bad");
         return;
     }
-    if (isMessageSummaryPlugin(plugin)) {
+    if (isDirectExecutePlugin(plugin)) {
         setStatus("正在执行功能插件...");
         await executePluginWithConfig(moduleName, {});
         return;
