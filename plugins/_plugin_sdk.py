@@ -20,8 +20,48 @@ class MESSAGE_TYPES(IntEnum):
     FILE = 0x600000031
 
 
+WXPID_OPTION_DEFAULT = "__default_first__"
+WXPID_OPTION_ALL = "__all__"
+
+
 def normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def normalize_wxpid_selection(value: Any) -> int | str | None:
+    normalized = normalize_text(value)
+    if value in (None, "", 0, "0") or normalized == WXPID_OPTION_DEFAULT:
+        return None
+    if normalized == WXPID_OPTION_ALL:
+        return WXPID_OPTION_ALL
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def resolve_wxpid_targets(api: Any, value: Any) -> list[int | None]:
+    normalized = normalize_wxpid_selection(value)
+    live_wxpids: list[int] = []
+    try:
+        payload = await api.get_wx_pids()
+        for item in payload if isinstance(payload, list) else []:
+            try:
+                wxpid = int(item)
+            except (TypeError, ValueError):
+                continue
+            if wxpid not in live_wxpids:
+                live_wxpids.append(wxpid)
+    except Exception:
+        live_wxpids = []
+
+    if normalized == WXPID_OPTION_ALL:
+        return live_wxpids
+    if normalized is None:
+        return live_wxpids[:1] if live_wxpids else [None]
+    if live_wxpids and normalized not in live_wxpids:
+        return live_wxpids[:1]
+    return [normalized]
 
 
 def to_string_list(value: Any) -> list[str]:

@@ -1,4 +1,4 @@
-from ._plugin_sdk import normalize_text, sleep, to_string_list, unique_strings
+from ._plugin_sdk import normalize_text, resolve_wxpid_targets, sleep, to_string_list, unique_strings
 
 
 name = "classify_labels"
@@ -64,16 +64,6 @@ config_schema = [
         ],
     },
 ]
-
-
-def normalize_wxpid(value):
-    if value in (None, ""):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
 
 def resolve_process_interval_seconds(config):
     raw_value = config.get("process_interval_seconds")
@@ -167,36 +157,23 @@ def merge_labels(existing_labels, next_label_id):
     return unique_strings([*to_string_list(existing_labels), next_label_id])
 
 
-def build_empty_report(reason, wxpid, process_interval_seconds, rule_count, *, error=""):
+def build_empty_report(reason, wxpid_selection, target_wxpids, process_interval_seconds, rule_count, *, error=""):
     return {
         "reason": reason,
-        "wxpid": wxpid,
+        "wxpidSelection": wxpid_selection,
+        "targetWxpids": target_wxpids,
         "processIntervalSeconds": process_interval_seconds,
         "ruleCount": rule_count,
         "appliedCount": 0,
         "skippedCount": 0,
+        "wxpids": [],
         "rooms": [],
         "error": error,
     }
 
 
-async def run_label_classification(context, reason):
-    entries = normalize_room_label_entries(context.config)
-    wxpid = normalize_wxpid(context.config.get("wxpid"))
-    process_interval_seconds = resolve_process_interval_seconds(context.config)
+async def run_label_classification_for_wxpid(context, reason, entries, wxpid, process_interval_seconds):
     delay_ms = process_interval_seconds * 1000
-
-    if not entries:
-        report = build_empty_report(reason, wxpid, process_interval_seconds, 0)
-        context.state.namespace("classify_labels").set("last_report", report)
-        return report
-
-    if wxpid is None:
-        report = build_empty_report(reason, None, process_interval_seconds, len(entries), error="missing-wxpid")
-        context.logger.warning("好友标签分类插件缺少微信进程配置", report)
-        context.state.namespace("classify_labels").set("last_report", report)
-        return report
-
     context.logger.info(
         "好友标签分类开始执行",
         {
@@ -288,15 +265,57 @@ async def run_label_classification(context, reason):
         reports.append(room_report)
         context.logger.info("标签分类插件规则处理完成", room_report)
 
-    report = {
-        "reason": reason,
+    return {
         "wxpid": wxpid,
-        "processIntervalSeconds": process_interval_seconds,
-        "ruleCount": len(entries),
         "appliedCount": applied_count,
         "skippedCount": skipped_count,
         "rooms": reports,
     }
+
+
+async def run_label_classification(context, reason):
+    entries = normalize_room_label_entries(context.config)
+    wxpid_selection = context.config.get("wxpid")
+    process_interval_seconds = resolve_process_interval_seconds(context.config)
+    target_wxpids = await resolve_wxpid_targets(context.api, wxpid_selection)
+
+    if not entries:
+        report = build_empty_report(reason, wxpid_selection, target_wxpids, process_interval_seconds, 0)
+        context.state.namespace("classify_labels").set("last_report", report)
+        return report
+
+    if not target_wxpids:
+        report = build_empty_report(reason, wxpid_selection, target_wxpids, process_interval_seconds, len(entries), error="missing-live-wxpids")
+        context.logger.warning("好友标签分类插件当前没有可用的微信进程", report)
+        context.state.namespace("classify_labels").set("last_report", report)
+        return report
+
+    report = {
+        "reason": reason,
+        "wxpidSelection": wxpid_selection,
+        "targetWxpids": target_wxpids,
+        "processIntervalSeconds": process_interval_seconds,
+        "ruleCount": len(entries),
+        "appliedCount": 0,
+        "skippedCount": 0,
+        "wxpids": [],
+        "rooms": [],
+    }
+
+    for wxpid in target_wxpids:
+        wxpid_report = await run_label_classification_for_wxpid(context, reason, entries, wxpid, process_interval_seconds)
+        report["wxpids"].append(
+            {
+                "wxpid": wxpid,
+                "appliedCount": wxpid_report["appliedCount"],
+                "skippedCount": wxpid_report["skippedCount"],
+                "roomCount": len(wxpid_report["rooms"]),
+            }
+        )
+        report["appliedCount"] += wxpid_report["appliedCount"]
+        report["skippedCount"] += wxpid_report["skippedCount"]
+        report["rooms"].extend(wxpid_report["rooms"])
+
     context.state.namespace("classify_labels").set("last_report", report)
     context.logger.info("好友标签分类已完成", report)
     return report
@@ -304,8 +323,8 @@ async def run_label_classification(context, reason):
 
 async def execute(context):
     report = await run_label_classification(context, "manual-execute")
-    if report.get("error") == "missing-wxpid":
-        return {"handled": False, "detail": "请先选择微信进程", "data": report}
+    if report.get("error") == "missing-live-wxpids":
+        return {"handled": False, "detail": "当前没有已登录的微信进程", "data": report}
     if not report["rooms"]:
         return {"handled": False, "detail": "没有可执行的标签配置规则", "data": report}
     detail = f"已遍历 {len(report['rooms'])} 个群聊，成功为 {report['appliedCount']} 位好友设置标签"

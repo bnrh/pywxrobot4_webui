@@ -8,7 +8,7 @@ try:
 except ImportError:
     winreg = None
 
-from ._plugin_sdk import normalize_text, to_string_list
+from ._plugin_sdk import normalize_text, resolve_wxpid_targets, to_string_list
 
 
 CSV_FIELDS = [
@@ -104,16 +104,6 @@ config_schema = [
     },
 ]
 
-
-def normalize_wxpid(value):
-    if value in (None, ""):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def resolve_export_dir(config):
     configured_dir = normalize_text(config.get("export_dir") or config.get("save_path") or "")
     return configured_dir or str(get_default_export_dir())
@@ -173,20 +163,24 @@ def render_csv(members):
     return "\ufeff" + buffer.getvalue()
 
 
-def build_export_file_path(export_path, room_name, roomid):
+def build_export_file_path(export_path, room_name, roomid, wxpid=None, include_wxpid=False):
     file_stem = sanitize_file_name(room_name or roomid)
     if normalize_text(room_name) and normalize_text(room_name) != roomid:
         file_stem = f"{file_stem}({roomid})"
+    if include_wxpid and wxpid not in (None, ""):
+        file_stem = f"{file_stem}_wxpid{wxpid}"
     return export_path / f"{file_stem}.csv"
 
 
 async def export_members(context, reason):
     export_dir = resolve_export_dir(context.config)
     rooms = normalize_room_entries(context.config)
-    wxpid = normalize_wxpid(context.config.get("wxpid"))
+    wxpid_selection = context.config.get("wxpid")
+    target_wxpids = await resolve_wxpid_targets(context.api, wxpid_selection)
     report = {
         "reason": reason,
-        "wxpid": wxpid,
+        "wxpid_selection": wxpid_selection,
+        "target_wxpids": target_wxpids,
         "export_dir": export_dir,
         "requested_count": len(rooms),
         "exported_count": 0,
@@ -196,46 +190,56 @@ async def export_members(context, reason):
     if not rooms:
         context.logger.info("群成员导出跳过，未配置需要导出的群聊", report)
         return report
+    if not target_wxpids:
+        report["error"] = "missing-live-wxpids"
+        context.logger.warning("群成员导出跳过，当前没有可用的微信进程", report)
+        context.state.namespace("export_room_members").set("last_report", report)
+        return report
 
     export_path = Path(export_dir)
     export_path.mkdir(parents=True, exist_ok=True)
     context.logger.info("开始导出群成员列表", report)
 
-    room_lookup = {}
-    try:
-        room_lookup = await build_room_lookup(context, wxpid)
-        context.logger.info("已加载群聊索引", {"reason": reason, "wxpid": wxpid, "room_count": len(room_lookup)})
-    except Exception as exc:
-        context.logger.warning("加载群聊索引失败，将按群ID直接导出", {"reason": reason, "wxpid": wxpid, "error": str(exc)})
+    include_wxpid_in_file_name = len(target_wxpids) > 1
+    room_lookup_cache = {}
 
-    for room in rooms:
-        roomid = normalize_text(room.get("roomid"))
-        if not roomid:
-            continue
-        room_info = room_lookup.get(roomid)
-        if room_lookup and not room_info:
-            context.logger.warning("导出群成员时未在群聊索引中找到目标群，将尝试按群ID直接读取", {"reason": reason, "roomid": roomid, "wxpid": wxpid})
-
+    for wxpid in target_wxpids:
+        room_lookup = {}
         try:
-            members = await context.api.get_room_members(roomid, wxpid)
+            room_lookup = await build_room_lookup(context, wxpid)
+            room_lookup_cache[wxpid] = room_lookup
+            context.logger.info("已加载群聊索引", {"reason": reason, "wxpid": wxpid, "room_count": len(room_lookup)})
         except Exception as exc:
-            failure = {"reason": reason, "roomid": roomid, "room_name": normalize_text(room_info.get("nickname") if room_info else roomid), "wxpid": wxpid, "status": "failed", "error": str(exc)}
-            report["rooms"].append(failure)
-            report["failed_count"] += 1
-            context.logger.warning("导出群成员失败", failure)
-            continue
+            context.logger.warning("加载群聊索引失败，将按群ID直接导出", {"reason": reason, "wxpid": wxpid, "error": str(exc)})
 
-        if not isinstance(members, list):
-            context.logger.warning("群成员接口返回了非列表结果，已按空列表导出", {"reason": reason, "roomid": roomid, "wxpid": wxpid, "result_type": type(members).__name__})
-            members = []
+        for room in rooms:
+            roomid = normalize_text(room.get("roomid"))
+            if not roomid:
+                continue
+            room_info = room_lookup.get(roomid)
+            if room_lookup and not room_info:
+                continue
 
-        room_name = normalize_text(room_info.get("nickname") if room_info else roomid) or roomid
-        file_path = build_export_file_path(export_path, room_name, roomid)
-        file_path.write_text(render_csv(members), encoding="utf-8")
-        room_report = {"reason": reason, "roomid": roomid, "room_name": room_name, "wxpid": wxpid, "file_path": str(file_path), "member_count": len(members)}
-        report["rooms"].append(room_report)
-        report["exported_count"] += 1
-        context.logger.info("已导出群成员列表", room_report)
+            try:
+                members = await context.api.get_room_members(roomid, wxpid)
+            except Exception as exc:
+                failure = {"reason": reason, "roomid": roomid, "room_name": normalize_text(room_info.get("nickname") if room_info else roomid), "wxpid": wxpid, "status": "failed", "error": str(exc)}
+                report["rooms"].append(failure)
+                report["failed_count"] += 1
+                context.logger.warning("导出群成员失败", failure)
+                continue
+
+            if not isinstance(members, list):
+                context.logger.warning("群成员接口返回了非列表结果，已按空列表导出", {"reason": reason, "roomid": roomid, "wxpid": wxpid, "result_type": type(members).__name__})
+                members = []
+
+            room_name = normalize_text(room_info.get("nickname") if room_info else roomid) or roomid
+            file_path = build_export_file_path(export_path, room_name, roomid, wxpid, include_wxpid_in_file_name)
+            file_path.write_text(render_csv(members), encoding="utf-8")
+            room_report = {"reason": reason, "roomid": roomid, "room_name": room_name, "wxpid": wxpid, "file_path": str(file_path), "member_count": len(members)}
+            report["rooms"].append(room_report)
+            report["exported_count"] += 1
+            context.logger.info("已导出群成员列表", room_report)
 
     context.logger.info("群成员导出流程结束", report)
     context.state.namespace("export_room_members").set("last_report", report)
@@ -253,6 +257,8 @@ async def on_hot_reload(hot_reload, context):
 
 async def execute(context):
     report = await export_members(context, "manual-execute")
+    if report.get("error") == "missing-live-wxpids":
+        return {"handled": False, "detail": "当前没有已登录的微信进程", "data": report}
     if report.get("exported_count"):
         detail = f"已导出 {report['exported_count']} 个群聊的成员列表"
         if report.get("failed_count"):

@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ._plugin_sdk import filter_room_entries, format_date_time, normalize_text, to_string_list
+from ._plugin_sdk import filter_room_entries, format_date_time, normalize_text, resolve_wxpid_targets, to_string_list
 
 
 name = "room_msg_summary"
@@ -95,6 +95,13 @@ def write_messages(file_path, messages, extension):
     target_path.write_text("\n".join(json.dumps(item, ensure_ascii=False) for item in messages) + "\n", encoding="utf-8")
 
 
+def build_message_file_name(room_name, extension, wxpid=None, include_wxpid=False):
+    file_name = f"{sanitize_file_name(room_name)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    if include_wxpid and wxpid not in (None, ""):
+        file_name = f"{file_name}_wxpid{wxpid}"
+    return f"{file_name}.{extension}"
+
+
 async def export_room_messages(context, reason):
     export_dir = normalize_text(context.config.get("export_dir") or context.config.get("save_path") or "")
     entries = normalize_room_entries(context.config)
@@ -103,32 +110,40 @@ async def export_room_messages(context, reason):
 
     export_path = Path(export_dir)
     export_path.mkdir(parents=True, exist_ok=True)
-    default_wxpid = context.config.get("wxpid")
+    default_wxpid_selection = context.config.get("wxpid")
+    default_target_wxpids = await resolve_wxpid_targets(context.api, default_wxpid_selection)
     room_lookup_cache = {}
     start_time, end_time = resolve_time_window(context.config)
     max_count = max(1, int(context.config.get("max_count", 500) or 500))
     extension = normalize_text(context.config.get("file_type") or context.config.get("output_format") or "txt").lower() or "txt"
     reports = []
+    if not default_target_wxpids and default_wxpid_selection not in (None, ""):
+        context.logger.warning("群消息汇总插件当前没有可用的微信进程", {"reason": reason, "wxpid_selection": default_wxpid_selection})
     for entry in entries:
-        wxpid = entry.get("wxpid") if entry.get("wxpid") is not None else default_wxpid
-        if wxpid not in room_lookup_cache:
-            room_lookup_cache[wxpid] = await build_room_lookup(context, wxpid)
-        lookup = room_lookup_cache[wxpid]
-        resolved_room = (entry.get("roomid") and lookup["by_id"].get(entry["roomid"])) or (entry.get("room_name") and lookup["by_name"].get(entry["room_name"]))
-        if not resolved_room:
-            context.logger.warning("群消息汇总插件未找到目标群聊", {"reason": reason, "roomid": entry.get("roomid"), "room_name": entry.get("room_name"), "wxpid": wxpid})
+        entry_wxpid_selection = entry.get("wxpid") if entry.get("wxpid") not in (None, "") else default_wxpid_selection
+        target_wxpids = default_target_wxpids if entry.get("wxpid") in (None, "") else await resolve_wxpid_targets(context.api, entry.get("wxpid"))
+        if not target_wxpids:
+            context.logger.warning("群消息汇总插件当前没有可用的微信进程", {"reason": reason, "roomid": entry.get("roomid"), "room_name": entry.get("room_name"), "wxpid_selection": entry_wxpid_selection})
             continue
-        messages = await context.api.get_chat_messages(wxid=resolved_room["roomid"], start_time=start_time, end_time=end_time, max_count=max_count, wxpid=wxpid)
-        room_dir = export_path / sanitize_file_name(resolved_room["nickname"] or resolved_room["roomid"])
-        room_dir.mkdir(parents=True, exist_ok=True)
-        file_name = f"{sanitize_file_name(resolved_room['nickname'])}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{extension}"
-        file_path = room_dir / file_name
-        write_messages(file_path, messages if isinstance(messages, list) else [], extension)
-        report = {"roomid": resolved_room["roomid"], "room_name": resolved_room["nickname"], "wxpid": wxpid, "file_path": str(file_path), "message_count": len(messages) if isinstance(messages, list) else 0, "start_time": start_time, "end_time": end_time}
-        reports.append(report)
-        context.logger.info("群消息已导出", report)
+        include_wxpid_in_file_name = len(target_wxpids) > 1
+        for wxpid in target_wxpids:
+            if wxpid not in room_lookup_cache:
+                room_lookup_cache[wxpid] = await build_room_lookup(context, wxpid)
+            lookup = room_lookup_cache[wxpid]
+            resolved_room = (entry.get("roomid") and lookup["by_id"].get(entry["roomid"])) or (entry.get("room_name") and lookup["by_name"].get(entry["room_name"]))
+            if not resolved_room:
+                context.logger.warning("群消息汇总插件未找到目标群聊", {"reason": reason, "roomid": entry.get("roomid"), "room_name": entry.get("room_name"), "wxpid": wxpid})
+                continue
+            messages = await context.api.get_chat_messages(wxid=resolved_room["roomid"], start_time=start_time, end_time=end_time, max_count=max_count, wxpid=wxpid)
+            room_dir = export_path / sanitize_file_name(resolved_room["nickname"] or resolved_room["roomid"])
+            room_dir.mkdir(parents=True, exist_ok=True)
+            file_path = room_dir / build_message_file_name(resolved_room["nickname"], extension, wxpid, include_wxpid_in_file_name)
+            write_messages(file_path, messages if isinstance(messages, list) else [], extension)
+            report = {"roomid": resolved_room["roomid"], "room_name": resolved_room["nickname"], "wxpid": wxpid, "file_path": str(file_path), "message_count": len(messages) if isinstance(messages, list) else 0, "start_time": start_time, "end_time": end_time}
+            reports.append(report)
+            context.logger.info("群消息已导出", report)
 
-    payload = {"reason": reason, "exported_count": len(reports), "rooms": reports, "start_time": start_time, "end_time": end_time}
+    payload = {"reason": reason, "wxpid_selection": default_wxpid_selection, "target_wxpids": default_target_wxpids, "exported_count": len(reports), "rooms": reports, "start_time": start_time, "end_time": end_time}
     context.state.namespace("room_msg_summary").set("last_report", payload)
     return payload
 

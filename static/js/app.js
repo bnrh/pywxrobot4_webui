@@ -748,22 +748,6 @@ function buildPluginScopeFields(plugin, modeDefaults = {}) {
     return fields;
 }
 
-function buildPluginExecuteRenderModel(plugin) {
-    const scopeTargets = getPluginScopeTargets(plugin);
-    const config = { ...(plugin?.config || {}) };
-    if (scopeTargets.includes("rooms") && config._scope_room_mode === undefined) {
-        config._scope_room_mode = "selected";
-    }
-    if (scopeTargets.includes("friend_labels") && config._scope_friend_mode === undefined) {
-        config._scope_friend_mode = "selected";
-    }
-    return {
-        ...plugin,
-        config,
-        config_schema: buildPluginScopeFields({ ...plugin, config }, config),
-    };
-}
-
 async function loadPluginTargets(force = false) {
     if (!force && state.pluginTargets) {
         return state.pluginTargets;
@@ -772,13 +756,29 @@ async function loadPluginTargets(force = false) {
     return state.pluginTargets;
 }
 
-function getWxpidFieldOptions(currentValue) {
-    const users = Array.isArray(state.users?.users) ? state.users.users : [];
-    const seen = new Set();
-    const options = [];
+const WXPID_OPTION_DEFAULT = "__default_first__";
+const WXPID_OPTION_ALL = "__all__";
 
-    for (const user of users) {
-        const numericValue = Number(user?.wxpid ?? user?.pid);
+function buildWxpidFieldSchema(field, currentValue, description = "") {
+    return {
+        ...field,
+        type: "select",
+        default: Object.prototype.hasOwnProperty.call(field, "default") ? field.default : WXPID_OPTION_DEFAULT,
+        options: getWxpidFieldOptions(currentValue),
+        description: description || field.description || "默认使用首个登录微信进程；也可选择遍历所有当前登录进程。",
+    };
+}
+
+function getWxpidFieldOptions(currentValue) {
+    const seen = new Set();
+    const options = [
+        { label: "默认第一个微信进程", value: WXPID_OPTION_DEFAULT },
+        { label: "所有微信进程", value: WXPID_OPTION_ALL },
+    ];
+    const targetOptions = Array.isArray(state.pluginTargets?.wxpid_options) ? state.pluginTargets.wxpid_options : [];
+
+    for (const option of targetOptions) {
+        const numericValue = Number(option?.value);
         if (!Number.isFinite(numericValue)) {
             continue;
         }
@@ -787,16 +787,42 @@ function getWxpidFieldOptions(currentValue) {
             continue;
         }
         seen.add(key);
-        const nickname = normalizeInlineText(user?.nickname || user?.display_name || "") || "未命名账号";
-        const wxid = normalizeInlineText(user?.wxid || "");
         options.push({
-            label: wxid ? `${nickname}(${wxid})` : `${nickname}(${numericValue})`,
+            label: normalizeInlineText(option?.label || `微信进程(${numericValue})`) || `微信进程(${numericValue})`,
+            search_text: normalizeInlineText(option?.search_text || ""),
             value: numericValue,
         });
     }
 
+    if (!targetOptions.length) {
+        const users = Array.isArray(state.users?.users) ? state.users.users : [];
+        for (const user of users) {
+            const numericValue = Number(user?.wxpid ?? user?.pid);
+            if (!Number.isFinite(numericValue)) {
+                continue;
+            }
+            const key = String(numericValue);
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            const nickname = normalizeInlineText(user?.nickname || user?.display_name || "") || "未命名账号";
+            const wxid = normalizeInlineText(user?.wxid || "");
+            options.push({
+                label: wxid ? `${nickname}(${wxid})` : `${nickname}(${numericValue})`,
+                value: numericValue,
+            });
+        }
+    }
+
     const normalizedCurrentValue = String(currentValue ?? "").trim();
-    if (!options.length && normalizedCurrentValue && !seen.has(normalizedCurrentValue)) {
+    if (
+        options.length <= 2
+        && normalizedCurrentValue
+        && normalizedCurrentValue !== WXPID_OPTION_DEFAULT
+        && normalizedCurrentValue !== WXPID_OPTION_ALL
+        && !seen.has(normalizedCurrentValue)
+    ) {
         const fallbackValue = Number(normalizedCurrentValue);
         options.push({
             label: `当前配置(${normalizedCurrentValue})`,
@@ -818,21 +844,58 @@ function buildPluginConfigRenderModel(plugin) {
             if (!field || typeof field !== "object") {
                 return field;
             }
-            const nextField = hydrateDynamicFieldOptions(field, plugin.config?.[field.key]);
-            if (nextField.key !== "wxpid") {
-                return nextField;
+            const currentValue = plugin.config?.[field.key];
+            let nextField = hydrateDynamicFieldOptions(field, currentValue);
+            if (nextField.key === "wxpid") {
+                nextField = buildWxpidFieldSchema(nextField, currentValue);
             }
-            return {
-                ...nextField,
-                type: "select",
-                options: getWxpidFieldOptions(plugin.config?.[field.key]),
-                description: nextField.description || "默认使用首个登录微信进程。",
-            };
+            if (Array.isArray(nextField.columns)) {
+                nextField = {
+                    ...nextField,
+                    columns: nextField.columns.map((column) => {
+                        if (!column || typeof column !== "object" || column.key !== "wxpid") {
+                            return column;
+                        }
+                        return buildWxpidFieldSchema(column, undefined, column.description || "默认使用首个登录微信进程；也可选择遍历所有当前登录进程。");
+                    }),
+                };
+            }
+            return nextField;
         }).concat(
             plugin.message_dependent
                 ? buildPluginScopeFields(plugin).filter((field) => !plugin.config_schema.some((item) => item?.key === field.key))
                 : []
         ),
+    };
+}
+
+function buildPluginExecuteRenderModel(plugin) {
+    const scopeTargets = getPluginScopeTargets(plugin);
+    const config = { ...(plugin?.config || {}) };
+    if (config.wxpid === undefined || config.wxpid === null || config.wxpid === "") {
+        config.wxpid = WXPID_OPTION_DEFAULT;
+    }
+    if (scopeTargets.includes("rooms") && config._scope_room_mode === undefined) {
+        config._scope_room_mode = "selected";
+    }
+    if (scopeTargets.includes("friend_labels") && config._scope_friend_mode === undefined) {
+        config._scope_friend_mode = "selected";
+    }
+    const renderPlugin = buildPluginConfigRenderModel({ ...plugin, config });
+    return {
+        ...renderPlugin,
+        config,
+        config_schema: [
+            ...(Array.isArray(renderPlugin.config_schema)
+                ? renderPlugin.config_schema
+                    .filter((field) => field?.key === "wxpid")
+                    .map((field) => ({
+                        ...field,
+                        description: field.description || "本次执行默认使用首个登录微信进程；这里的选择不会覆盖已保存配置。",
+                    }))
+                : []),
+            ...buildPluginScopeFields({ ...plugin, config }, config),
+        ],
     };
 }
 
@@ -918,7 +981,7 @@ async function openPluginExecuteModal(moduleName) {
     }
     state.pluginExecuteModule = moduleName;
     elements.pluginExecuteModalTitle.textContent = `${plugin.name} 执行范围`;
-    elements.pluginExecuteMeta.textContent = "执行前选择这次运行要作用的群聊、好友标签或公众号。本次选择不会覆盖已保存配置。";
+    elements.pluginExecuteMeta.textContent = "执行前选择这次运行要作用的微信进程、群聊、好友标签或公众号。本次选择不会覆盖已保存配置。";
     renderPluginConfigFields(elements.pluginExecuteForm, renderPlugin);
     initializeSearchableChoiceFilters(elements.pluginExecuteForm);
     syncScopeFieldVisibility(elements.pluginExecuteForm);

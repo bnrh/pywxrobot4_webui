@@ -9,7 +9,7 @@ try:
 except ImportError:
     winreg = None
 
-from ._plugin_sdk import format_date_time, normalize_text, to_string_list
+from ._plugin_sdk import format_date_time, normalize_text, resolve_wxpid_targets, to_string_list
 
 
 name = "room_members_deduplication"
@@ -182,16 +182,6 @@ def normalize_group_entries(config):
         groups.append({"group_name": group_name, "roomids": roomids})
     return {"groups": groups, "ignored_groups": ignored_groups}
 
-
-def normalize_wxpid(value):
-    if value in (None, ""):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def resolve_export_dir(config):
     configured_dir = normalize_text(config.get("export_dir") or config.get("report_dir") or config.get("save_path") or "")
     return configured_dir or str(DEFAULT_EXPORT_DIR)
@@ -214,12 +204,14 @@ def sanitize_file_name(value):
     return text.translate(str.maketrans({'\\': '_', '/': '_', ':': '_', '*': '_', '?': '_', '"': '_', '<': '_', '>': '_', '|': '_'}))
 
 
-def build_export_file_path(export_path, group_name, room_names):
+def build_export_file_path(export_path, group_name, room_names, wxpid=None, include_wxpid=False):
     joined_room_names = "｜".join([normalize_text(item) for item in room_names if normalize_text(item)])
     file_stem = sanitize_file_name(joined_room_names or group_name or "重复群成员") or "重复群成员"
     if len(file_stem) > 120:
         fallback_name = sanitize_file_name(f"{normalize_text(group_name) or '重复群成员'}_共{len(room_names)}群")
         file_stem = (fallback_name or "重复群成员")[:120].rstrip("._ ") or "重复群成员"
+    if include_wxpid and wxpid not in (None, ""):
+        file_stem = f"{file_stem}_wxpid{wxpid}"
     return export_path / f"{file_stem}.csv"
 
 
@@ -318,10 +310,12 @@ async def run_deduplication(context, reason):
     groups = normalized_groups["groups"]
     ignored_groups = normalized_groups["ignored_groups"]
     export_dir = resolve_export_dir(context.config)
-    wxpid = normalize_wxpid(context.config.get("wxpid"))
+    wxpid_selection = context.config.get("wxpid")
+    target_wxpids = await resolve_wxpid_targets(context.api, wxpid_selection)
     payload = {
         "reason": reason,
-        "wxpid": wxpid,
+        "wxpid_selection": wxpid_selection,
+        "target_wxpids": target_wxpids,
         "export_dir": export_dir,
         "configured_group_count": len(groups) + len(ignored_groups),
         "valid_group_count": len(groups),
@@ -335,78 +329,85 @@ async def run_deduplication(context, reason):
     }
 
     if ignored_groups:
-        context.logger.warning("部分群聊组因群聊数量不足 2 个而被跳过", {"reason": reason, "ignored_groups": ignored_groups, "wxpid": wxpid})
+        context.logger.warning("部分群聊组因群聊数量不足 2 个而被跳过", {"reason": reason, "ignored_groups": ignored_groups, "wxpid_selection": wxpid_selection})
     if not groups:
         context.logger.info("重复群成员导出跳过，没有可执行的群聊组", payload)
+        context.state.namespace("room_members_deduplication").set("last_report", payload)
+        return payload
+    if not target_wxpids:
+        payload["error"] = "missing-live-wxpids"
+        context.logger.warning("重复群成员导出跳过，当前没有可用的微信进程", payload)
         context.state.namespace("room_members_deduplication").set("last_report", payload)
         return payload
 
     export_path = Path(export_dir)
     export_path.mkdir(parents=True, exist_ok=True)
-    context.logger.info("开始导出重复群成员 CSV", {"reason": reason, "wxpid": wxpid, "export_dir": export_dir, "group_count": len(groups)})
+    context.logger.info("开始导出重复群成员 CSV", {"reason": reason, "wxpid_selection": wxpid_selection, "target_wxpids": target_wxpids, "export_dir": export_dir, "group_count": len(groups)})
 
-    room_lookup = {}
-    try:
-        room_lookup = await build_room_lookup(context, wxpid)
-        context.logger.info("已加载群聊索引", {"reason": reason, "wxpid": wxpid, "room_count": len(room_lookup)})
-    except Exception as exc:
-        context.logger.warning("加载群聊索引失败，将按群ID继续导出重复成员", {"reason": reason, "wxpid": wxpid, "error": str(exc)})
+    include_wxpid_in_file_name = len(target_wxpids) > 1
+    for wxpid in target_wxpids:
+        room_lookup = {}
+        try:
+            room_lookup = await build_room_lookup(context, wxpid)
+            context.logger.info("已加载群聊索引", {"reason": reason, "wxpid": wxpid, "room_count": len(room_lookup)})
+        except Exception as exc:
+            context.logger.warning("加载群聊索引失败，将按群ID继续导出重复成员", {"reason": reason, "wxpid": wxpid, "error": str(exc)})
 
-    for group in groups:
-        room_names = [normalize_text(room_lookup.get(roomid, {}).get("nickname") or roomid) or roomid for roomid in group["roomids"]]
-        context.logger.info("开始检查群聊组重复成员", {"reason": reason, "group_name": group["group_name"], "roomids": group["roomids"], "room_names": room_names, "wxpid": wxpid})
+        for group in groups:
+            room_names = [normalize_text(room_lookup.get(roomid, {}).get("nickname") or roomid) or roomid for roomid in group["roomids"]]
+            context.logger.info("开始检查群聊组重复成员", {"reason": reason, "group_name": group["group_name"], "roomids": group["roomids"], "room_names": room_names, "wxpid": wxpid})
 
-        members_by_room = {}
-        room_member_counts = {}
-        group_failed = False
-        group_error = ""
-        for roomid in group["roomids"]:
-            try:
-                members = await context.api.get_room_members(roomid, wxpid)
-            except Exception as exc:
-                group_failed = True
-                group_error = str(exc)
-                break
+            members_by_room = {}
+            room_member_counts = {}
+            group_failed = False
+            group_error = ""
+            for roomid in group["roomids"]:
+                try:
+                    members = await context.api.get_room_members(roomid, wxpid)
+                except Exception as exc:
+                    group_failed = True
+                    group_error = str(exc)
+                    break
 
-            if not isinstance(members, list):
-                context.logger.warning("群成员接口返回了非列表结果，已按空列表处理", {"reason": reason, "group_name": group["group_name"], "roomid": roomid, "wxpid": wxpid, "result_type": type(members).__name__})
-                members = []
-            members_by_room[roomid] = members
-            room_member_counts[roomid] = len(members)
-            context.logger.info("已加载群成员", {"reason": reason, "group_name": group["group_name"], "roomid": roomid, "room_name": normalize_text(room_lookup.get(roomid, {}).get("nickname") or roomid) or roomid, "wxpid": wxpid, "member_count": len(members)})
+                if not isinstance(members, list):
+                    context.logger.warning("群成员接口返回了非列表结果，已按空列表处理", {"reason": reason, "group_name": group["group_name"], "roomid": roomid, "wxpid": wxpid, "result_type": type(members).__name__})
+                    members = []
+                members_by_room[roomid] = members
+                room_member_counts[roomid] = len(members)
+                context.logger.info("已加载群成员", {"reason": reason, "group_name": group["group_name"], "roomid": roomid, "room_name": normalize_text(room_lookup.get(roomid, {}).get("nickname") or roomid) or roomid, "wxpid": wxpid, "member_count": len(members)})
 
-        if group_failed:
-            failure = {
+            if group_failed:
+                failure = {
+                    "group_name": group["group_name"],
+                    "roomids": group["roomids"],
+                    "room_names": room_names,
+                    "wxpid": wxpid,
+                    "status": "failed",
+                    "error": group_error,
+                }
+                payload["groups"].append(failure)
+                payload["failed_group_count"] += 1
+                context.logger.warning("导出重复群成员失败", {"reason": reason, **failure})
+                continue
+
+            duplicates = build_duplicate_rows(group["group_name"], members_by_room, room_lookup)
+            file_path = build_export_file_path(export_path, group["group_name"], room_names, wxpid, include_wxpid_in_file_name)
+            file_path.write_text(render_csv(duplicates), encoding="utf-8")
+
+            group_report = {
                 "group_name": group["group_name"],
                 "roomids": group["roomids"],
                 "room_names": room_names,
                 "wxpid": wxpid,
-                "status": "failed",
-                "error": group_error,
+                "status": "exported",
+                "duplicate_count": len(duplicates),
+                "room_member_counts": room_member_counts,
+                "file_path": str(file_path),
             }
-            payload["groups"].append(failure)
-            payload["failed_group_count"] += 1
-            context.logger.warning("导出重复群成员失败", {"reason": reason, **failure})
-            continue
-
-        duplicates = build_duplicate_rows(group["group_name"], members_by_room, room_lookup)
-        file_path = build_export_file_path(export_path, group["group_name"], room_names)
-        file_path.write_text(render_csv(duplicates), encoding="utf-8")
-
-        group_report = {
-            "group_name": group["group_name"],
-            "roomids": group["roomids"],
-            "room_names": room_names,
-            "wxpid": wxpid,
-            "status": "exported",
-            "duplicate_count": len(duplicates),
-            "room_member_counts": room_member_counts,
-            "file_path": str(file_path),
-        }
-        payload["groups"].append(group_report)
-        payload["exported_file_count"] += 1
-        payload["duplicate_member_count"] += len(duplicates)
-        context.logger.info("已导出重复群成员 CSV", {"reason": reason, **group_report})
+            payload["groups"].append(group_report)
+            payload["exported_file_count"] += 1
+            payload["duplicate_member_count"] += len(duplicates)
+            context.logger.info("已导出重复群成员 CSV", {"reason": reason, **group_report})
 
     payload["generated_at"] = format_date_time(datetime.now())
     context.logger.info("重复群成员导出流程结束", payload)
@@ -416,6 +417,8 @@ async def run_deduplication(context, reason):
 
 async def execute(context):
     report = await run_deduplication(context, "manual-execute")
+    if report.get("error") == "missing-live-wxpids":
+        return {"handled": False, "detail": "当前没有已登录的微信进程", "data": report}
     if report.get("exported_file_count"):
         detail = f"已导出 {report['exported_file_count']} 组群聊的重复成员 CSV，共 {report['duplicate_member_count']} 名重复成员"
         if report.get("failed_group_count"):
