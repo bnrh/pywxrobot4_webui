@@ -808,9 +808,16 @@ function buildRoomMsgSummaryTimeWindow(rangeKey) {
 
 function normalizeRoomMsgSummaryRenderConfig(config = {}) {
     const nextConfig = { ...config };
+    const currentPlugin = getPluginByModule(state.pluginConfigModule) || getPluginByModule(state.pluginExecuteModule);
+    const exportDirField = Array.isArray(currentPlugin?.config_schema)
+        ? currentPlugin.config_schema.find((field) => field?.key === "export_dir")
+        : null;
     const normalizedFileType = normalizeInlineText(nextConfig.file_type || nextConfig.output_format).toLowerCase();
     if (!normalizedFileType || normalizedFileType === "txt") {
         nextConfig.file_type = "jsonl";
+    }
+    if (!normalizeInlineText(nextConfig.export_dir) && !normalizeInlineText(nextConfig.save_path) && normalizeInlineText(exportDirField?.default)) {
+        nextConfig.export_dir = String(exportDirField.default);
     }
     const currentTimeRange = normalizeInlineText(nextConfig.time_range).toLowerCase() || "2h";
     const { startTime, endTime } = buildRoomMsgSummaryTimeWindow(currentTimeRange);
