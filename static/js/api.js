@@ -48,6 +48,14 @@ export const api = {
     getUsers() {
         return requestJson("/api/users");
     },
+    getRoomMembers(roomid, wxpid = "") {
+        const params = new URLSearchParams();
+        if (wxpid !== "" && wxpid !== null && wxpid !== undefined) {
+            params.set("wxpid", String(wxpid));
+        }
+        const query = params.toString();
+        return requestJson(`/api/rooms/${encodeURIComponent(roomid)}/members${query ? `?${query}` : ""}`);
+    },
     getAiAssistant() {
         return requestJson("/api/ai-assistant");
     },

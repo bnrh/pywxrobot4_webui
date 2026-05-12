@@ -1658,7 +1658,8 @@ optgroup {
 }
 
 .config-object-table-row.is-editing .config-object-table-editor-cell {
-    grid-column: span 3;
+    --config-editor-span: 3;
+    grid-column: span var(--config-editor-span);
     min-width: 0;
     padding: 14px;
     border-radius: 14px;
@@ -1668,12 +1669,24 @@ optgroup {
 }
 
 .config-object-table-row.is-editing .config-object-table-editor-cell.is-wide {
-    grid-column: span 4;
+    --config-editor-span: 4;
 }
 
 .config-object-table-row.is-editing .config-object-table-editor-cell textarea {
     min-height: 104px;
     resize: vertical;
+}
+
+.config-object-table-row.is-editing .config-object-table-editor-cell .config-column-choice {
+    min-width: 0;
+}
+
+.config-object-table-row.is-editing .config-object-table-editor-cell .config-choice-grid {
+    grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+}
+
+.config-object-table-row.is-editing .config-object-table-editor-cell .config-choice-item {
+    align-items: flex-start;
 }
 
 .config-object-table-row.is-editing .config-searchable-select,
@@ -1857,6 +1870,108 @@ optgroup {
     display: block;
 }
 
+.config-string-list-picker {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.config-string-list-picker-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.config-string-list-picker-toolbar .detail-meta {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.config-room-member-picker {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid rgba(86, 245, 208, 0.2);
+    background: linear-gradient(180deg, rgba(8, 22, 38, 0.92), rgba(5, 14, 25, 0.88));
+}
+
+.config-room-member-picker[hidden] {
+    display: none;
+}
+
+.config-room-member-picker-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+}
+
+.config-room-member-picker-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.config-room-member-picker-summary {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.config-room-member-picker-list {
+    max-height: 320px;
+}
+
+.config-room-member-choice {
+    align-items: start;
+}
+
+.config-room-member-choice-body {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.config-room-member-choice-title {
+    display: block;
+    min-width: 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.config-room-member-choice-meta {
+    display: block;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.config-room-member-status {
+    min-height: 18px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.config-room-member-status.is-error {
+    color: #ff9fad;
+}
+
+.config-room-member-status.is-good {
+    color: #8ff0da;
+}
+
 .config-searchable-select {
     position: relative;
     z-index: 1;
@@ -2005,6 +2120,15 @@ optgroup {
 
     .config-choice-toolbar-actions {
         grid-template-columns: 1fr;
+    }
+
+    .config-string-list-picker-toolbar,
+    .config-room-member-picker-toolbar {
+        grid-template-columns: 1fr;
+    }
+
+    .config-room-member-picker-actions {
+        justify-content: flex-start;
     }
 
     .config-object-table-header {

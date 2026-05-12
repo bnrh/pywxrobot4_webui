@@ -73,6 +73,7 @@ config_schema = [
                 "required": True,
                 "required_message": "群聊不能为空",
                 "width": "wide",
+                "editor_span": 4,
             },
             {
                 "key": "mode",
@@ -86,6 +87,7 @@ config_schema = [
                     {"label": "禁止以下类型", "value": RULE_MODE_BLOCK},
                 ],
                 "width": "compact",
+                "editor_span": 3,
             },
             {
                 "key": "message_types",
@@ -96,6 +98,7 @@ config_schema = [
                 "required_message": "请至少选择一种消息类型",
                 "options": MESSAGE_KIND_OPTIONS,
                 "width": "wide",
+                "editor_span": 12,
             },
             {
                 "key": "whitelist_members",
@@ -104,6 +107,13 @@ config_schema = [
                 "rows": 3,
                 "placeholder": "每行一个成员 wxid、群昵称或展示名",
                 "width": "wide",
+                "editor_span": 5,
+                "picker": "room-members",
+                "picker_room_field": "roomid",
+                "picker_button_label": "选择群成员",
+                "picker_value_key": "wxid",
+                "picker_search_placeholder": "搜索群昵称、昵称或 wxid",
+                "picker_help": "可手动填写，也可从当前群成员中搜索后填入白名单。选择器会默认填入成员 wxid，更稳定。",
             },
         ],
     },

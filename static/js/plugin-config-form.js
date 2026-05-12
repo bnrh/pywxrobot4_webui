@@ -1,3 +1,8 @@
+import { api } from "/static/js/api.js?v=20260512-09";
+
+const roomMemberPickerCache = new Map();
+const roomMemberPickerPendingRequests = new Map();
+
 function escapeHtml(value) {
     return String(value ?? "")
         .replace(/&/g, "&amp;")
@@ -116,6 +121,17 @@ function findFieldOptionByValue(field, value) {
         const descriptor = getFieldOptionDescriptor(option);
         if (JSON.stringify(descriptor.value) === normalizedValue) {
             return descriptor;
+        }
+    }
+    return null;
+}
+
+function findFieldOptionItemByValue(field, value) {
+    const normalizedValue = JSON.stringify(value);
+    for (const option of getFieldOptionItems(field)) {
+        const descriptor = getFieldOptionDescriptor(option);
+        if (JSON.stringify(descriptor.value) === normalizedValue) {
+            return option;
         }
     }
     return null;
@@ -271,6 +287,88 @@ function renderStringListField(field, value) {
     `;
 }
 
+function toNormalizedStringList(value) {
+    const items = Array.isArray(value) ? value : String(value ?? "").split(/\r?\n/);
+    return items
+        .map((item) => String(item ?? "").trim())
+        .filter(Boolean);
+}
+
+function mergeUniqueStringList(values) {
+    const merged = [];
+    const seen = new Set();
+    for (const value of values) {
+        const text = String(value ?? "").trim();
+        const key = normalizeSearchText(text);
+        if (!text || seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        merged.push(text);
+    }
+    return merged;
+}
+
+function getRoomMemberPickerCacheKey(roomid, wxpid) {
+    return `${String(wxpid ?? "").trim()}::${String(roomid ?? "").trim()}`;
+}
+
+async function loadRoomMemberPickerMembers(roomid, wxpid) {
+    const cacheKey = getRoomMemberPickerCacheKey(roomid, wxpid);
+    if (roomMemberPickerCache.has(cacheKey)) {
+        return roomMemberPickerCache.get(cacheKey);
+    }
+    if (roomMemberPickerPendingRequests.has(cacheKey)) {
+        return roomMemberPickerPendingRequests.get(cacheKey);
+    }
+
+    const requestPromise = api.getRoomMembers(roomid, wxpid).then((payload) => {
+        const members = Array.isArray(payload?.members) ? payload.members : [];
+        roomMemberPickerCache.set(cacheKey, members);
+        roomMemberPickerPendingRequests.delete(cacheKey);
+        return members;
+    }).catch((error) => {
+        roomMemberPickerPendingRequests.delete(cacheKey);
+        throw error;
+    });
+
+    roomMemberPickerPendingRequests.set(cacheKey, requestPromise);
+    return requestPromise;
+}
+
+function isRoomMemberPickerColumn(column) {
+    return column?.type === "string-list" && column?.picker === "room-members";
+}
+
+function renderRoomMemberPickerColumn(column, value, datasetKey = "data-column-key", fieldKey = "") {
+    const lines = Array.isArray(value) ? value : [];
+    const buttonLabel = String(column.picker_button_label || "选择群成员").trim() || "选择群成员";
+    const helpText = String(column.picker_help || "可手动填写，也可从当前群成员中搜索后填入白名单。选择器会默认填入成员 wxid，更稳定。").trim();
+    const searchPlaceholder = String(column.picker_search_placeholder || "搜索群昵称、昵称或 wxid").trim() || "搜索群昵称、昵称或 wxid";
+    return `
+        <div class="config-string-list-picker" data-config-string-list-picker>
+            <div class="config-string-list-picker-toolbar">
+                <span class="detail-meta">${escapeHtml(helpText)}</span>
+                <button class="button secondary compact" type="button" data-config-form-action="toggle-room-member-picker" data-field="${escapeHtml(fieldKey)}" data-column-key="${escapeHtml(column.key)}">${escapeHtml(buttonLabel)}</button>
+            </div>
+            <textarea ${datasetKey}="${escapeHtml(column.key)}" rows="${escapeHtml(String(column.rows || 3))}" placeholder="${escapeHtml(column.placeholder || "每行填写一项")}">${escapeHtml(lines.join("\n"))}</textarea>
+            <div class="config-room-member-picker" data-config-room-member-picker hidden>
+                <div class="config-room-member-picker-toolbar">
+                    <input class="config-search-input" type="search" data-config-room-member-search placeholder="${escapeHtml(searchPlaceholder)}">
+                    <div class="config-room-member-picker-actions">
+                        <button class="button primary compact" type="button" data-config-form-action="apply-room-member-picker" data-field="${escapeHtml(fieldKey)}" data-column-key="${escapeHtml(column.key)}">填入白名单</button>
+                        <button class="button ghost compact" type="button" data-config-form-action="close-room-member-picker" data-field="${escapeHtml(fieldKey)}" data-column-key="${escapeHtml(column.key)}">收起</button>
+                    </div>
+                </div>
+                <div class="config-room-member-picker-summary" data-config-room-member-summary>选择后会按成员 wxid 填入白名单，更稳定。</div>
+                <div class="config-choice-list config-room-member-picker-list" data-config-room-member-list></div>
+                <div class="config-choice-empty" data-config-room-member-empty hidden>没有匹配到群成员。</div>
+            </div>
+            <div class="config-room-member-status" data-config-room-member-status hidden></div>
+        </div>
+    `;
+}
+
 function renderMultiCheckboxField(field, value, datasetKey = "data-config-key") {
     const selectedValues = new Set(Array.isArray(value) ? value.map((item) => JSON.stringify(item)) : []);
     const options = Array.isArray(field.options) ? field.options : [];
@@ -371,8 +469,11 @@ function renderKeyMultiValueRow(field, keyValue = "", values = []) {
     `;
 }
 
-function renderRowColumnControl(column, value) {
+function renderRowColumnControl(column, value, fieldKey = "") {
     if (column.type === "string-list") {
+        if (isRoomMemberPickerColumn(column)) {
+            return renderRoomMemberPickerColumn(column, value, "data-column-key", fieldKey);
+        }
         const lines = Array.isArray(value) ? value : [];
         return `<textarea data-column-key="${escapeHtml(column.key)}" rows="${escapeHtml(String(column.rows || 3))}" placeholder="${escapeHtml(column.placeholder || "每行一项")}">${escapeHtml(lines.join("\n"))}</textarea>`;
     }
@@ -476,6 +577,20 @@ function renderObjectTableRow(field, rowValue = {}) {
     `;
 }
 
+function getObjectTableEditorCellClass(column) {
+    const classNames = ["config-object-table-cell", "config-object-table-editor-cell"];
+    if (column?.width === "wide") {
+        classNames.push("is-wide");
+    }
+    return classNames.join(" ");
+}
+
+function getObjectTableEditorCellStyle(column) {
+    const rawSpan = Number(column?.editor_span);
+    const editorSpan = Number.isFinite(rawSpan) ? Math.max(1, Math.min(12, Math.round(rawSpan))) : null;
+    return editorSpan ? ` style="--config-editor-span:${escapeHtml(String(editorSpan))}"` : "";
+}
+
 function renderObjectTableEditor(field, rowValue = {}, originalRowValue = undefined) {
     const row = rowValue && typeof rowValue === "object" ? rowValue : {};
     const originalValueAttr = originalRowValue === undefined
@@ -484,9 +599,9 @@ function renderObjectTableEditor(field, rowValue = {}, originalRowValue = undefi
     return `
         <div class="config-object-table-row is-editing" data-config-row-editor${originalValueAttr} ${getObjectTableGridStyle(field)}>
             ${(Array.isArray(field.columns) ? field.columns : []).map((column) => `
-                <div class="config-object-table-cell config-object-table-editor-cell ${column.width === "wide" ? "is-wide" : ""}">
+                <div class="${escapeHtml(getObjectTableEditorCellClass(column))}"${getObjectTableEditorCellStyle(column)}>
                     <div class="config-row-label">${escapeHtml(column.label)}</div>
-                    ${renderRowColumnControl(column, row[column.key])}
+                    ${renderRowColumnControl(column, row[column.key], field.key)}
                 </div>
             `).join("")}
             <div class="config-object-table-actions">
@@ -523,7 +638,7 @@ function renderObjectRow(field, rowValue = {}) {
             ${field.columns.map((column) => `
                 <div class="config-row-cell ${column.width === "wide" ? "is-wide" : ""}">
                     <div class="config-row-label">${escapeHtml(column.label)}</div>
-                    ${renderRowColumnControl(column, row[column.key])}
+                    ${renderRowColumnControl(column, row[column.key], field.key)}
                 </div>
             `).join("")}
             <div class="config-row-actions">
@@ -739,6 +854,276 @@ function showObjectTableEditorError(editorRow, message) {
         errorElement.textContent = message;
         errorElement.hidden = !message;
     }
+}
+
+function getObjectTableColumn(field, columnKey) {
+    return (Array.isArray(field?.columns) ? field.columns : []).find((column) => column?.key === columnKey) || null;
+}
+
+function getRoomMemberPickerContext(button, field) {
+    const pickerColumn = getObjectTableColumn(field, button.dataset.columnKey || "");
+    const pickerContainer = button.closest("[data-config-string-list-picker]");
+    const editorRow = button.closest("[data-config-row-editor]");
+    const textarea = pickerContainer?.querySelector(`textarea[data-column-key="${pickerColumn?.key || ""}"]`) || null;
+    const panel = pickerContainer?.querySelector("[data-config-room-member-picker]") || null;
+    const list = pickerContainer?.querySelector("[data-config-room-member-list]") || null;
+    const empty = pickerContainer?.querySelector("[data-config-room-member-empty]") || null;
+    const summary = pickerContainer?.querySelector("[data-config-room-member-summary]") || null;
+    const status = pickerContainer?.querySelector("[data-config-room-member-status]") || null;
+    const searchInput = pickerContainer?.querySelector("[data-config-room-member-search]") || null;
+    const roomColumn = getObjectTableColumn(field, pickerColumn?.picker_room_field || "roomid");
+    const roomInput = roomColumn && editorRow ? editorRow.querySelector(`[data-column-key="${roomColumn.key}"]`) : null;
+    const roomid = roomInput && roomColumn ? String(readRowColumnValue(roomInput, roomColumn) || "").trim() : "";
+    const roomOption = roomColumn && roomid ? findFieldOptionItemByValue(roomColumn, roomid) : null;
+    const roomOptionDescriptor = roomOption ? getFieldOptionDescriptor(roomOption) : null;
+    const wxpid = roomOption && Object.prototype.hasOwnProperty.call(roomOption, "wxpid") ? roomOption.wxpid : "";
+    return {
+        pickerColumn,
+        pickerContainer,
+        editorRow,
+        textarea,
+        panel,
+        list,
+        empty,
+        summary,
+        status,
+        searchInput,
+        roomColumn,
+        roomid,
+        roomOption,
+        roomLabel: roomOptionDescriptor?.label || roomid,
+        wxpid,
+    };
+}
+
+function setRoomMemberPickerStatus(statusElement, message = "", tone = "") {
+    if (!statusElement) {
+        return;
+    }
+    statusElement.textContent = String(message || "").trim();
+    statusElement.hidden = !statusElement.textContent;
+    statusElement.classList.toggle("is-error", tone === "error");
+    statusElement.classList.toggle("is-good", tone === "good");
+}
+
+function doesRoomMemberMatchWhitelist(member, whitelistValues) {
+    const normalizedWhitelist = new Set(toNormalizedStringList(whitelistValues).map((item) => normalizeSearchText(item)).filter(Boolean));
+    if (!normalizedWhitelist.size) {
+        return false;
+    }
+    const candidates = [member?.wxid, member?.display_name, member?.room_nick_name, member?.nick_name]
+        .map((item) => normalizeSearchText(item))
+        .filter(Boolean);
+    return candidates.some((candidate) => normalizedWhitelist.has(candidate));
+}
+
+function renderRoomMemberPickerOptions(members, whitelistValues) {
+    return members.map((member) => {
+        const displayName = String(member?.display_name || member?.label || member?.wxid || "未命名成员").trim() || "未命名成员";
+        const wxid = String(member?.wxid || member?.value || "").trim();
+        const nickName = String(member?.nick_name || "").trim();
+        const roomNickName = String(member?.room_nick_name || "").trim();
+        const metaParts = [
+            roomNickName && roomNickName !== displayName ? `群昵称：${roomNickName}` : "",
+            nickName && nickName !== displayName && nickName !== roomNickName ? `昵称：${nickName}` : "",
+            wxid ? `wxid：${wxid}` : "",
+        ].filter(Boolean);
+        return `
+            <label class="config-choice-item config-choice-item-list config-room-member-choice" data-config-room-member-item data-search-text="${escapeHtml(normalizeSearchText(member?.search_text || [displayName, roomNickName, nickName, wxid].join(" ")))}">
+                <input
+                    type="checkbox"
+                    data-config-room-member-option
+                    value="${escapeHtml(wxid)}"
+                    data-display-name="${escapeHtml(displayName)}"
+                    data-room-nick-name="${escapeHtml(roomNickName)}"
+                    data-nick-name="${escapeHtml(nickName)}"
+                    ${doesRoomMemberMatchWhitelist(member, whitelistValues) ? "checked" : ""}
+                >
+                <span class="config-room-member-choice-body">
+                    <strong class="config-room-member-choice-title">${escapeHtml(displayName)}</strong>
+                    ${metaParts.length ? `<small class="config-room-member-choice-meta">${escapeHtml(metaParts.join(" · "))}</small>` : ""}
+                </span>
+            </label>
+        `;
+    }).join("");
+}
+
+function applyRoomMemberPickerFilter(searchInput) {
+    const pickerContainer = searchInput?.closest("[data-config-string-list-picker]");
+    const list = pickerContainer?.querySelector("[data-config-room-member-list]");
+    const empty = pickerContainer?.querySelector("[data-config-room-member-empty]");
+    if (!list || !empty) {
+        return;
+    }
+    const query = normalizeSearchText(searchInput.value);
+    let visibleCount = 0;
+    for (const item of list.querySelectorAll("[data-config-room-member-item]")) {
+        const searchText = normalizeSearchText(item.getAttribute("data-search-text") || item.textContent || "");
+        const matched = !query || searchText.includes(query);
+        item.hidden = !matched;
+        item.style.display = matched ? "" : "none";
+        if (matched) {
+            visibleCount += 1;
+        }
+    }
+    empty.hidden = visibleCount > 0;
+    if (visibleCount <= 0) {
+        empty.textContent = query ? "没有匹配到群成员。" : (list.children.length ? "当前群没有可选成员。" : "请先读取群成员列表。");
+    }
+}
+
+function initializeRoomMemberPickerSearch(searchInput) {
+    if (!(searchInput instanceof HTMLInputElement) || searchInput.dataset.roomMemberPickerBound === "1") {
+        return;
+    }
+    const listener = () => applyRoomMemberPickerFilter(searchInput);
+    searchInput.addEventListener("input", listener);
+    searchInput.addEventListener("search", listener);
+    searchInput.dataset.roomMemberPickerBound = "1";
+}
+
+function closeRoomMemberPicker(button, field) {
+    const context = getRoomMemberPickerContext(button, field);
+    if (!context?.panel) {
+        return false;
+    }
+    context.panel.hidden = true;
+    return true;
+}
+
+async function openRoomMemberPicker(button, field) {
+    const context = getRoomMemberPickerContext(button, field);
+    if (!context?.panel || !context.pickerColumn) {
+        return false;
+    }
+
+    initializeRoomMemberPickerSearch(context.searchInput);
+    context.panel.hidden = false;
+    if (context.searchInput) {
+        context.searchInput.value = "";
+    }
+
+    if (context.summary) {
+        context.summary.textContent = context.roomLabel
+            ? `正在读取 ${context.roomLabel} 的群成员，填入时默认使用成员 wxid。`
+            : "选择后会按成员 wxid 填入白名单，更稳定。";
+    }
+
+    if (!context.roomid) {
+        if (context.list) {
+            context.list.innerHTML = "";
+        }
+        if (context.empty) {
+            context.empty.hidden = false;
+            context.empty.textContent = "请先选择群聊，再打开成员选择器。";
+        }
+        setRoomMemberPickerStatus(context.status, "请先选择群聊，再打开成员选择器。", "error");
+        const roomSearchInput = context.editorRow?.querySelector(`[data-config-searchable-input="${context.roomColumn?.key || "roomid"}"]`);
+        roomSearchInput?.focus?.();
+        return true;
+    }
+
+    if (context.list) {
+        context.list.innerHTML = "";
+    }
+    if (context.empty) {
+        context.empty.hidden = false;
+        context.empty.textContent = "正在读取群成员...";
+    }
+    setRoomMemberPickerStatus(context.status, "正在读取群成员...", "");
+
+    try {
+        const members = await loadRoomMemberPickerMembers(context.roomid, context.wxpid);
+        if (context.panel) {
+            context.panel.dataset.roomid = context.roomid;
+            context.panel.dataset.wxpid = String(context.wxpid ?? "");
+        }
+        if (context.list) {
+            context.list.innerHTML = renderRoomMemberPickerOptions(members, toNormalizedStringList(context.textarea?.value || ""));
+        }
+        if (context.empty) {
+            context.empty.hidden = members.length > 0;
+            context.empty.textContent = members.length ? "没有匹配到群成员。" : "当前群没有可选成员。";
+        }
+        if (context.summary) {
+            context.summary.textContent = context.roomLabel
+                ? `${context.roomLabel} 共 ${members.length} 位群成员，可按群昵称、昵称或 wxid 搜索；填入时默认使用成员 wxid。`
+                : `共 ${members.length} 位群成员，可按群昵称、昵称或 wxid 搜索；填入时默认使用成员 wxid。`;
+        }
+        setRoomMemberPickerStatus(context.status, members.length ? `已加载 ${members.length} 位群成员。` : "当前群没有可选成员。", members.length ? "good" : "");
+        if (context.searchInput) {
+            applyRoomMemberPickerFilter(context.searchInput);
+        }
+        return true;
+    } catch (error) {
+        if (context.list) {
+            context.list.innerHTML = "";
+        }
+        if (context.empty) {
+            context.empty.hidden = false;
+            context.empty.textContent = "读取群成员失败，请稍后重试。";
+        }
+        setRoomMemberPickerStatus(context.status, `读取群成员失败：${error.message || error}`, "error");
+        return true;
+    }
+}
+
+function applyRoomMemberPickerSelection(button, field) {
+    const context = getRoomMemberPickerContext(button, field);
+    if (!context?.panel || !(context.textarea instanceof HTMLTextAreaElement)) {
+        return false;
+    }
+
+    const currentRoomInput = context.roomColumn && context.editorRow
+        ? context.editorRow.querySelector(`[data-column-key="${context.roomColumn.key}"]`)
+        : null;
+    const currentRoomid = currentRoomInput && context.roomColumn
+        ? String(readRowColumnValue(currentRoomInput, context.roomColumn) || "").trim()
+        : "";
+    if (currentRoomid && context.panel.dataset.roomid && currentRoomid !== context.panel.dataset.roomid) {
+        setRoomMemberPickerStatus(context.status, "当前群聊已变化，请重新打开成员选择器后再填入。", "error");
+        return true;
+    }
+
+    const selectedInputs = [...context.panel.querySelectorAll("[data-config-room-member-option]:checked")];
+    if (!selectedInputs.length) {
+        setRoomMemberPickerStatus(context.status, "请先勾选至少一位群成员。", "error");
+        return true;
+    }
+
+    const existingValues = toNormalizedStringList(context.textarea.value);
+    const existingKeys = new Set(existingValues.map((item) => normalizeSearchText(item)).filter(Boolean));
+    const nextValues = [...existingValues];
+    let addedCount = 0;
+
+    for (const input of selectedInputs) {
+        const memberWxid = String(input.value || "").trim();
+        const candidateKeys = [
+            memberWxid,
+            input.dataset.displayName,
+            input.dataset.roomNickName,
+            input.dataset.nickName,
+        ].map((item) => normalizeSearchText(item)).filter(Boolean);
+        if (!memberWxid || candidateKeys.some((candidate) => existingKeys.has(candidate))) {
+            continue;
+        }
+        nextValues.push(memberWxid);
+        existingKeys.add(normalizeSearchText(memberWxid));
+        addedCount += 1;
+    }
+
+    if (addedCount <= 0) {
+        setRoomMemberPickerStatus(context.status, "选中的成员已经在白名单中，无需重复填入。", "good");
+        context.panel.hidden = true;
+        return true;
+    }
+
+    context.textarea.value = mergeUniqueStringList(nextValues).join("\n");
+    context.textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    context.textarea.dispatchEvent(new Event("change", { bubbles: true }));
+    context.panel.hidden = true;
+    setRoomMemberPickerStatus(context.status, `已填入 ${addedCount} 位群成员到白名单。`, "good");
+    return true;
 }
 
 function readRowColumnValue(columnElement, column) {
@@ -1024,6 +1409,16 @@ export function handleStructuredConfigAction(container, plugin, event) {
     }
 
     if (field.type === "object-list" && field.display_mode === "table") {
+        if (action === "toggle-room-member-picker") {
+            void openRoomMemberPicker(button, field);
+            return true;
+        }
+        if (action === "apply-room-member-picker") {
+            return applyRoomMemberPickerSelection(button, field);
+        }
+        if (action === "close-room-member-picker") {
+            return closeRoomMemberPicker(button, field);
+        }
         if (action === "remove-row") {
             button.closest("[data-config-row]")?.remove();
             syncObjectTableState(fieldContainer);
