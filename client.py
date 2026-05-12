@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime
 from time import monotonic
 from typing import Any
 from urllib import error, request
@@ -51,6 +52,32 @@ class WxRobotApiClient:
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _normalize_unix_seconds(value: Any) -> int:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            numeric_value = int(value)
+            return numeric_value // 1000 if abs(numeric_value) >= 1_000_000_000_000 else numeric_value
+
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("时间不能为空")
+
+        if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
+            numeric_value = int(text)
+            return numeric_value // 1000 if abs(numeric_value) >= 1_000_000_000_000 else numeric_value
+
+        normalized_text = text.replace("T", " ")
+        for format_string in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                return int(datetime.strptime(normalized_text, format_string).timestamp())
+            except ValueError:
+                continue
+
+        try:
+            return int(datetime.fromisoformat(text).timestamp())
+        except ValueError as exc:
+            raise ValueError(f"无法解析时间参数: {value}") from exc
 
     @classmethod
     def _extract_wxpids(cls, payload: Any) -> list[int]:
@@ -362,7 +389,12 @@ class WxRobotApiClient:
         max_count: int = 500,
         wxpid: int | None = None,
     ) -> list[dict[str, Any]]:
-        payload = {"wxid": wxid, "start_time": start_time, "end_time": end_time, "max_count": max_count}
+        payload = {
+            "wxid": wxid,
+            "start_time": self._normalize_unix_seconds(start_time),
+            "end_time": self._normalize_unix_seconds(end_time),
+            "max_count": max_count,
+        }
         return await self.post_json("/other/chatmsgs", self._with_optional_wxpid(payload, wxpid))
 
     async def get_resource_path(self, msgid: str, wxid: str, local_type: int, wxpid: int | None = None) -> dict[str, Any]:
