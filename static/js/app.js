@@ -1080,6 +1080,11 @@ async function openPluginExecuteModal(moduleName) {
         setStatus("未找到指定功能插件", "bad");
         return;
     }
+    if (isRoomMsgSummaryPlugin(plugin)) {
+        setStatus("正在执行功能插件...");
+        await executePluginWithConfig(moduleName, {});
+        return;
+    }
     if (needsPluginTargets(plugin)) {
         await loadPluginTargets(true);
     }
