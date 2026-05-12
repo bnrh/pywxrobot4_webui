@@ -43,6 +43,14 @@ CSV_FIELDS = [
 ]
 
 
+def is_truthy(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return normalize_text(value).lower() in {"1", "true", "yes", "on", "y", "是"}
+
+
 def get_default_export_dir():
     if winreg is not None:
         for registry_key in WINDOWS_DOWNLOADS_REGISTRY_KEYS:
@@ -237,8 +245,12 @@ def merge_member_profile(entry, member):
         if next_value in (None, ""):
             continue
         entry[field] = next_value
-    if member.get("is_owner"):
+    if is_truthy(member.get("is_owner")):
         entry["is_owner"] = True
+
+
+def should_ignore_member(member):
+    return is_truthy(member.get("is_owner")) or is_truthy(member.get("is_admin"))
 
 
 def build_duplicate_rows(group_name, members_by_room, room_lookup):
@@ -246,7 +258,7 @@ def build_duplicate_rows(group_name, members_by_room, room_lookup):
     for roomid, members in members_by_room.items():
         room_name = normalize_text(room_lookup.get(roomid, {}).get("nickname") or roomid) or roomid
         for member in members if isinstance(members, list) else []:
-            if member.get("is_owner"):
+            if should_ignore_member(member):
                 continue
             wxid = normalize_text(member.get("username") or member.get("wxid"))
             if not wxid:

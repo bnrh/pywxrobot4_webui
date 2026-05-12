@@ -22,6 +22,7 @@ CSV_FIELDS = [
     "province",
     "city",
     "is_owner",
+    "is_admin",
     "room_nick_name",
 ]
 
