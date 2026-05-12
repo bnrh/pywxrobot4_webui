@@ -758,12 +758,12 @@ async function loadPluginTargets(force = false) {
 
 const WXPID_OPTION_DEFAULT = "__default_first__";
 const WXPID_OPTION_ALL = "__all__";
-const ROOM_MSG_SUMMARY_PLUGIN_KEY = "room_msg_summary";
+const MESSAGE_SUMMARY_PLUGIN_KEYS = new Set(["room_msg_summary", "user_msg_summary"]);
 
-function isRoomMsgSummaryPlugin(plugin) {
+function isMessageSummaryPlugin(plugin) {
     const name = normalizeInlineText(plugin?.name || "").toLowerCase();
     const moduleName = normalizeInlineText(plugin?.module || "").toLowerCase();
-    return name === ROOM_MSG_SUMMARY_PLUGIN_KEY || moduleName.endsWith(`.${ROOM_MSG_SUMMARY_PLUGIN_KEY}`) || moduleName === ROOM_MSG_SUMMARY_PLUGIN_KEY;
+    return [...MESSAGE_SUMMARY_PLUGIN_KEYS].some((pluginKey) => name === pluginKey || moduleName.endsWith(`.${pluginKey}`) || moduleName === pluginKey);
 }
 
 function getRoomMsgSummaryLookbackSeconds(rangeKey) {
@@ -806,11 +806,10 @@ function buildRoomMsgSummaryTimeWindow(rangeKey) {
     };
 }
 
-function normalizeRoomMsgSummaryRenderConfig(config = {}) {
-    const nextConfig = { ...config };
-    const currentPlugin = getPluginByModule(state.pluginConfigModule) || getPluginByModule(state.pluginExecuteModule);
-    const exportDirField = Array.isArray(currentPlugin?.config_schema)
-        ? currentPlugin.config_schema.find((field) => field?.key === "export_dir")
+function normalizeRoomMsgSummaryRenderConfig(plugin) {
+    const nextConfig = { ...(plugin?.config || {}) };
+    const exportDirField = Array.isArray(plugin?.config_schema)
+        ? plugin.config_schema.find((field) => field?.key === "export_dir")
         : null;
     const normalizedFileType = normalizeInlineText(nextConfig.file_type || nextConfig.output_format).toLowerCase();
     if (!normalizedFileType || normalizedFileType === "txt") {
@@ -843,7 +842,7 @@ function getPluginModuleNameForForm(formElement) {
 function syncRoomMsgSummaryTimeFields(formElement, { force = false } = {}) {
     const moduleName = getPluginModuleNameForForm(formElement);
     const plugin = moduleName ? getPluginByModule(moduleName) : null;
-    if (!isRoomMsgSummaryPlugin(plugin)) {
+    if (!isMessageSummaryPlugin(plugin)) {
         return;
     }
 
@@ -939,8 +938,8 @@ function getWxpidFieldOptions(currentValue) {
 }
 
 function buildPluginConfigRenderModel(plugin) {
-    const sourcePlugin = isRoomMsgSummaryPlugin(plugin)
-        ? { ...plugin, config: normalizeRoomMsgSummaryRenderConfig(plugin?.config || {}) }
+    const sourcePlugin = isMessageSummaryPlugin(plugin)
+        ? { ...plugin, config: normalizeRoomMsgSummaryRenderConfig(plugin) }
         : plugin;
 
     if (!sourcePlugin || !Array.isArray(sourcePlugin.config_schema)) {
@@ -1080,7 +1079,7 @@ async function openPluginExecuteModal(moduleName) {
         setStatus("未找到指定功能插件", "bad");
         return;
     }
-    if (isRoomMsgSummaryPlugin(plugin)) {
+    if (isMessageSummaryPlugin(plugin)) {
         setStatus("正在执行功能插件...");
         await executePluginWithConfig(moduleName, {});
         return;
