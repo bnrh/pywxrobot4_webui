@@ -859,7 +859,7 @@ async function openPluginConfigModal(moduleName) {
         return;
     }
     if (needsPluginTargets(plugin)) {
-        await loadPluginTargets();
+        await loadPluginTargets(true);
     }
     const renderPlugin = buildPluginConfigRenderModel(plugin);
     state.pluginConfigModule = moduleName;
@@ -908,7 +908,7 @@ async function openPluginExecuteModal(moduleName) {
         return;
     }
     if (needsPluginTargets(plugin)) {
-        await loadPluginTargets();
+        await loadPluginTargets(true);
     }
     const renderPlugin = buildPluginExecuteRenderModel(plugin);
     if (!renderPlugin.config_schema.length) {
