@@ -1,5 +1,6 @@
 import asyncio
 import json
+from time import monotonic
 from typing import Any
 from urllib import error, request
 
@@ -9,9 +10,13 @@ class WxRobotApiError(RuntimeError):
 
 
 class WxRobotApiClient:
+    _LIVE_WXPID_CACHE_TTL_SECONDS = 5.0
+
     def __init__(self, base_url: str, timeout: float = 10.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self._cached_live_wxpids: list[int] = []
+        self._cached_live_wxpids_at = 0.0
 
     @staticmethod
     def _coerce_timeout(value: Any) -> float | None:
@@ -38,6 +43,65 @@ class WxRobotApiClient:
             return None
         return max(self.timeout, operation_timeout + max(0.0, buffer_seconds))
 
+    @staticmethod
+    def _normalize_wxpid_value(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _extract_wxpids(cls, payload: Any) -> list[int]:
+        wxpids = payload.get("wxpids") if isinstance(payload, dict) else payload
+        items: list[int] = []
+        for item in wxpids if isinstance(wxpids, list) else []:
+            normalized = cls._normalize_wxpid_value(item)
+            if normalized is None or normalized in items:
+                continue
+            items.append(normalized)
+        return items
+
+    def _cache_live_wxpids(self, wxpids: list[int]) -> list[int]:
+        self._cached_live_wxpids = list(wxpids)
+        self._cached_live_wxpids_at = monotonic()
+        return list(self._cached_live_wxpids)
+
+    def _get_live_wxpids_sync(self, request_timeout: float | None = None, *, force: bool = False) -> list[int]:
+        now = monotonic()
+        if not force and self._cached_live_wxpids_at > 0 and now - self._cached_live_wxpids_at <= self._LIVE_WXPID_CACHE_TTL_SECONDS:
+            return list(self._cached_live_wxpids)
+        try:
+            payload = self._request_json_sync("/getwxpids", None, "GET", request_timeout)
+        except WxRobotApiError:
+            return list(self._cached_live_wxpids)
+        return self._cache_live_wxpids(self._extract_wxpids(payload))
+
+    def _resolve_optional_wxpid_sync(self, wxpid: Any, request_timeout: float | None = None) -> int | None:
+        normalized_wxpid = self._normalize_wxpid_value(wxpid)
+        live_wxpids = self._get_live_wxpids_sync(request_timeout)
+        if not live_wxpids:
+            return normalized_wxpid
+        if normalized_wxpid in live_wxpids:
+            return normalized_wxpid
+        return live_wxpids[0]
+
+    def _normalize_payload_wxpid_sync(
+        self,
+        payload: dict[str, Any] | None,
+        request_timeout: float | None = None,
+    ) -> dict[str, Any] | None:
+        if payload is None:
+            return None
+        next_payload = dict(payload)
+        resolved_wxpid = self._resolve_optional_wxpid_sync(next_payload.get("wxpid"), request_timeout)
+        if resolved_wxpid is None:
+            next_payload.pop("wxpid", None)
+        else:
+            next_payload["wxpid"] = resolved_wxpid
+        return next_payload
+
     async def get_json(self, path: str, request_timeout: float | None = None) -> Any:
         return await asyncio.to_thread(self._request_json_sync, path, None, "GET", request_timeout)
 
@@ -53,8 +117,9 @@ class WxRobotApiClient:
     ) -> Any:
         url = f"{self.base_url}/{path.lstrip('/')}"
         effective_timeout = self._resolve_request_timeout(request_timeout)
-        body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers = {"Content-Type": "application/json"} if payload is not None else {}
+        normalized_payload = self._normalize_payload_wxpid_sync(payload, effective_timeout)
+        body = None if normalized_payload is None else json.dumps(normalized_payload, ensure_ascii=False).encode("utf-8")
+        headers = {"Content-Type": "application/json"} if normalized_payload is not None else {}
         req = request.Request(
             url,
             data=body,
@@ -102,15 +167,7 @@ class WxRobotApiClient:
         return await self.get_json("/getusers")
 
     async def get_wx_pids(self) -> list[int]:
-        payload = await self.get_json("/getwxpids")
-        wxpids = payload.get("wxpids") if isinstance(payload, dict) else payload
-        items: list[int] = []
-        for item in wxpids if isinstance(wxpids, list) else []:
-            try:
-                items.append(int(item))
-            except (TypeError, ValueError):
-                continue
-        return items
+        return self._cache_live_wxpids(self._extract_wxpids(await self.get_json("/getwxpids")))
 
     async def hook(self) -> Any:
         return await self.get_json("/hook")

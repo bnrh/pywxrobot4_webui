@@ -796,7 +796,7 @@ function getWxpidFieldOptions(currentValue) {
     }
 
     const normalizedCurrentValue = String(currentValue ?? "").trim();
-    if (normalizedCurrentValue && !seen.has(normalizedCurrentValue)) {
+    if (!options.length && normalizedCurrentValue && !seen.has(normalizedCurrentValue)) {
         const fallbackValue = Number(normalizedCurrentValue);
         options.push({
             label: `当前配置(${normalizedCurrentValue})`,
