@@ -858,7 +858,7 @@ async function openPluginConfigModal(moduleName) {
         setStatus("未找到指定插件配置", "bad");
         return;
     }
-    if (plugin.message_dependent && needsPluginTargets(plugin)) {
+    if (needsPluginTargets(plugin)) {
         await loadPluginTargets();
     }
     const renderPlugin = buildPluginConfigRenderModel(plugin);
