@@ -52,6 +52,27 @@ FILE_SCOPE_RULES = [
     (("static/css/",), "界面"),
 ]
 
+SURROGATE_CHAR_PATTERN = re.compile(r"[\ud800-\udfff]")
+
+
+def sanitize_text(value: object) -> str:
+    return SURROGATE_CHAR_PATTERN.sub("\ufffd", str(value or ""))
+
+
+def sanitize_json_compatible_value(value: object) -> object:
+    if isinstance(value, str):
+        return sanitize_text(value)
+    if isinstance(value, list):
+        return [sanitize_json_compatible_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [sanitize_json_compatible_value(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            sanitize_text(key) if isinstance(key, str) else key: sanitize_json_compatible_value(item)
+            for key, item in value.items()
+        }
+    return value
+
 
 def read_stdin_json() -> dict:
     try:
@@ -64,11 +85,12 @@ def read_stdin_json() -> dict:
         payload = json.loads(raw)
     except json.JSONDecodeError:
         return {}
-    return payload if isinstance(payload, dict) else {}
+    sanitized_payload = sanitize_json_compatible_value(payload)
+    return sanitized_payload if isinstance(sanitized_payload, dict) else {}
 
 
 def print_json(payload: dict) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.write(json.dumps(sanitize_json_compatible_value(payload), ensure_ascii=False))
 
 
 def get_repo_root(payload: dict) -> Path:
@@ -102,14 +124,17 @@ def load_state(state_file: Path) -> dict:
         return {"prompt": "", "files": []}
     files = payload.get("files") if isinstance(payload.get("files"), list) else []
     return {
-        "prompt": str(payload.get("prompt") or "").strip(),
-        "files": [str(item).strip() for item in files if str(item).strip()],
+        "prompt": sanitize_text(payload.get("prompt") or "").strip(),
+        "files": [sanitize_text(item).strip() for item in files if sanitize_text(item).strip()],
     }
 
 
 def save_state(state_file: Path, state: dict) -> None:
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    state_file.write_text(
+        json.dumps(sanitize_json_compatible_value(state), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def cleanup_state(state_file: Path) -> None:
@@ -356,7 +381,7 @@ def build_commit_message(prompt: str, files: list[str]) -> str:
 def handle_user_prompt_submit(repo_root: Path, payload: dict) -> dict:
     state_file = get_state_file(repo_root, payload)
     state = load_state(state_file)
-    state["prompt"] = str(payload.get("prompt") or "").strip()
+    state["prompt"] = sanitize_text(payload.get("prompt") or "").strip()
     save_state(state_file, state)
     return {}
 
