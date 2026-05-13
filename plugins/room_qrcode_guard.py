@@ -94,6 +94,50 @@ def is_default_whitelist_member(member):
     return is_truthy(member.get("is_owner")) or is_truthy(member.get("is_admin"))
 
 
+async def can_current_account_remove_members(context, roomid, wxpid, self_wxid, log_payload=None):
+    payload = dict(log_payload or {})
+    normalized_self_wxid = normalize_text(self_wxid)
+    if not normalized_self_wxid:
+        context.logger.warning(
+            "群二维码检测插件无法确认当前账号微信号，已跳过移除群成员",
+            {**payload, "roomid": roomid, "wxpid": wxpid},
+        )
+        return False
+
+    try:
+        room_members = await context.api.get_room_members(roomid, wxpid)
+    except Exception as exc:
+        context.logger.warning(
+            "群二维码检测插件移人前读取群成员失败，已跳过移除群成员",
+            {**payload, "roomid": roomid, "self_wxid": normalized_self_wxid, "wxpid": wxpid, "error": str(exc)},
+        )
+        return False
+
+    if not isinstance(room_members, list):
+        context.logger.warning(
+            "群二维码检测插件移人前读取群成员返回了非列表结果，已跳过移除群成员",
+            {**payload, "roomid": roomid, "self_wxid": normalized_self_wxid, "wxpid": wxpid, "result_type": type(room_members).__name__},
+        )
+        return False
+
+    self_member = find_room_member(room_members, normalized_self_wxid)
+    if is_default_whitelist_member(self_member):
+        return True
+
+    context.logger.warning(
+        "群二维码检测插件当前账号不是群主或管理员，已跳过移除群成员",
+        {
+            **payload,
+            "roomid": roomid,
+            "self_wxid": normalized_self_wxid,
+            "wxpid": wxpid,
+            "self_is_owner": is_truthy(self_member.get("is_owner")) if isinstance(self_member, dict) else False,
+            "self_is_admin": is_truthy(self_member.get("is_admin")) if isinstance(self_member, dict) else False,
+        },
+    )
+    return False
+
+
 def get_active_pending_kick(pending_state, pending_key):
     pending = pending_state.get(pending_key)
     if not isinstance(pending, dict):
@@ -360,18 +404,33 @@ async def handle_message(event, context):
     delay_seconds = random_between(3, 5)
     await sleep(delay_seconds * 1000)
 
+    removal_log_payload = {**log_payload, "warning_count": warning_count, "delay_seconds": delay_seconds}
+    if not await can_current_account_remove_members(
+        context,
+        roomid,
+        event.normalized_wxpid,
+        self_wxid,
+        removal_log_payload,
+    ):
+        pending_state.delete(pending_key)
+        return {
+            "handled": True,
+            "detail": "已发送警告，但当前账号没有群管理权限，未移出群成员",
+            "data": {**removal_log_payload, "action": "warned_only_no_permission"},
+        }
+
     try:
         await context.api.delete_room_members(roomid=roomid, wxids=sender_wxid, wxpid=event.normalized_wxpid)
     except Exception as exc:
         pending_state.delete(pending_key)
         context.logger.error(
             "群二维码检测插件移出违规成员失败",
-            {**log_payload, "warning_count": warning_count, "delay_seconds": delay_seconds, "error": str(exc)},
+            {**removal_log_payload, "error": str(exc)},
         )
         return {
             "handled": True,
             "detail": "已发送警告，但移出群成员失败",
-            "data": {**log_payload, "action": "warned_only", "warning_count": warning_count, "delay_seconds": delay_seconds, "error": str(exc)},
+            "data": {**removal_log_payload, "action": "warned_only", "error": str(exc)},
         }
     finally:
         pending_state.delete(pending_key)
