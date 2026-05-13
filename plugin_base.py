@@ -3,7 +3,7 @@ import sqlite3
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -234,10 +234,32 @@ class PluginLogger:
 class PluginContext:
     settings: PluginServiceSettings
     api_client: WxRobotApiClient
+    login_account_cache_getter: Callable[[], list[dict[str, Any]]] | None = None
+    login_account_cache_refresher: Callable[[list[dict[str, Any]] | None], Awaitable[list[dict[str, Any]]]] | None = None
+    login_account_serializer: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None
 
     @property
     def api(self) -> WxRobotApiClient:
         return self.api_client
+
+    def get_cached_login_accounts(self) -> list[dict[str, Any]]:
+        if not callable(self.login_account_cache_getter):
+            return []
+        cached_accounts = self.login_account_cache_getter()
+        return list(cached_accounts) if isinstance(cached_accounts, list) else []
+
+    async def refresh_cached_login_accounts(self, users: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+        if callable(self.login_account_cache_refresher):
+            refreshed_accounts = await self.login_account_cache_refresher(users)
+            return list(refreshed_accounts) if isinstance(refreshed_accounts, list) else []
+        return self.serialize_login_accounts(users)
+
+    def serialize_login_accounts(self, users: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+        normalized_users = users if isinstance(users, list) else []
+        if callable(self.login_account_serializer):
+            serialized_accounts = self.login_account_serializer(normalized_users)
+            return list(serialized_accounts) if isinstance(serialized_accounts, list) else []
+        return list(normalized_users)
 
 
 @dataclass(slots=True)
@@ -250,6 +272,9 @@ class PluginExecutionContext:
     plugin_name: str
     plugin_module: str
     hot_reload: dict[str, Any] | None = None
+    login_account_cache_getter: Callable[[], list[dict[str, Any]]] | None = None
+    login_account_cache_refresher: Callable[[list[dict[str, Any]] | None], Awaitable[list[dict[str, Any]]]] | None = None
+    login_account_serializer: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None
 
     @property
     def api_client(self) -> WxRobotApiClient:
@@ -258,6 +283,25 @@ class PluginExecutionContext:
     @property
     def pluginName(self) -> str:
         return self.plugin_name
+
+    def get_cached_login_accounts(self) -> list[dict[str, Any]]:
+        if not callable(self.login_account_cache_getter):
+            return []
+        cached_accounts = self.login_account_cache_getter()
+        return list(cached_accounts) if isinstance(cached_accounts, list) else []
+
+    async def refresh_cached_login_accounts(self, users: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+        if callable(self.login_account_cache_refresher):
+            refreshed_accounts = await self.login_account_cache_refresher(users)
+            return list(refreshed_accounts) if isinstance(refreshed_accounts, list) else []
+        return self.serialize_login_accounts(users)
+
+    def serialize_login_accounts(self, users: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+        normalized_users = users if isinstance(users, list) else []
+        if callable(self.login_account_serializer):
+            serialized_accounts = self.login_account_serializer(normalized_users)
+            return list(serialized_accounts) if isinstance(serialized_accounts, list) else []
+        return list(normalized_users)
 
     @property
     def pluginModule(self) -> str:

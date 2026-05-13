@@ -295,6 +295,9 @@ class PythonPlugin:
             plugin_name=self.name,
             plugin_module=self.module_name,
             hot_reload=deepcopy(hot_reload) if hot_reload else None,
+            login_account_cache_getter=context.login_account_cache_getter,
+            login_account_cache_refresher=context.login_account_cache_refresher,
+            login_account_serializer=context.login_account_serializer,
         )
 
     def _resolve_hook(self, *names: str) -> Callable[..., Any] | None:

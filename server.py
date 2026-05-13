@@ -947,7 +947,13 @@ class PluginRuntime:
         self.settings = settings
         self.api_client = WxRobotApiClient(settings.wxrobot_api_base_url, settings.request_timeout)
         self.directory_cache = ContactDirectoryCache(self.api_client)
-        self.context = PluginContext(settings=settings, api_client=self.api_client)
+        self.context = PluginContext(
+            settings=settings,
+            api_client=self.api_client,
+            login_account_cache_getter=self.get_cached_login_accounts,
+            login_account_cache_refresher=self.refresh_login_account_cache,
+            login_account_serializer=self._serialize_login_accounts,
+        )
         self.manager = PluginManager(
             self.context,
             settings.plugins,
@@ -995,18 +1001,27 @@ class PluginRuntime:
         self.heartbeat_error = ""
         self.heartbeat_healthy = None
 
-    async def _run_heartbeat_check(self) -> None:
+    def get_cached_login_accounts(self) -> list[dict[str, Any]]:
+        return list(self.heartbeat_accounts)
+
+    async def refresh_login_account_cache(self, users: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         self.heartbeat_last_checked_at = datetime.now().astimezone()
+        login_users = users if isinstance(users, list) else None
         try:
-            users = await self.api_client.get_logged_in_users()
+            if login_users is None:
+                login_users = await self.api_client.get_logged_in_users()
         except Exception as exc:
             self.heartbeat_error = str(exc)
             self.heartbeat_healthy = False
-            return
+            return list(self.heartbeat_accounts)
 
-        self.heartbeat_accounts = self._serialize_login_accounts(users)
+        self.heartbeat_accounts = self._serialize_login_accounts(login_users if isinstance(login_users, list) else [])
         self.heartbeat_error = ""
         self.heartbeat_healthy = True
+        return list(self.heartbeat_accounts)
+
+    async def _run_heartbeat_check(self) -> None:
+        await self.refresh_login_account_cache()
 
     async def _heartbeat_loop(self) -> None:
         while True:
@@ -1039,7 +1054,13 @@ class PluginRuntime:
         next_settings = settings or PluginServiceSettings.from_storage()
         next_api_client = WxRobotApiClient(next_settings.wxrobot_api_base_url, next_settings.request_timeout)
         next_directory_cache = ContactDirectoryCache(next_api_client)
-        next_context = PluginContext(settings=next_settings, api_client=next_api_client)
+        next_context = PluginContext(
+            settings=next_settings,
+            api_client=next_api_client,
+            login_account_cache_getter=self.get_cached_login_accounts,
+            login_account_cache_refresher=self.refresh_login_account_cache,
+            login_account_serializer=self._serialize_login_accounts,
+        )
         next_manager = PluginManager(
             next_context,
             next_settings.plugins,
