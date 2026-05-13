@@ -130,6 +130,7 @@
 | `invite_to_toom` | 好友请求 / 通知 / 文本 | 根据关键词自动拉群 |
 | `openclaw_channel` | 群文本消息 | 转发消息到外部 Webhook |
 | `room_message_guard` | 群消息 | 按分组消息类型进行群聊禁言治理 |
+| `room_qrcode_guard` | 群图片消息 | 检测群聊图片是否包含二维码，警告后可移出发送成员，依赖 zxing-cpp Python 绑定 |
 | `vmq_monitor` | 单聊消息 | 监听指定公众号收款消息并推送到外部服务 |
 
 ### 功能与周期插件
