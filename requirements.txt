@@ -1,0 +1,13 @@
+# Core web service
+fastapi
+uvicorn
+loguru
+pydantic
+
+# FastAPI form/file upload support
+python-multipart
+
+# QR code detection plugin
+numpy
+Pillow
+zxing-cpp
