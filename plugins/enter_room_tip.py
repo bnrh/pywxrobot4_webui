@@ -13,6 +13,7 @@ NOTICE_DELAY_SECONDS = 3.0
 SYSMSG_DELAY_SECONDS = 1.0
 IMAGE_UPLOAD_DIR = "uploads/enter_room_tip"
 ENTER_ROOM_PATTERN = re.compile(r"加入(?:了)?群聊")
+ENTER_ROOM_QUOTED_NICKNAME_PATTERN = re.compile(r'(?:"|“)(.*?)(?:"|”)', re.S)
 CONTENT_PREVIEW_LIMIT = 160
 config_schema = [
     {
@@ -183,6 +184,33 @@ def find_first_xml_tag_value(xml_text, tag_name):
     return values[0] if values else ""
 
 
+def extract_enter_room_notice_nicknames(notice_text):
+    text = str(notice_text or "")
+    if not text:
+        return []
+
+    def extract_quoted_names(segment):
+        return [
+            normalize_text(match.group(1))
+            for match in ENTER_ROOM_QUOTED_NICKNAME_PATTERN.finditer(str(segment or ""))
+            if normalize_text(match.group(1))
+        ]
+
+    invitation_match = re.search(r"邀请([\s\S]*?)加入(?:了)?群聊", text)
+    if invitation_match:
+        invitation_names = extract_quoted_names(invitation_match.group(1))
+        if invitation_names:
+            return invitation_names
+
+    join_match = re.search(r"([\s\S]*?)加入(?:了)?群聊", text)
+    if join_match:
+        joined_names = extract_quoted_names(join_match.group(1))
+        if joined_names:
+            return joined_names
+
+    return extract_quoted_names(text)
+
+
 def inspect_enter_room_notice(content):
     normalized_content = normalize_text(content)
     xml_text = extract_sysmsg_xml(content)
@@ -195,12 +223,14 @@ def inspect_enter_room_notice(content):
         or find_first_xml_tag_value(delchatroommember_xml, "text")
         or normalized_content
     )
+    member_nicknames = extract_enter_room_notice_nicknames(notice_text)
     return {
         "matched": bool(ENTER_ROOM_PATTERN.search(notice_text)),
         "notice_text": notice_text,
         "sysmsg_type": sysmsg_type,
         "scene": find_first_xml_tag_value(link_xml, "scene") or find_xml_tag_text(xml_text, ["delchatroommember", "link", "scene"]),
         "member_usernames": extract_xml_tag_values(memberlist_xml, "username") or extract_xml_tag_values(xml_text, "username"),
+        "member_nicknames": member_nicknames,
         "content_preview": normalized_content[:CONTENT_PREVIEW_LIMIT],
     }
 
@@ -215,13 +245,15 @@ def build_notice_log_payload(event, roomid, type_code, notice_meta):
         "sysmsg_type": notice_meta.get("sysmsg_type", ""),
         "scene": notice_meta.get("scene", ""),
         "member_usernames": notice_meta.get("member_usernames", []),
+        "member_nicknames": notice_meta.get("member_nicknames", []),
         "content_preview": notice_meta.get("content_preview", ""),
     }
 
 
-def build_members_from_usernames(usernames, latest_members_map, fallback_members_map=None):
+def build_members_from_usernames(usernames, latest_members_map, fallback_members_map=None, notice_member_nicknames=None):
     fallback_map = fallback_members_map if isinstance(fallback_members_map, dict) else {}
     latest_map = latest_members_map if isinstance(latest_members_map, dict) else {}
+    normalized_notice_nicknames = [normalize_text(item) for item in notice_member_nicknames or [] if normalize_text(item)]
     unique_usernames: list[str] = []
     seen: set[str] = set()
     for username in usernames or []:
@@ -231,13 +263,30 @@ def build_members_from_usernames(usernames, latest_members_map, fallback_members
         seen.add(normalized_username)
         unique_usernames.append(normalized_username)
 
-    return [
-        {
-            "username": username,
-            "nick_name": normalize_text(latest_map.get(username) or fallback_map.get(username) or username or "成员"),
-        }
-        for username in unique_usernames
-    ]
+    members = []
+    for index, username in enumerate(unique_usernames):
+        parsed_nickname = normalized_notice_nicknames[index] if index < len(normalized_notice_nicknames) else ""
+        members.append(
+            {
+                "username": username,
+                "nick_name": parsed_nickname or normalize_text(latest_map.get(username) or fallback_map.get(username) or username or "成员"),
+            }
+        )
+    return members
+
+
+def apply_notice_member_nicknames(members, notice_member_nicknames):
+    normalized_notice_nicknames = [normalize_text(item) for item in notice_member_nicknames or [] if normalize_text(item)]
+    if not normalized_notice_nicknames:
+        return members
+
+    normalized_members = [dict(member) for member in members if isinstance(member, dict)]
+    if len(normalized_notice_nicknames) != len(normalized_members):
+        return normalized_members
+
+    for index, member in enumerate(normalized_members):
+        member["nick_name"] = normalized_notice_nicknames[index]
+    return normalized_members
 
 
 async def warmup_room_members(context, wxpid):
@@ -292,7 +341,12 @@ async def handle_message(event, context):
     new_members_map = await fetch_room_member_map(context, roomid, event.normalized_wxpid)
     room_cache.set(roomid, new_members_map)
     if notice_meta["member_usernames"]:
-        new_members = build_members_from_usernames(notice_meta["member_usernames"], new_members_map, old_members)
+        new_members = build_members_from_usernames(
+            notice_meta["member_usernames"],
+            new_members_map,
+            old_members,
+            notice_meta.get("member_nicknames"),
+        )
         context.logger.info(
             "入群欢迎插件直接使用通知中的成员 wxid",
             {
@@ -305,6 +359,7 @@ async def handle_message(event, context):
         )
     else:
         new_members = [{"username": username, "nick_name": nickname} for username, nickname in new_members_map.items() if username not in old_members]
+        new_members = apply_notice_member_nicknames(new_members, notice_meta.get("member_nicknames"))
     if not new_members:
         context.logger.info("入群欢迎插件未识别到新增成员", {**log_payload, "cached_member_count": len(old_members), "latest_member_count": len(new_members_map)})
         return {"handled": False, "detail": "没有识别到新增成员"}
