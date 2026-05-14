@@ -2176,7 +2176,7 @@ function buildAiAssistantPromptPluginCardMarkup(promptPlugin = {}) {
                 </label>
                 <label class="field-group smart-prompt-plugin-number-field">
                     <span class="field-label">温度 temperature</span>
-                    <input data-field="temperature" type="number" min="0" max="1.5" step="0.1" value="${escapeHtml(temperature)}">
+                    <input data-field="temperature" type="number" min="0" max="1.5" step="any" value="${escapeHtml(temperature)}">
                 </label>
                 <div class="config-object-table-actions smart-prompt-plugin-actions">
                     <button class="button ghost compact" type="button" data-ai-config-action="remove-prompt-plugin">删除</button>
@@ -3147,6 +3147,10 @@ elements.refreshUsersButton.addEventListener("click", async () => {
 
 elements.aiAssistantSettingsForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!elements.aiAssistantSettingsForm.reportValidity()) {
+        setStatus("请先修正智能插件配置中的输入项", "bad");
+        return;
+    }
     try {
         setStatus("正在保存智能插件设置...");
         applyAiAssistantPayload(await api.saveAiAssistantSettings(readAiAssistantSettingsForm()), true);
