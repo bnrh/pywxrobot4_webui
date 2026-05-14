@@ -117,6 +117,41 @@ def _is_biz_conversation_wxid(wxid: str) -> bool:
     return bool(normalized) and normalized.startswith("gh_")
 
 
+def _normalize_text(value: Any) -> str:
+    return "" if value in (None, "") else str(value).strip()
+
+
+def _normalize_wxpid(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped, 16) if stripped.lower().startswith("0x") else int(stripped)
+        except ValueError:
+            return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_login_account_wxid(accounts: list[dict[str, Any]] | None, wxpid: int | None) -> str:
+    if wxpid is None:
+        return ""
+    for item in accounts if isinstance(accounts, list) else []:
+        if not isinstance(item, dict):
+            continue
+        if _normalize_wxpid(item.get("wxpid") or item.get("pid")) != wxpid:
+            continue
+        wxid = _normalize_text(item.get("wxid"))
+        if wxid:
+            return wxid
+    return ""
+
+
 def _resolve_module_attr(module: ModuleType, *names: str, default: Any = None) -> Any:
     for name in names:
         if hasattr(module, name):
@@ -652,6 +687,34 @@ class PluginManager:
             return False
         return bool(user_labels & selected_labels)
 
+    async def _resolve_event_self_wxid(self, event: MessageEvent) -> str:
+        current_account_wxid = _normalize_text(event.current_account_wxid)
+        if current_account_wxid:
+            return current_account_wxid
+
+        wxpid = event.normalized_wxpid
+        if wxpid is None:
+            return ""
+
+        cached_accounts = self.context.get_cached_login_accounts()
+        resolved_wxid = _resolve_login_account_wxid(cached_accounts, wxpid)
+        if resolved_wxid:
+            return resolved_wxid
+
+        refreshed_accounts = await self.context.refresh_cached_login_accounts()
+        return _resolve_login_account_wxid(refreshed_accounts, wxpid)
+
+    async def _is_self_sent_message(self, event: MessageEvent) -> bool:
+        if event.is_self_message:
+            return True
+
+        sender_wxid = _normalize_text(event.sender_wxid)
+        if not sender_wxid:
+            return False
+
+        self_wxid = await self._resolve_event_self_wxid(event)
+        return bool(self_wxid) and sender_wxid == self_wxid
+
     async def load_plugins(self) -> None:
         self._plugins.clear()
         for module_name in self.module_names:
@@ -696,6 +759,9 @@ class PluginManager:
             logger.exception("周期插件 {} 执行失败", plugin.name)
 
     async def dispatch(self, event: MessageEvent) -> list[dict[str, Any]]:
+        if await self._is_self_sent_message(event):
+            return []
+
         results: list[dict[str, Any]] = []
         for plugin in self._plugins:
             if not plugin.should_handle_message(event):

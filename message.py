@@ -9,6 +9,15 @@ class MessageType(IntEnum):
     IMAGE = 0x3
 
 
+def _is_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value or "").strip().lower()
+    return normalized in {"1", "true", "yes", "on", "y", "是"}
+
+
 class MessageEvent(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -130,6 +139,30 @@ class MessageEvent(BaseModel):
     def sender_wxid(self) -> str:
         value = self.first_non_empty("room_sender", "from_wxid", "from_user", "sender", "wxid")
         return "" if value in (None, "") else str(value)
+
+    @property
+    def current_account_wxid(self) -> str:
+        value = self.first_non_empty("self_wxid", "current_wxid", "login_wxid", "account_wxid")
+        return "" if value in (None, "") else str(value)
+
+    @property
+    def is_self_message(self) -> bool:
+        for key in (
+            "is_self_msg",
+            "is_self",
+            "isSelf",
+            "is_self_message",
+            "isSelfMsg",
+            "isSend",
+            "is_send",
+            "issend",
+            "from_self",
+            "is_from_self",
+        ):
+            value = self._extra_value(key)
+            if value not in (None, ""):
+                return _is_truthy(value)
+        return False
 
     @property
     def is_group_message(self) -> bool:
