@@ -98,9 +98,11 @@ PROVIDER_CATALOG = {
 
 DEFAULT_AI_ASSISTANT_SETTINGS = {
     "active_provider": "zhipu",
+    "active_prompt_plugin_id": "default-smart-plugin",
     "system_prompt": DEFAULT_SYSTEM_PROMPT,
     "temperature": 0.2,
     "max_tool_rounds": 6,
+    "prompt_plugins": [],
     "providers": {
         key: {
             "configs": [],
@@ -732,7 +734,83 @@ async def _load_provider_model_options(provider_key: str, provider_settings: dic
 
 
 def get_default_ai_assistant_settings() -> dict[str, Any]:
-    return deepcopy(DEFAULT_AI_ASSISTANT_SETTINGS)
+    defaults = deepcopy(DEFAULT_AI_ASSISTANT_SETTINGS)
+    if not defaults.get("prompt_plugins"):
+        defaults["prompt_plugins"] = [
+            {
+                "id": str(defaults.get("active_prompt_plugin_id") or "default-smart-plugin"),
+                "name": "通用助手",
+                "prompt": str(defaults.get("system_prompt") or DEFAULT_SYSTEM_PROMPT).strip() or DEFAULT_SYSTEM_PROMPT,
+                "temperature": _clamp_float(defaults.get("temperature"), 0.2, 0.0, 1.5),
+                "max_tool_rounds": _clamp_int(defaults.get("max_tool_rounds"), 6, 1, 8),
+            }
+        ]
+    return defaults
+
+
+def _build_default_prompt_plugin(index: int = 1) -> dict[str, Any]:
+    defaults = DEFAULT_AI_ASSISTANT_SETTINGS
+    return {
+        "id": "default-smart-plugin" if index == 1 else f"prompt-plugin-{index}",
+        "name": "通用助手" if index == 1 else f"提示词插件 {index}",
+        "prompt": str(defaults.get("system_prompt") or DEFAULT_SYSTEM_PROMPT).strip() or DEFAULT_SYSTEM_PROMPT,
+        "temperature": _clamp_float(defaults.get("temperature"), 0.2, 0.0, 1.5),
+        "max_tool_rounds": _clamp_int(defaults.get("max_tool_rounds"), 6, 1, 8),
+    }
+
+
+def _normalize_prompt_plugin_entries(raw_settings: dict[str, Any], defaults: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_plugins = raw_settings.get("prompt_plugins") if isinstance(raw_settings.get("prompt_plugins"), list) else None
+    normalized_plugins: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    def append_plugin(item: dict[str, Any], index: int) -> None:
+        default_plugin = _build_default_prompt_plugin(index)
+        normalized_id = str(item.get("id") or default_plugin["id"]).strip() or default_plugin["id"]
+        if normalized_id in seen_ids:
+            normalized_id = f"{normalized_id}-{index}"
+        seen_ids.add(normalized_id)
+        normalized_plugins.append(
+            {
+                "id": normalized_id,
+                "name": str(item.get("name") or item.get("plugin_name") or default_plugin["name"]).strip() or default_plugin["name"],
+                "prompt": str(item.get("prompt") or item.get("system_prompt") or default_plugin["prompt"]).strip() or default_plugin["prompt"],
+                "temperature": _clamp_float(item.get("temperature"), default_plugin["temperature"], 0.0, 1.5),
+                "max_tool_rounds": _clamp_int(item.get("max_tool_rounds"), default_plugin["max_tool_rounds"], 1, 8),
+            }
+        )
+
+    if raw_plugins is not None:
+        for index, raw_plugin in enumerate(raw_plugins, start=1):
+            if not isinstance(raw_plugin, dict):
+                continue
+            append_plugin(raw_plugin, index)
+
+    if not normalized_plugins:
+        append_plugin(
+            {
+                "id": raw_settings.get("active_prompt_plugin_id") or defaults.get("active_prompt_plugin_id"),
+                "name": raw_settings.get("prompt_plugin_name") or "通用助手",
+                "prompt": raw_settings.get("system_prompt") or defaults.get("system_prompt"),
+                "temperature": raw_settings.get("temperature"),
+                "max_tool_rounds": raw_settings.get("max_tool_rounds"),
+            },
+            1,
+        )
+
+    return normalized_plugins
+
+
+def resolve_ai_assistant_prompt_plugin(settings: dict[str, Any], prompt_plugin_id: str | None = None) -> dict[str, Any]:
+    prompt_plugins = settings.get("prompt_plugins") if isinstance(settings.get("prompt_plugins"), list) else []
+    if not prompt_plugins:
+        raise RuntimeError("当前还没有可用的提示词插件配置")
+
+    normalized_plugin_id = str(prompt_plugin_id or settings.get("active_prompt_plugin_id") or "").strip()
+    selected_plugin = next((item for item in prompt_plugins if str(item.get("id") or "") == normalized_plugin_id), None)
+    if selected_plugin is None:
+        selected_plugin = prompt_plugins[0]
+    return selected_plugin
 
 
 def _normalize_provider_base_url(value: Any, default: str) -> str:
@@ -859,6 +937,7 @@ def normalize_ai_assistant_settings(value: Any) -> dict[str, Any]:
     defaults = get_default_ai_assistant_settings()
     raw_settings = value if isinstance(value, dict) else {}
     raw_providers = raw_settings.get("providers") if isinstance(raw_settings.get("providers"), dict) else {}
+    prompt_plugins = _normalize_prompt_plugin_entries(raw_settings, defaults)
     providers: dict[str, dict[str, Any]] = {}
     for provider_key, provider_meta in PROVIDER_CATALOG.items():
         raw_provider = raw_providers.get(provider_key) if isinstance(raw_providers.get(provider_key), dict) else {}
@@ -873,11 +952,24 @@ def normalize_ai_assistant_settings(value: Any) -> dict[str, Any]:
     if active_provider not in PROVIDER_CATALOG:
         active_provider = defaults["active_provider"]
 
+    active_prompt_plugin_id = str(raw_settings.get("active_prompt_plugin_id") or defaults.get("active_prompt_plugin_id") or "").strip()
+    if active_prompt_plugin_id not in {str(item.get("id") or "") for item in prompt_plugins}:
+        active_prompt_plugin_id = str(prompt_plugins[0].get("id") or defaults.get("active_prompt_plugin_id") or "default-smart-plugin")
+    selected_prompt_plugin = resolve_ai_assistant_prompt_plugin(
+        {
+            "prompt_plugins": prompt_plugins,
+            "active_prompt_plugin_id": active_prompt_plugin_id,
+        },
+        active_prompt_plugin_id,
+    )
+
     return {
         "active_provider": active_provider,
-        "system_prompt": str(raw_settings.get("system_prompt") or defaults["system_prompt"]).strip() or defaults["system_prompt"],
-        "temperature": _clamp_float(raw_settings.get("temperature"), defaults["temperature"], 0.0, 1.5),
-        "max_tool_rounds": _clamp_int(raw_settings.get("max_tool_rounds"), defaults["max_tool_rounds"], 1, 8),
+        "active_prompt_plugin_id": active_prompt_plugin_id,
+        "system_prompt": str(selected_prompt_plugin.get("prompt") or defaults["system_prompt"]).strip() or defaults["system_prompt"],
+        "temperature": _clamp_float(selected_prompt_plugin.get("temperature"), defaults["temperature"], 0.0, 1.5),
+        "max_tool_rounds": _clamp_int(selected_prompt_plugin.get("max_tool_rounds"), defaults["max_tool_rounds"], 1, 8),
+        "prompt_plugins": prompt_plugins,
         "providers": providers,
     }
 
@@ -934,6 +1026,7 @@ async def build_ai_assistant_payload(settings: dict[str, Any]) -> dict[str, Any]
         "notes": [
             "配置会保存在本地 SQLite 的 system_settings 表中。",
             "固定厂商的网关地址、请求路径和附加参数均写死在代码中；通用 OpenAI 仅需额外填写 Base URL。",
+            "提示词插件配置和模型 API Key 配置相互独立；多个提示词插件会共享同一批模型配置。",
         ],
     }
 
@@ -1940,9 +2033,11 @@ async def run_ai_assistant(
     provider_key: str | None = None,
     model_override: str | None = None,
     provider_config_id: str | None = None,
+    prompt_plugin_id: str | None = None,
     progress_callback: Any = None,
 ) -> dict[str, Any]:
     normalized_settings = normalize_ai_assistant_settings(settings)
+    selected_prompt_plugin = resolve_ai_assistant_prompt_plugin(normalized_settings, prompt_plugin_id)
     selected_provider = str(provider_key or normalized_settings["active_provider"]).strip().lower()
     if selected_provider not in PROVIDER_CATALOG:
         raise RuntimeError("未找到可用的 AI 厂商配置")
@@ -1969,7 +2064,7 @@ async def run_ai_assistant(
     contextual_tool_routing_prompt = _build_contextual_tool_routing_prompt(history[-1].get("content") or "")
     current_time_prompt = _build_current_time_prompt()
     request_messages: list[dict[str, Any]] = [
-        {"role": "system", "content": normalized_settings["system_prompt"]},
+        {"role": "system", "content": str(selected_prompt_plugin.get("prompt") or normalized_settings["system_prompt"])},
         {"role": "system", "content": current_time_prompt},
         {"role": "system", "content": INTERNAL_TOOL_ROUTING_PROMPT},
         *(
@@ -1980,7 +2075,7 @@ async def run_ai_assistant(
     ]
     tool_schemas = get_tool_schemas()
     trace_entries: list[dict[str, Any]] = []
-    max_tool_rounds = normalized_settings["max_tool_rounds"]
+    max_tool_rounds = _clamp_int(selected_prompt_plugin.get("max_tool_rounds"), normalized_settings["max_tool_rounds"], 1, 8)
     selected_model = str(model_override or provider_meta["default_model"] or "").strip() or provider_meta["default_model"]
     tool_executor = _McpHttpToolExecutor(api_client)
 
@@ -2002,7 +2097,7 @@ async def run_ai_assistant(
                 "messages": request_messages,
                 "tools": tool_schemas,
                 "tool_choice": "auto",
-                "temperature": normalized_settings["temperature"],
+                "temperature": _clamp_float(selected_prompt_plugin.get("temperature"), normalized_settings["temperature"], 0.0, 1.5),
             }
             request_payload = _merge_provider_extra_body(selected_provider, request_payload)
 
@@ -2056,6 +2151,8 @@ async def run_ai_assistant(
                     "provider_label": provider_meta["label"],
                     "provider_config_id": selected_provider_config["id"],
                     "provider_config_name": selected_provider_config["name"],
+                    "prompt_plugin_id": str(selected_prompt_plugin.get("id") or ""),
+                    "prompt_plugin_name": str(selected_prompt_plugin.get("name") or ""),
                     "model": selected_model,
                     "reply": assistant_content or "已完成，但 AI 没有返回可展示的文本。",
                     "reasoning_content": assistant_reasoning_content,

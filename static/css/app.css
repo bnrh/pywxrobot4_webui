@@ -676,6 +676,10 @@ textarea {
     width: clamp(146px, 13vw, 208px);
 }
 
+.smart-toolbar-select-prompt {
+    width: clamp(152px, 15vw, 224px);
+}
+
 .smart-toolbar-select:hover {
     transform: translateY(-1px);
     border-color: rgba(76, 201, 255, 0.26);
@@ -771,6 +775,52 @@ textarea {
     display: grid;
     gap: 16px;
     min-width: 0;
+}
+
+.smart-prompt-plugin-shell {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+}
+
+.smart-prompt-plugin-list {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+}
+
+.smart-prompt-plugin-card {
+    display: grid;
+    gap: 14px;
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(145, 189, 232, 0.14);
+    background: linear-gradient(180deg, rgba(10, 23, 38, 0.9), rgba(6, 16, 29, 0.82));
+}
+
+.smart-prompt-plugin-card.is-invalid {
+    border-color: rgba(255, 110, 127, 0.32);
+    box-shadow: 0 0 0 1px rgba(255, 110, 127, 0.08);
+}
+
+.smart-prompt-plugin-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) 180px 180px auto;
+    gap: 12px;
+    align-items: end;
+}
+
+.smart-prompt-plugin-name-field,
+.smart-prompt-plugin-number-field {
+    min-width: 0;
+}
+
+.smart-prompt-plugin-actions {
+    align-self: center;
+}
+
+.smart-prompt-plugin-editor {
+    min-height: 164px;
 }
 
 .smart-model-config-table {
@@ -2459,8 +2509,13 @@ optgroup {
 
     .smart-toolbar-select,
     .smart-toolbar-select-provider,
-    .smart-toolbar-select-model {
+    .smart-toolbar-select-model,
+    .smart-toolbar-select-prompt {
         width: min(220px, 100%);
+    }
+
+    .smart-prompt-plugin-head {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
@@ -2491,9 +2546,14 @@ optgroup {
     .smart-inline-field,
     .smart-toolbar-select,
     .smart-toolbar-select-provider,
-    .smart-toolbar-select-model {
+    .smart-toolbar-select-model,
+    .smart-toolbar-select-prompt {
         width: 100%;
         max-width: none;
+    }
+
+    .smart-prompt-plugin-head {
+        grid-template-columns: 1fr;
     }
 
     .nav-tab {

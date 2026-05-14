@@ -25,6 +25,7 @@ from ai_assistant import (
     build_ai_assistant_payload,
     get_default_ai_assistant_settings,
     normalize_ai_assistant_settings,
+    resolve_ai_assistant_prompt_plugin,
     run_ai_assistant,
 )
 from client import WxRobotApiClient
@@ -123,6 +124,7 @@ class AiAssistantChatMessage(BaseModel):
 class AiAssistantChatRequest(BaseModel):
     provider: str | None = None
     provider_config_id: str | None = None
+    prompt_plugin_id: str | None = None
     model: str | None = None
     messages: list[AiAssistantChatMessage] = Field(default_factory=list)
 
@@ -132,6 +134,7 @@ class AiAssistantChatJobCreateRequest(BaseModel):
     prompt: str
     provider: str | None = None
     provider_config_id: str | None = None
+    prompt_plugin_id: str | None = None
     model: str | None = None
 
 
@@ -202,6 +205,8 @@ def _normalize_ai_assistant_message_payload(message: Any) -> dict[str, Any]:
         "provider": str(payload.get("provider") or ""),
         "provider_label": str(payload.get("provider_label") or ""),
         "provider_config_id": str(payload.get("provider_config_id") or ""),
+        "prompt_plugin_id": str(payload.get("prompt_plugin_id") or ""),
+        "prompt_plugin_name": str(payload.get("prompt_plugin_name") or ""),
         "model": str(payload.get("model") or ""),
         "tool_traces": [_normalize_ai_assistant_tool_trace_payload(item) for item in tool_traces],
         "progress_message": str(payload.get("progress_message") or ""),
@@ -373,7 +378,14 @@ async def _clear_ai_assistant_conversation_payload(conversation_id: str) -> dict
     return _build_ai_assistant_conversation_payload(store)
 
 
-async def _append_ai_assistant_chat_placeholders(conversation_id: str, prompt: str, provider: str, model: str) -> tuple[dict[str, Any], dict[str, Any]]:
+async def _append_ai_assistant_chat_placeholders(
+    conversation_id: str,
+    prompt: str,
+    provider: str,
+    model: str,
+    prompt_plugin_id: str = "",
+    prompt_plugin_name: str = "",
+) -> tuple[dict[str, Any], dict[str, Any]]:
     normalized_id = str(conversation_id or "").strip()
     normalized_prompt = str(prompt or "").strip()
     if not normalized_prompt:
@@ -403,6 +415,8 @@ async def _append_ai_assistant_chat_placeholders(conversation_id: str, prompt: s
                 "content": "",
                 "provider": provider,
                 "provider_label": PROVIDER_CATALOG.get(provider, {}).get("label", ""),
+                "prompt_plugin_id": str(prompt_plugin_id or ""),
+                "prompt_plugin_name": str(prompt_plugin_name or ""),
                 "model": model,
                 "status": "running",
                 "progress_message": "等待模型响应...",
@@ -483,6 +497,8 @@ def _normalize_ai_assistant_job_payload(job: dict[str, Any]) -> dict[str, Any]:
     payload.setdefault("status", "queued")
     payload.setdefault("error", "")
     payload.setdefault("provider_config_id", "")
+    payload.setdefault("prompt_plugin_id", "")
+    payload.setdefault("prompt_plugin_name", "")
     payload.setdefault("created_at", _now_iso())
     payload.setdefault("updated_at", payload["created_at"])
     return payload
@@ -540,6 +556,8 @@ async def _mark_ai_assistant_job_stopped(
     assistant_message_id: str,
     provider_key: str,
     provider_config_id: str | None,
+    prompt_plugin_id: str | None,
+    prompt_plugin_name: str | None,
     selected_model: str,
     progress_message: str = "本次对话已手动停止。",
 ) -> dict[str, Any]:
@@ -562,6 +580,8 @@ async def _mark_ai_assistant_job_stopped(
             "provider": str(current_message.get("provider") or provider_key),
             "provider_label": str(current_message.get("provider_label") or PROVIDER_CATALOG.get(provider_key, {}).get("label", "")),
             "provider_config_id": str(current_message.get("provider_config_id") or provider_config_id or ""),
+            "prompt_plugin_id": str(current_message.get("prompt_plugin_id") or prompt_plugin_id or ""),
+            "prompt_plugin_name": str(current_message.get("prompt_plugin_name") or prompt_plugin_name or ""),
             "model": str(current_message.get("model") or selected_model),
         },
     )
@@ -576,6 +596,8 @@ async def _mark_ai_assistant_job_stopped(
             "error": "",
             "provider": provider_key,
             "provider_config_id": str(provider_config_id or ""),
+            "prompt_plugin_id": str(prompt_plugin_id or ""),
+            "prompt_plugin_name": str(prompt_plugin_name or ""),
             "model": selected_model,
         },
     )
@@ -1574,6 +1596,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         assistant_message_id: str,
         provider_key: str,
         provider_config_id: str | None,
+        prompt_plugin_id: str | None,
+        prompt_plugin_name: str | None,
         selected_model: str,
     ) -> None:
         settings_payload = WebuiSettingsStore().get_json_setting(
@@ -1598,6 +1622,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                     "provider": provider_key,
                     "provider_label": PROVIDER_CATALOG.get(provider_key, {}).get("label", ""),
                     "provider_config_id": str(provider_config_id or ""),
+                    "prompt_plugin_id": str(prompt_plugin_id or ""),
+                    "prompt_plugin_name": str(prompt_plugin_name or ""),
                     "model": selected_model,
                 },
             )
@@ -1612,6 +1638,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                     "error": "",
                     "provider": provider_key,
                     "provider_config_id": str(provider_config_id or ""),
+                    "prompt_plugin_id": str(prompt_plugin_id or ""),
+                    "prompt_plugin_name": str(prompt_plugin_name or ""),
                     "model": selected_model,
                 },
             )
@@ -1628,6 +1656,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                     "error": "",
                     "provider": provider_key,
                     "provider_config_id": str(provider_config_id or ""),
+                    "prompt_plugin_id": str(prompt_plugin_id or ""),
+                    "prompt_plugin_name": str(prompt_plugin_name or ""),
                     "model": selected_model,
                 },
             )
@@ -1639,6 +1669,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 provider_key,
                 selected_model,
                 provider_config_id,
+                prompt_plugin_id,
                 handle_progress,
             )
             final_model = str(result.get("model") or selected_model)
@@ -1655,6 +1686,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                     "provider": str(result.get("provider") or provider_key),
                     "provider_label": str(result.get("provider_label") or PROVIDER_CATALOG.get(provider_key, {}).get("label", "")),
                     "provider_config_id": str(result.get("provider_config_id") or provider_config_id or ""),
+                    "prompt_plugin_id": str(result.get("prompt_plugin_id") or prompt_plugin_id or ""),
+                    "prompt_plugin_name": str(result.get("prompt_plugin_name") or prompt_plugin_name or ""),
                     "model": final_model,
                 },
             )
@@ -1669,6 +1702,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                     "error": "",
                     "provider": str(result.get("provider") or provider_key),
                     "provider_config_id": str(result.get("provider_config_id") or provider_config_id or ""),
+                    "prompt_plugin_id": str(result.get("prompt_plugin_id") or prompt_plugin_id or ""),
+                    "prompt_plugin_name": str(result.get("prompt_plugin_name") or prompt_plugin_name or ""),
                     "model": final_model,
                 },
             )
@@ -1679,6 +1714,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 assistant_message_id,
                 provider_key,
                 provider_config_id,
+                prompt_plugin_id,
+                prompt_plugin_name,
                 selected_model,
             )
             return
@@ -1696,6 +1733,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                     "provider": provider_key,
                     "provider_label": PROVIDER_CATALOG.get(provider_key, {}).get("label", ""),
                     "provider_config_id": str(provider_config_id or ""),
+                    "prompt_plugin_id": str(prompt_plugin_id or ""),
+                    "prompt_plugin_name": str(prompt_plugin_name or ""),
                     "model": selected_model,
                 },
             )
@@ -1710,6 +1749,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                     "error": error_message,
                     "provider": provider_key,
                     "provider_config_id": str(provider_config_id or ""),
+                    "prompt_plugin_id": str(prompt_plugin_id or ""),
+                    "prompt_plugin_name": str(prompt_plugin_name or ""),
                     "model": selected_model,
                 },
             )
@@ -2002,6 +2043,9 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         if selected_provider not in PROVIDER_CATALOG:
             raise HTTPException(status_code=400, detail="未找到可用的 AI 厂商配置")
         selected_provider_config_id = str(item.provider_config_id or "").strip()
+        selected_prompt_plugin = resolve_ai_assistant_prompt_plugin(normalized_settings, item.prompt_plugin_id)
+        selected_prompt_plugin_id = str(selected_prompt_plugin.get("id") or "").strip()
+        selected_prompt_plugin_name = str(selected_prompt_plugin.get("name") or "").strip()
         selected_model = str(
             item.model
             or PROVIDER_CATALOG[selected_provider]["default_model"]
@@ -2013,6 +2057,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 item.prompt,
                 selected_provider,
                 selected_model,
+                selected_prompt_plugin_id,
+                selected_prompt_plugin_name,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2029,6 +2075,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 "error": "",
                 "provider": selected_provider,
                 "provider_config_id": selected_provider_config_id,
+                "prompt_plugin_id": selected_prompt_plugin_id,
+                "prompt_plugin_name": selected_prompt_plugin_name,
                 "model": selected_model,
                 "created_at": _now_iso(),
             },
@@ -2040,6 +2088,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 placeholder_context["assistant_message_id"],
                 selected_provider,
                 selected_provider_config_id,
+                selected_prompt_plugin_id,
+                selected_prompt_plugin_name,
                 selected_model,
             )
         )
@@ -2076,6 +2126,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         assistant_message_id = str(job.get("assistant_message_id") or "").strip()
         provider_key = str(job.get("provider") or "").strip().lower()
         provider_config_id = str(job.get("provider_config_id") or "").strip()
+        prompt_plugin_id = str(job.get("prompt_plugin_id") or "").strip()
+        prompt_plugin_name = str(job.get("prompt_plugin_name") or "").strip()
         selected_model = str(job.get("model") or "").strip()
 
         if conversation_id and assistant_message_id:
@@ -2112,6 +2164,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 assistant_message_id,
                 provider_key,
                 provider_config_id,
+                prompt_plugin_id,
+                prompt_plugin_name,
                 selected_model,
             )
 
@@ -2136,6 +2190,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 item.provider,
                 item.model,
                 item.provider_config_id,
+                item.prompt_plugin_id,
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

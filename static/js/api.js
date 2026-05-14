@@ -96,7 +96,7 @@ export const api = {
             body: JSON.stringify({ settings }),
         });
     },
-    createAiAssistantChatJob(conversationId, prompt, provider = "", providerConfigId = "", model = "") {
+    createAiAssistantChatJob(conversationId, prompt, provider = "", providerConfigId = "", model = "", promptPluginId = "") {
         return requestJson("/api/ai-assistant/chat-jobs", {
             method: "POST",
             body: JSON.stringify({
@@ -105,6 +105,7 @@ export const api = {
                 provider: provider || null,
                 provider_config_id: providerConfigId || null,
                 model: model || null,
+                prompt_plugin_id: promptPluginId || null,
             }),
         });
     },
@@ -116,13 +117,14 @@ export const api = {
             method: "POST",
         });
     },
-    chatWithAiAssistant(messages = [], provider = "", providerConfigId = "", model = "") {
+    chatWithAiAssistant(messages = [], provider = "", providerConfigId = "", model = "", promptPluginId = "") {
         return requestJson("/api/ai-assistant/chat", {
             method: "POST",
             body: JSON.stringify({
                 provider: provider || null,
                 provider_config_id: providerConfigId || null,
                 model: model || null,
+                prompt_plugin_id: promptPluginId || null,
                 messages,
             }),
         });

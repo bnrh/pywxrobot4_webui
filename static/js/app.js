@@ -1,4 +1,4 @@
-import { api } from "/static/js/api.js?v=20260512-09";
+import { api } from "/static/js/api.js?v=20260514-01";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
@@ -121,6 +121,7 @@ const state = {
         selectedProvider: "",
         selectedProviderConfigId: "",
         selectedModel: "",
+        selectedPromptPluginId: "",
     },
     selectedMessageId: null,
     messageAutoFollow: true,
@@ -167,6 +168,7 @@ const elements = {
     openAiAssistantConversationSwitcherButton: document.getElementById("openAiAssistantConversationSwitcherButton"),
     aiAssistantProviderSelect: document.getElementById("aiAssistantProviderSelect"),
     aiAssistantModelSelect: document.getElementById("aiAssistantModelSelect"),
+    aiAssistantPromptPluginSelect: document.getElementById("aiAssistantPromptPluginSelect"),
     toggleAiAssistantConfigButton: document.getElementById("toggleAiAssistantConfigButton"),
     toggleAiAssistantToolsButton: document.getElementById("toggleAiAssistantToolsButton"),
     aiAssistantConfigModal: document.getElementById("aiAssistantConfigModal"),
@@ -1864,6 +1866,7 @@ function renderAiConversation() {
                         <span class="badge ${statusTone}">${escapeHtml(roleLabel)}</span>
                         <span class="badge ${statusTone}">${escapeHtml(statusLabel)}</span>
                         ${message.provider_label ? `<span class="badge">${escapeHtml(message.provider_label)}</span>` : ""}
+                        ${message.prompt_plugin_name ? `<span class="badge">${escapeHtml(message.prompt_plugin_name)}</span>` : ""}
                         ${message.model ? `<span class="badge">${escapeHtml(message.model)}</span>` : ""}
                     </div>
                     <div class="detail-meta">${escapeHtml(formatStandardDateTime(message.updated_at) || message.updated_at || "")}</div>
@@ -1911,6 +1914,20 @@ function getAiAssistantProviders() {
 
 function getAiAssistantSettings() {
     return state.aiAssistant?.settings || {};
+}
+
+function getAiAssistantPromptPlugins() {
+    return Array.isArray(getAiAssistantSettings().prompt_plugins) ? getAiAssistantSettings().prompt_plugins : [];
+}
+
+function getAiAssistantPromptPlugin(promptPluginId = state.aiAssistantUi.selectedPromptPluginId) {
+    const promptPlugins = getAiAssistantPromptPlugins();
+    const normalizedPromptPluginId = String(promptPluginId || "").trim();
+    const activePromptPluginId = String(getAiAssistantSettings().active_prompt_plugin_id || "").trim();
+    return promptPlugins.find((plugin) => plugin.id === normalizedPromptPluginId)
+        || promptPlugins.find((plugin) => plugin.id === activePromptPluginId)
+        || promptPlugins[0]
+        || null;
 }
 
 function getAiAssistantProvider(providerKey = state.aiAssistantUi.selectedProvider) {
@@ -2010,6 +2027,7 @@ function normalizeAiAssistantModelOptions(provider) {
 }
 
 function getAiAssistantCurrentSelection() {
+    const selectedPromptPlugin = getAiAssistantPromptPlugin();
     const provider = getAiAssistantProvider() || getAiAssistantProviders()[0] || null;
     if (!provider) {
         return {
@@ -2020,6 +2038,7 @@ function getAiAssistantCurrentSelection() {
             selectedConfigMeta: null,
             selectedModel: "",
             selectionValue: "",
+            selectedPromptPlugin,
         };
     }
 
@@ -2056,6 +2075,7 @@ function getAiAssistantCurrentSelection() {
         selectedConfigMeta,
         selectedModel,
         selectionValue: matchedOption?.selectionValue || encodeAiAssistantModelSelection(selectedConfig?.id || "", selectedModel),
+        selectedPromptPlugin,
     };
 }
 
@@ -2097,7 +2117,16 @@ function setAiAssistantProviderSelection(providerKey, preferredModel = "", prefe
 
 function syncAiAssistantUiFromPayload(preserveSelection = true) {
     const settings = getAiAssistantSettings();
+    const promptPlugins = getAiAssistantPromptPlugins();
     const providers = getAiAssistantProviders();
+    if (!promptPlugins.length) {
+        state.aiAssistantUi.selectedPromptPluginId = "";
+    } else {
+        const preferredPromptPluginId = preserveSelection && promptPlugins.some((plugin) => plugin.id === state.aiAssistantUi.selectedPromptPluginId)
+            ? state.aiAssistantUi.selectedPromptPluginId
+            : (promptPlugins.find((plugin) => plugin.id === settings.active_prompt_plugin_id)?.id || promptPlugins[0].id);
+        state.aiAssistantUi.selectedPromptPluginId = preferredPromptPluginId;
+    }
     if (!providers.length) {
         state.aiAssistantUi.selectedProvider = "";
         state.aiAssistantUi.selectedProviderConfigId = "";
@@ -2115,6 +2144,110 @@ function syncAiAssistantUiFromPayload(preserveSelection = true) {
 
 function createAiAssistantConfigId(providerKey = "provider") {
     return `${String(providerKey || "provider").trim()}-config-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createAiAssistantPromptPluginId() {
+    return `prompt-plugin-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildAiAssistantPromptPluginCardMarkup(promptPlugin = {}) {
+    const pluginId = String(promptPlugin.id || createAiAssistantPromptPluginId()).trim();
+    const pluginName = String(promptPlugin.name || "").trim();
+    const prompt = String(promptPlugin.prompt || promptPlugin.system_prompt || "").trim();
+    const maxToolRounds = String(promptPlugin.max_tool_rounds ?? 6).trim() || "6";
+    const temperature = String(promptPlugin.temperature ?? 0.2).trim() || "0.2";
+    const hasInput = Boolean(pluginName || prompt || maxToolRounds !== "6" || temperature !== "0.2");
+    const validationErrors = [];
+    if (hasInput && !prompt) {
+        validationErrors.push("提示词不能为空。");
+    }
+
+    return `
+        <article class="smart-prompt-plugin-card ${validationErrors.length ? "is-invalid" : ""}" data-ai-prompt-plugin-row>
+            <input type="hidden" data-field="id" value="${escapeHtml(pluginId)}">
+            <div class="smart-prompt-plugin-head">
+                <label class="field-group smart-prompt-plugin-name-field">
+                    <span class="field-label">插件名称</span>
+                    <input data-field="name" type="text" value="${escapeHtml(pluginName)}" placeholder="例如：群聊总结">
+                </label>
+                <label class="field-group smart-prompt-plugin-number-field">
+                    <span class="field-label">工具调用轮数上限</span>
+                    <input data-field="max_tool_rounds" type="number" min="1" max="8" step="1" value="${escapeHtml(maxToolRounds)}">
+                </label>
+                <label class="field-group smart-prompt-plugin-number-field">
+                    <span class="field-label">温度 temperature</span>
+                    <input data-field="temperature" type="number" min="0" max="1.5" step="0.1" value="${escapeHtml(temperature)}">
+                </label>
+                <div class="config-object-table-actions smart-prompt-plugin-actions">
+                    <button class="button ghost compact" type="button" data-ai-config-action="remove-prompt-plugin">删除</button>
+                </div>
+            </div>
+            <label class="field-group">
+                <span class="field-label">提示词</span>
+                <textarea class="config-editor smart-prompt-plugin-editor" data-field="prompt" placeholder="为这个智能插件填写单独的系统提示词">${escapeHtml(prompt)}</textarea>
+            </label>
+            <div class="detail-meta">该提示词会与内置时间提示、工具路由规则一起注入到模型上下文中。</div>
+            <div class="config-object-table-error" data-ai-prompt-plugin-error>${escapeHtml(validationErrors.join(" "))}</div>
+        </article>
+    `;
+}
+
+function syncAiAssistantPromptPluginTableState() {
+    const list = elements.aiAssistantSettingsForm?.querySelector("[data-ai-prompt-plugin-list]");
+    if (!list) {
+        return;
+    }
+    const rows = list.querySelectorAll("[data-ai-prompt-plugin-row]");
+    const emptyState = list.querySelector("[data-ai-prompt-plugin-empty]");
+    if (!rows.length) {
+        if (!emptyState) {
+            list.innerHTML = '<div class="empty-state smart-ai-config-empty" data-ai-prompt-plugin-empty>还没有任何提示词插件。点击右上角“新增提示词插件”后，分别填写名称、提示词和轮数上限。</div>';
+        }
+        return;
+    }
+    emptyState?.remove();
+}
+
+function syncAiAssistantPromptPluginCardState(card) {
+    if (!card) {
+        return;
+    }
+    const name = card.querySelector('[data-field="name"]')?.value.trim() || "";
+    const prompt = card.querySelector('[data-field="prompt"]')?.value.trim() || "";
+    const maxToolRounds = card.querySelector('[data-field="max_tool_rounds"]')?.value.trim() || "6";
+    const temperature = card.querySelector('[data-field="temperature"]')?.value.trim() || "0.2";
+    const hasInput = Boolean(name || prompt || maxToolRounds !== "6" || temperature !== "0.2");
+    const validationErrors = [];
+    if (hasInput && !prompt) {
+        validationErrors.push("提示词不能为空。");
+    }
+    card.classList.toggle("is-invalid", validationErrors.length > 0);
+    const errorNode = card.querySelector("[data-ai-prompt-plugin-error]");
+    if (errorNode) {
+        errorNode.textContent = validationErrors.join(" ");
+    }
+}
+
+function appendAiAssistantPromptPluginRow() {
+    const list = elements.aiAssistantSettingsForm?.querySelector("[data-ai-prompt-plugin-list]");
+    if (!list) {
+        return;
+    }
+
+    const currentPromptPlugin = getAiAssistantPromptPlugin();
+    syncAiAssistantPromptPluginTableState();
+    list.querySelector("[data-ai-prompt-plugin-empty]")?.remove();
+    list.insertAdjacentHTML(
+        "beforeend",
+        buildAiAssistantPromptPluginCardMarkup({
+            id: createAiAssistantPromptPluginId(),
+            name: "",
+            prompt: currentPromptPlugin?.prompt || getAiAssistantSettings().system_prompt || "",
+            max_tool_rounds: currentPromptPlugin?.max_tool_rounds ?? getAiAssistantSettings().max_tool_rounds ?? 6,
+            temperature: currentPromptPlugin?.temperature ?? getAiAssistantSettings().temperature ?? 0.2,
+        })
+    );
+    syncAiAssistantPromptPluginCardState(list.lastElementChild);
 }
 
 function buildAiAssistantProviderSelectOptions(selectedProviderKey = "") {
@@ -2321,6 +2454,7 @@ function renderAiAssistant() {
 
     const settings = getAiAssistantSettings();
     const providers = getAiAssistantProviders();
+    const promptPlugins = getAiAssistantPromptPlugins();
     const tools = Array.isArray(state.aiAssistant.tools) ? state.aiAssistant.tools : [];
     const currentConversation = getAiAssistantCurrentConversation();
     const currentConversationTitle = currentConversation?.title || "未命名对话";
@@ -2337,6 +2471,7 @@ function renderAiAssistant() {
         selectedConfigMeta,
         selectedModel,
         selectionValue,
+        selectedPromptPlugin,
     } = getAiAssistantCurrentSelection();
     const configuredRows = providers.reduce((count, provider) => {
         const providerSettings = settings.providers?.[provider.key] || {};
@@ -2355,6 +2490,7 @@ function renderAiAssistant() {
             providerMetaConfigs.get(providerConfig.id) || null,
         ));
     }).join("");
+    const promptPluginRowMarkup = promptPlugins.map((promptPlugin) => buildAiAssistantPromptPluginCardMarkup(promptPlugin)).join("");
 
     if (elements.aiAssistantProviderSelect) {
         elements.aiAssistantProviderSelect.innerHTML = providers.map((provider) => `
@@ -2369,6 +2505,15 @@ function renderAiAssistant() {
             `).join("")
             : '<option value="">暂无可用模型</option>';
         elements.aiAssistantModelSelect.disabled = !selectedProvider || (!modelOptions.length && !selectedConfig?.api_key);
+    }
+
+    if (elements.aiAssistantPromptPluginSelect) {
+        elements.aiAssistantPromptPluginSelect.innerHTML = promptPlugins.length
+            ? promptPlugins.map((promptPlugin) => `
+                <option value="${escapeHtml(promptPlugin.id || "")}" ${promptPlugin.id === selectedPromptPlugin?.id ? "selected" : ""}>${escapeHtml(promptPlugin.name || "未命名提示词插件")}</option>
+            `).join("")
+            : '<option value="">暂无提示词插件</option>';
+        elements.aiAssistantPromptPluginSelect.disabled = !promptPlugins.length;
     }
 
     if (elements.toggleAiAssistantConfigButton) {
@@ -2398,18 +2543,19 @@ function renderAiAssistant() {
 
     if (elements.aiAssistantSettingsForm) {
         elements.aiAssistantSettingsForm.innerHTML = `
-            <label class="field-group">
-                <span class="field-label">工具调用轮数上限</span>
-                <input name="max_tool_rounds" type="number" min="1" max="8" step="1" value="${escapeHtml(String(settings.max_tool_rounds ?? 6))}">
-            </label>
-            <label class="field-group field-span-2">
-                <span class="field-label">系统提示词</span>
-                <textarea class="config-editor" name="system_prompt">${escapeHtml(settings.system_prompt || "")}</textarea>
-            </label>
-            <label class="field-group field-span-2">
-                <span class="field-label">温度 temperature</span>
-                <input name="temperature" type="number" min="0" max="1.5" step="0.1" value="${escapeHtml(String(settings.temperature ?? 0.2))}">
-            </label>
+            <section class="config-field-shell field-span-2 smart-prompt-plugin-shell">
+                <div class="config-field-head smart-provider-head">
+                    <div>
+                        <h5 class="detail-section-title">提示词插件配置</h5>
+                        <div class="detail-meta">为不同场景维护独立的插件名称、提示词、工具调用轮数上限和温度；聊天页顶部按需切换。</div>
+                        <div class="detail-meta">模型 API Key 配置与提示词插件配置解耦，可复用同一套厂商配置。</div>
+                    </div>
+                    <button class="button secondary compact smart-toolbar-button" type="button" data-ai-config-action="add-prompt-plugin">新增提示词插件</button>
+                </div>
+                <div class="smart-prompt-plugin-list" data-ai-prompt-plugin-list>
+                    ${promptPluginRowMarkup || '<div class="empty-state smart-ai-config-empty" data-ai-prompt-plugin-empty>还没有任何提示词插件。点击右上角“新增提示词插件”后，分别填写名称、提示词和轮数上限。</div>'}
+                </div>
+            </section>
             <section class="config-field-shell field-span-2 smart-model-config-shell">
                 <div class="config-field-head smart-provider-head">
                     <div>
@@ -2434,6 +2580,9 @@ function renderAiAssistant() {
                 </div>
             </section>
         `;
+        elements.aiAssistantSettingsForm.querySelectorAll("[data-ai-prompt-plugin-row]").forEach((card) => {
+            syncAiAssistantPromptPluginCardState(card);
+        });
         elements.aiAssistantSettingsForm.querySelectorAll("[data-ai-config-row]").forEach((row) => {
             syncAiAssistantConfigRowState(row);
         });
@@ -2441,20 +2590,21 @@ function renderAiAssistant() {
 
     if (elements.aiAssistantAlert) {
         const selectedLabel = selectedProvider?.label || "未选择厂商";
+        const selectedPromptPluginLabel = selectedPromptPlugin?.name || "未选择提示词插件";
         if (selectedConfig?.enabled && selectedConfig?.api_key) {
             elements.aiAssistantAlert.className = `settings-alert is-visible ${selectedConfigMeta?.model_fetch_error ? "bad" : "good"}`;
             elements.aiAssistantAlert.textContent = selectedConfigMeta?.model_fetch_error
-                ? `${selectedLabel} · ${selectedConfig.name || "未命名配置"} 已启用，但模型列表自动获取失败，当前会回退到 ${selectedModel}。`
-                : `${selectedLabel} · ${selectedConfig.name || "未命名配置"} 已配置并启用，当前对话模型为 ${selectedModel}。配置会保存在本地 SQLite。`;
+                ? `${selectedPromptPluginLabel} · ${selectedLabel} · ${selectedConfig.name || "未命名配置"} 已启用，但模型列表自动获取失败，当前会回退到 ${selectedModel}。`
+                : `${selectedPromptPluginLabel} · ${selectedLabel} · ${selectedConfig.name || "未命名配置"} 已配置并启用，当前对话模型为 ${selectedModel}。配置会保存在本地 SQLite。`;
         } else if (selectedConfig?.api_key) {
             elements.aiAssistantAlert.className = "settings-alert is-visible bad";
-            elements.aiAssistantAlert.textContent = `${selectedLabel} · ${selectedConfig.name || "未命名配置"} 已填写 API Key，但当前未启用。发送前请先在配置中启用。`;
+            elements.aiAssistantAlert.textContent = `${selectedPromptPluginLabel} · ${selectedLabel} · ${selectedConfig.name || "未命名配置"} 已填写 API Key，但当前未启用。发送前请先在配置中启用。`;
         } else if (selectedConfig) {
             elements.aiAssistantAlert.className = "settings-alert is-visible bad";
-            elements.aiAssistantAlert.textContent = `${selectedLabel} · ${selectedConfig.name || "未命名配置"} 尚未填写 API Key。点击上方配置按钮后保存，才能开始对话。`;
+            elements.aiAssistantAlert.textContent = `${selectedPromptPluginLabel} · ${selectedLabel} · ${selectedConfig.name || "未命名配置"} 尚未填写 API Key。点击上方配置按钮后保存，才能开始对话。`;
         } else {
             elements.aiAssistantAlert.className = "settings-alert is-visible bad";
-            elements.aiAssistantAlert.textContent = `${selectedLabel} 还没有任何配置。点击上方配置按钮新增一行并保存后，才能开始对话。`;
+            elements.aiAssistantAlert.textContent = `${selectedPromptPluginLabel} · ${selectedLabel} 还没有任何配置。点击上方配置按钮新增一行并保存后，才能开始对话。`;
         }
     }
 
@@ -2478,9 +2628,11 @@ function renderAiAssistant() {
     if (elements.aiAssistantProviderBadgeRow) {
         elements.aiAssistantProviderBadgeRow.innerHTML = selectedProvider
             ? `
+                <span class="badge">${escapeHtml(selectedPromptPlugin?.name || "未选择提示词插件")}</span>
                 <span class="badge good">${escapeHtml(selectedProvider.label)}</span>
                 <span class="badge">${escapeHtml(selectedConfig?.name || "未命名配置")}</span>
                 <span class="badge">${escapeHtml(selectedModel || selectedProvider.default_model || "")}</span>
+                <span class="badge">${escapeHtml(`工具轮数 ${selectedPromptPlugin?.max_tool_rounds ?? settings.max_tool_rounds ?? 6}`)}</span>
                 <span class="badge ${selectedConfig?.api_key ? "good" : "bad"}">${escapeHtml(selectedConfig?.api_key ? "已配置 API Key" : "未配置 API Key")}</span>
                 <span class="badge ${selectedConfig?.enabled ? "good" : "warn"}">${escapeHtml(selectedConfig?.enabled ? "已启用" : "未启用")}</span>
             `
@@ -2489,7 +2641,7 @@ function renderAiAssistant() {
 
     if (elements.aiAssistantConversationMeta) {
         elements.aiAssistantConversationMeta.textContent = selectedProvider
-            ? `${currentConversationTitle} · ${selectedProvider.label}${selectedConfig?.name ? ` / ${selectedConfig.name}` : ""} 当前会话模型：${selectedModel || selectedProvider.default_model || "未设置"}。${currentConversationJobActive ? `当前任务：${currentJob.progress_message || "处理中..."}` : (selectedConfigMeta?.model_fetch_error ? "模型列表自动获取失败，已回退到默认模型。" : `当前共可选 ${modelOptions.length} 个模型选项。`)}`
+            ? `${currentConversationTitle} · ${selectedPromptPlugin?.name || "未选择提示词插件"} · ${selectedProvider.label}${selectedConfig?.name ? ` / ${selectedConfig.name}` : ""} 当前会话模型：${selectedModel || selectedProvider.default_model || "未设置"}。${currentConversationJobActive ? `当前任务：${currentJob.progress_message || "处理中..."}` : (selectedConfigMeta?.model_fetch_error ? "模型列表自动获取失败，已回退到默认模型。" : `当前共可选 ${modelOptions.length} 个模型选项。`)}`
             : "请先配置并启用一个 AI 厂商。";
     }
 
@@ -2832,11 +2984,59 @@ function readAiAssistantSettingsForm() {
     const normalizedProviders = Object.fromEntries(providers.map((provider) => [provider.key, { configs: [] }]));
     const payload = {
         active_provider: state.aiAssistantUi.selectedProvider || state.aiAssistant?.settings?.active_provider || "zhipu",
-        system_prompt: form.querySelector('[name="system_prompt"]')?.value.trim() || "",
-        temperature: Number(form.querySelector('[name="temperature"]')?.value || 0.2),
-        max_tool_rounds: Number(form.querySelector('[name="max_tool_rounds"]')?.value || 6),
+        active_prompt_plugin_id: "",
+        system_prompt: "",
+        temperature: 0.2,
+        max_tool_rounds: 6,
+        prompt_plugins: [],
         providers: normalizedProviders,
     };
+
+    const promptPluginRows = Array.from(form.querySelectorAll("[data-ai-prompt-plugin-row]"));
+    for (const [index, row] of promptPluginRows.entries()) {
+        const rawName = row.querySelector('[data-field="name"]')?.value.trim() || "";
+        const rawPrompt = row.querySelector('[data-field="prompt"]')?.value.trim() || "";
+        const rawMaxToolRounds = row.querySelector('[data-field="max_tool_rounds"]')?.value.trim() || "6";
+        const rawTemperature = row.querySelector('[data-field="temperature"]')?.value.trim() || "0.2";
+        const hasInput = Boolean(rawName || rawPrompt || rawMaxToolRounds !== "6" || rawTemperature !== "0.2");
+        if (!hasInput) {
+            continue;
+        }
+        if (!rawPrompt) {
+            throw new Error(`${rawName || `提示词插件 ${index + 1}`} 的提示词不能为空`);
+        }
+        payload.prompt_plugins.push({
+            id: row.querySelector('[data-field="id"]')?.value.trim() || createAiAssistantPromptPluginId(),
+            name: rawName || `提示词插件 ${payload.prompt_plugins.length + 1}`,
+            prompt: rawPrompt,
+            temperature: Number(rawTemperature || 0.2),
+            max_tool_rounds: Number(rawMaxToolRounds || 6),
+        });
+    }
+
+    if (!payload.prompt_plugins.length) {
+        const fallbackPromptPlugin = getAiAssistantPromptPlugin() || {
+            id: createAiAssistantPromptPluginId(),
+            name: "通用助手",
+            prompt: state.aiAssistant?.settings?.system_prompt || "",
+            temperature: state.aiAssistant?.settings?.temperature ?? 0.2,
+            max_tool_rounds: state.aiAssistant?.settings?.max_tool_rounds ?? 6,
+        };
+        payload.prompt_plugins.push({
+            id: fallbackPromptPlugin.id || createAiAssistantPromptPluginId(),
+            name: fallbackPromptPlugin.name || "通用助手",
+            prompt: fallbackPromptPlugin.prompt || state.aiAssistant?.settings?.system_prompt || "",
+            temperature: Number(fallbackPromptPlugin.temperature ?? 0.2),
+            max_tool_rounds: Number(fallbackPromptPlugin.max_tool_rounds ?? 6),
+        });
+    }
+
+    const selectedPromptPlugin = payload.prompt_plugins.find((plugin) => plugin.id === state.aiAssistantUi.selectedPromptPluginId)
+        || payload.prompt_plugins[0];
+    payload.active_prompt_plugin_id = selectedPromptPlugin.id;
+    payload.system_prompt = selectedPromptPlugin.prompt;
+    payload.temperature = Number(selectedPromptPlugin.temperature ?? 0.2);
+    payload.max_tool_rounds = Number(selectedPromptPlugin.max_tool_rounds ?? 6);
 
     const configRows = Array.from(form.querySelectorAll("[data-ai-config-row]"));
     for (const row of configRows) {
@@ -2969,6 +3169,18 @@ elements.aiAssistantSettingsForm.addEventListener("click", (event) => {
     }
 
     const action = actionTarget.dataset.aiConfigAction || "";
+    if (action === "add-prompt-plugin") {
+        appendAiAssistantPromptPluginRow();
+        syncAiAssistantPromptPluginTableState();
+        return;
+    }
+
+    if (action === "remove-prompt-plugin") {
+        actionTarget.closest("[data-ai-prompt-plugin-row]")?.remove();
+        syncAiAssistantPromptPluginTableState();
+        return;
+    }
+
     if (action === "add-row") {
         appendAiAssistantConfigRow();
         syncAiAssistantConfigTableState();
@@ -2985,6 +3197,11 @@ elements.aiAssistantSettingsForm.addEventListener("input", (event) => {
     if (!(event.target instanceof Element)) {
         return;
     }
+    const promptPluginCard = event.target.closest("[data-ai-prompt-plugin-row]");
+    if (promptPluginCard) {
+        syncAiAssistantPromptPluginCardState(promptPluginCard);
+        return;
+    }
     const row = event.target.closest("[data-ai-config-row]");
     if (row) {
         syncAiAssistantConfigRowState(row);
@@ -2993,6 +3210,12 @@ elements.aiAssistantSettingsForm.addEventListener("input", (event) => {
 
 elements.aiAssistantSettingsForm.addEventListener("change", (event) => {
     if (!(event.target instanceof Element)) {
+        return;
+    }
+    const promptPluginCard = event.target.closest("[data-ai-prompt-plugin-row]");
+    if (promptPluginCard) {
+        syncAiAssistantPromptPluginCardState(promptPluginCard);
+        syncAiAssistantPromptPluginTableState();
         return;
     }
     const row = event.target.closest("[data-ai-config-row]");
@@ -3067,6 +3290,14 @@ elements.aiAssistantModelSelect?.addEventListener("change", (event) => {
     renderAiAssistant();
 });
 
+elements.aiAssistantPromptPluginSelect?.addEventListener("change", (event) => {
+    if (!(event.target instanceof HTMLSelectElement)) {
+        return;
+    }
+    state.aiAssistantUi.selectedPromptPluginId = event.target.value;
+    renderAiAssistant();
+});
+
 elements.toggleAiAssistantConfigButton?.addEventListener("click", () => {
     openAiAssistantConfigModal();
 });
@@ -3121,13 +3352,17 @@ elements.aiAssistantPromptForm.addEventListener("submit", async (event) => {
         return;
     }
 
-    const { provider: selectedProvider, selectedConfig, selectedModel } = getAiAssistantCurrentSelection();
+    const { provider: selectedProvider, selectedConfig, selectedModel, selectedPromptPlugin } = getAiAssistantCurrentSelection();
     if (!selectedProvider || !selectedConfig?.api_key) {
         setStatus("当前选择的 AI 配置尚未填写 API Key，请先点击配置按钮完成设置", "bad");
         return;
     }
     if (!selectedConfig.enabled) {
         setStatus("当前选择的 AI 配置尚未启用，请先在配置中启用后再发送", "bad");
+        return;
+    }
+    if (!selectedPromptPlugin?.id) {
+        setStatus("当前还没有可用的提示词插件，请先点击配置按钮完成设置", "bad");
         return;
     }
 
@@ -3153,7 +3388,8 @@ elements.aiAssistantPromptForm.addEventListener("submit", async (event) => {
             prompt,
             selectedProvider.key || "",
             selectedConfig.id || "",
-            selectedModel || selectedProvider.default_model || ""
+            selectedModel || selectedProvider.default_model || "",
+            selectedPromptPlugin.id || ""
         );
         applyAiAssistantPayload(payload, true);
         renderAiAssistant();
