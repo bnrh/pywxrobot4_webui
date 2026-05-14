@@ -2154,9 +2154,9 @@ function buildAiAssistantPromptPluginCardMarkup(promptPlugin = {}) {
     const pluginId = String(promptPlugin.id || createAiAssistantPromptPluginId()).trim();
     const pluginName = String(promptPlugin.name || "").trim();
     const prompt = String(promptPlugin.prompt || promptPlugin.system_prompt || "").trim();
-    const maxToolRounds = String(promptPlugin.max_tool_rounds ?? 6).trim() || "6";
+    const maxToolRounds = String(promptPlugin.max_tool_rounds ?? 20).trim() || "20";
     const temperature = String(promptPlugin.temperature ?? 0.2).trim() || "0.2";
-    const hasInput = Boolean(pluginName || prompt || maxToolRounds !== "6" || temperature !== "0.2");
+    const hasInput = Boolean(pluginName || prompt || maxToolRounds !== "20" || temperature !== "0.2");
     const validationErrors = [];
     if (hasInput && !prompt) {
         validationErrors.push("提示词不能为空。");
@@ -2172,7 +2172,7 @@ function buildAiAssistantPromptPluginCardMarkup(promptPlugin = {}) {
                 </label>
                 <label class="field-group smart-prompt-plugin-number-field">
                     <span class="field-label">工具调用轮数上限</span>
-                    <input data-field="max_tool_rounds" type="number" min="1" max="8" step="1" value="${escapeHtml(maxToolRounds)}">
+                    <input data-field="max_tool_rounds" type="number" min="1" max="500" step="1" value="${escapeHtml(maxToolRounds)}">
                 </label>
                 <label class="field-group smart-prompt-plugin-number-field">
                     <span class="field-label">温度 temperature</span>
@@ -2214,9 +2214,9 @@ function syncAiAssistantPromptPluginCardState(card) {
     }
     const name = card.querySelector('[data-field="name"]')?.value.trim() || "";
     const prompt = card.querySelector('[data-field="prompt"]')?.value.trim() || "";
-    const maxToolRounds = card.querySelector('[data-field="max_tool_rounds"]')?.value.trim() || "6";
+    const maxToolRounds = card.querySelector('[data-field="max_tool_rounds"]')?.value.trim() || "20";
     const temperature = card.querySelector('[data-field="temperature"]')?.value.trim() || "0.2";
-    const hasInput = Boolean(name || prompt || maxToolRounds !== "6" || temperature !== "0.2");
+    const hasInput = Boolean(name || prompt || maxToolRounds !== "20" || temperature !== "0.2");
     const validationErrors = [];
     if (hasInput && !prompt) {
         validationErrors.push("提示词不能为空。");
@@ -2243,7 +2243,7 @@ function appendAiAssistantPromptPluginRow() {
             id: createAiAssistantPromptPluginId(),
             name: "",
             prompt: currentPromptPlugin?.prompt || getAiAssistantSettings().system_prompt || "",
-            max_tool_rounds: currentPromptPlugin?.max_tool_rounds ?? getAiAssistantSettings().max_tool_rounds ?? 6,
+            max_tool_rounds: currentPromptPlugin?.max_tool_rounds ?? getAiAssistantSettings().max_tool_rounds ?? 20,
             temperature: currentPromptPlugin?.temperature ?? getAiAssistantSettings().temperature ?? 0.2,
         })
     );
@@ -2632,7 +2632,7 @@ function renderAiAssistant() {
                 <span class="badge good">${escapeHtml(selectedProvider.label)}</span>
                 <span class="badge">${escapeHtml(selectedConfig?.name || "未命名配置")}</span>
                 <span class="badge">${escapeHtml(selectedModel || selectedProvider.default_model || "")}</span>
-                <span class="badge">${escapeHtml(`工具轮数 ${selectedPromptPlugin?.max_tool_rounds ?? settings.max_tool_rounds ?? 6}`)}</span>
+                <span class="badge">${escapeHtml(`工具轮数 ${selectedPromptPlugin?.max_tool_rounds ?? settings.max_tool_rounds ?? 20}`)}</span>
                 <span class="badge ${selectedConfig?.api_key ? "good" : "bad"}">${escapeHtml(selectedConfig?.api_key ? "已配置 API Key" : "未配置 API Key")}</span>
                 <span class="badge ${selectedConfig?.enabled ? "good" : "warn"}">${escapeHtml(selectedConfig?.enabled ? "已启用" : "未启用")}</span>
             `
@@ -2987,7 +2987,7 @@ function readAiAssistantSettingsForm() {
         active_prompt_plugin_id: "",
         system_prompt: "",
         temperature: 0.2,
-        max_tool_rounds: 6,
+        max_tool_rounds: 20,
         prompt_plugins: [],
         providers: normalizedProviders,
     };
@@ -2996,9 +2996,9 @@ function readAiAssistantSettingsForm() {
     for (const [index, row] of promptPluginRows.entries()) {
         const rawName = row.querySelector('[data-field="name"]')?.value.trim() || "";
         const rawPrompt = row.querySelector('[data-field="prompt"]')?.value.trim() || "";
-        const rawMaxToolRounds = row.querySelector('[data-field="max_tool_rounds"]')?.value.trim() || "6";
+        const rawMaxToolRounds = row.querySelector('[data-field="max_tool_rounds"]')?.value.trim() || "20";
         const rawTemperature = row.querySelector('[data-field="temperature"]')?.value.trim() || "0.2";
-        const hasInput = Boolean(rawName || rawPrompt || rawMaxToolRounds !== "6" || rawTemperature !== "0.2");
+        const hasInput = Boolean(rawName || rawPrompt || rawMaxToolRounds !== "20" || rawTemperature !== "0.2");
         if (!hasInput) {
             continue;
         }
@@ -3010,7 +3010,7 @@ function readAiAssistantSettingsForm() {
             name: rawName || `提示词插件 ${payload.prompt_plugins.length + 1}`,
             prompt: rawPrompt,
             temperature: Number(rawTemperature || 0.2),
-            max_tool_rounds: Number(rawMaxToolRounds || 6),
+            max_tool_rounds: Number(rawMaxToolRounds || 20),
         });
     }
 
@@ -3020,14 +3020,14 @@ function readAiAssistantSettingsForm() {
             name: "通用助手",
             prompt: state.aiAssistant?.settings?.system_prompt || "",
             temperature: state.aiAssistant?.settings?.temperature ?? 0.2,
-            max_tool_rounds: state.aiAssistant?.settings?.max_tool_rounds ?? 6,
+            max_tool_rounds: state.aiAssistant?.settings?.max_tool_rounds ?? 20,
         };
         payload.prompt_plugins.push({
             id: fallbackPromptPlugin.id || createAiAssistantPromptPluginId(),
             name: fallbackPromptPlugin.name || "通用助手",
             prompt: fallbackPromptPlugin.prompt || state.aiAssistant?.settings?.system_prompt || "",
             temperature: Number(fallbackPromptPlugin.temperature ?? 0.2),
-            max_tool_rounds: Number(fallbackPromptPlugin.max_tool_rounds ?? 6),
+            max_tool_rounds: Number(fallbackPromptPlugin.max_tool_rounds ?? 20),
         });
     }
 
@@ -3036,7 +3036,7 @@ function readAiAssistantSettingsForm() {
     payload.active_prompt_plugin_id = selectedPromptPlugin.id;
     payload.system_prompt = selectedPromptPlugin.prompt;
     payload.temperature = Number(selectedPromptPlugin.temperature ?? 0.2);
-    payload.max_tool_rounds = Number(selectedPromptPlugin.max_tool_rounds ?? 6);
+    payload.max_tool_rounds = Number(selectedPromptPlugin.max_tool_rounds ?? 20);
 
     const configRows = Array.from(form.querySelectorAll("[data-ai-config-row]"));
     for (const row of configRows) {

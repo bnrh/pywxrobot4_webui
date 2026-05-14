@@ -101,7 +101,7 @@ DEFAULT_AI_ASSISTANT_SETTINGS = {
     "active_prompt_plugin_id": "default-smart-plugin",
     "system_prompt": DEFAULT_SYSTEM_PROMPT,
     "temperature": 0.2,
-    "max_tool_rounds": 6,
+    "max_tool_rounds": 20,
     "prompt_plugins": [],
     "providers": {
         key: {
@@ -742,7 +742,7 @@ def get_default_ai_assistant_settings() -> dict[str, Any]:
                 "name": "通用助手",
                 "prompt": str(defaults.get("system_prompt") or DEFAULT_SYSTEM_PROMPT).strip() or DEFAULT_SYSTEM_PROMPT,
                 "temperature": _clamp_float(defaults.get("temperature"), 0.2, 0.0, 1.5),
-                "max_tool_rounds": _clamp_int(defaults.get("max_tool_rounds"), 6, 1, 8),
+                "max_tool_rounds": _clamp_int(defaults.get("max_tool_rounds"), 20, 1, 500),
             }
         ]
     return defaults
@@ -755,7 +755,7 @@ def _build_default_prompt_plugin(index: int = 1) -> dict[str, Any]:
         "name": "通用助手" if index == 1 else f"提示词插件 {index}",
         "prompt": str(defaults.get("system_prompt") or DEFAULT_SYSTEM_PROMPT).strip() or DEFAULT_SYSTEM_PROMPT,
         "temperature": _clamp_float(defaults.get("temperature"), 0.2, 0.0, 1.5),
-        "max_tool_rounds": _clamp_int(defaults.get("max_tool_rounds"), 6, 1, 8),
+        "max_tool_rounds": _clamp_int(defaults.get("max_tool_rounds"), 20, 1, 500),
     }
 
 
@@ -776,7 +776,7 @@ def _normalize_prompt_plugin_entries(raw_settings: dict[str, Any], defaults: dic
                 "name": str(item.get("name") or item.get("plugin_name") or default_plugin["name"]).strip() or default_plugin["name"],
                 "prompt": str(item.get("prompt") or item.get("system_prompt") or default_plugin["prompt"]).strip() or default_plugin["prompt"],
                 "temperature": _clamp_float(item.get("temperature"), default_plugin["temperature"], 0.0, 1.5),
-                "max_tool_rounds": _clamp_int(item.get("max_tool_rounds"), default_plugin["max_tool_rounds"], 1, 8),
+                "max_tool_rounds": _clamp_int(item.get("max_tool_rounds"), default_plugin["max_tool_rounds"], 1, 500),
             }
         )
 
@@ -968,7 +968,7 @@ def normalize_ai_assistant_settings(value: Any) -> dict[str, Any]:
         "active_prompt_plugin_id": active_prompt_plugin_id,
         "system_prompt": str(selected_prompt_plugin.get("prompt") or defaults["system_prompt"]).strip() or defaults["system_prompt"],
         "temperature": _clamp_float(selected_prompt_plugin.get("temperature"), defaults["temperature"], 0.0, 1.5),
-        "max_tool_rounds": _clamp_int(selected_prompt_plugin.get("max_tool_rounds"), defaults["max_tool_rounds"], 1, 8),
+        "max_tool_rounds": _clamp_int(selected_prompt_plugin.get("max_tool_rounds"), defaults["max_tool_rounds"], 1, 500),
         "prompt_plugins": prompt_plugins,
         "providers": providers,
     }
@@ -2075,7 +2075,7 @@ async def run_ai_assistant(
     ]
     tool_schemas = get_tool_schemas()
     trace_entries: list[dict[str, Any]] = []
-    max_tool_rounds = _clamp_int(selected_prompt_plugin.get("max_tool_rounds"), normalized_settings["max_tool_rounds"], 1, 8)
+    max_tool_rounds = _clamp_int(selected_prompt_plugin.get("max_tool_rounds"), normalized_settings["max_tool_rounds"], 1, 500)
     selected_model = str(model_override or provider_meta["default_model"] or "").strip() or provider_meta["default_model"]
     tool_executor = _McpHttpToolExecutor(api_client)
 
