@@ -840,8 +840,9 @@ class ContactDirectoryCache:
                     if profile is not None:
                         profiles[profile.wxid] = profile
 
-            if profiles:
-                self._contacts[pid_key] = profiles
+            # Cache empty results as well so repeated message enrichment does not
+            # fan out into the same contact refresh storm on every lookup.
+            self._contacts[pid_key] = profiles
             return self._contacts.get(pid_key, {})
 
     async def get_contact(self, wxid: str, wxpid: int | None) -> ContactProfile | None:
@@ -882,8 +883,9 @@ class ContactDirectoryCache:
                 if profile is not None:
                     profiles[profile.wxid] = profile
 
-            if profiles:
-                self._room_members[cache_key] = profiles
+            # Mirror contact-cache behavior: even an empty member list should
+            # suppress repeated refreshes until a later explicit invalidation.
+            self._room_members[cache_key] = profiles
             return self._room_members.get(cache_key, {})
 
     async def get_room_member(self, roomid: str, wxid: str, wxpid: int | None) -> RoomMemberProfile | None:

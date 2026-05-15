@@ -233,6 +233,7 @@ const elements = {
 
 let logFilterTimerId = null;
 let pluginLogFilterTimerId = null;
+let messagePollInFlight = null;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -2775,12 +2776,22 @@ async function loadPluginTargetsIfNeeded(plugin) {
 }
 
 async function refreshMessagesByPoll() {
-    try {
-        await loadMessages();
-        handleMessagePollSuccess();
-    } catch (error) {
-        handleMessagePollFailure(error);
+    if (messagePollInFlight) {
+        return messagePollInFlight;
     }
+
+    messagePollInFlight = (async () => {
+        try {
+            await loadMessages();
+            handleMessagePollSuccess();
+        } catch (error) {
+            handleMessagePollFailure(error);
+        } finally {
+            messagePollInFlight = null;
+        }
+    })();
+
+    return messagePollInFlight;
 }
 
 async function loadPlugins() {
