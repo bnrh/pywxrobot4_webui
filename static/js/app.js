@@ -1,11 +1,11 @@
-import { api } from "/static/js/api.js?v=20260517-02";
+import { api } from "/static/js/api.js?v=20260517-03";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260517-02";
+} from "/static/js/plugin-config-form.js?v=20260517-03";
 
 const OVERVIEW_POLL_INTERVAL_MS = 15000;
 const MESSAGE_POLL_INTERVAL_MS = 3000;
@@ -876,11 +876,31 @@ function getFetchOptionsTargetInput(element) {
     return targetInput instanceof HTMLInputElement ? targetInput : null;
 }
 
-function buildFetchOptionsSelectMarkup(fieldKey, options, currentValue, placeholder) {
+function readFetchOptionsRequestValue(inputElement) {
+    if (inputElement instanceof HTMLSelectElement) {
+        return parseStructuredFieldValue(inputElement.value);
+    }
+    if (inputElement instanceof HTMLInputElement && inputElement.type === "checkbox") {
+        return Boolean(inputElement.checked);
+    }
+    if (inputElement instanceof HTMLInputElement && inputElement.type === "number") {
+        const text = String(inputElement.value || "").trim();
+        if (!text) {
+            return undefined;
+        }
+        const value = Number(text);
+        return Number.isFinite(value) ? value : undefined;
+    }
+    if (inputElement instanceof HTMLInputElement || inputElement instanceof HTMLTextAreaElement) {
+        return inputElement.value;
+    }
+    return "";
+}
+
+function buildFetchOptionsSelectMarkup(fieldKey, options, currentValue) {
     const normalizedCurrentValue = JSON.stringify(currentValue ?? "");
     return `
         <select data-config-fetch-options-select="${escapeHtml(fieldKey)}" style="margin-top:8px;">
-            <option value="">${escapeHtml(placeholder)}</option>
             ${options.map((option) => {
                 const optionValue = Object.prototype.hasOwnProperty.call(option, "value") ? option.value : option;
                 const optionLabel = Object.prototype.hasOwnProperty.call(option, "label") ? option.label : String(optionValue ?? "");
@@ -897,13 +917,20 @@ function updateFetchOptionsSelect(fieldShell, fieldKey, options, currentValue) {
     }
     const mergedOptions = mergeOptionsWithCurrentValues(options, currentValue);
     const existingSelect = fieldShell.querySelector(`[data-config-fetch-options-select="${fieldKey}"]`);
-    const placeholder = normalizeInlineText(existingSelect?.querySelector("option")?.textContent || "") || "从已获取的模型列表中选择";
-    const nextMarkup = buildFetchOptionsSelectMarkup(fieldKey, mergedOptions, currentValue, placeholder);
+    const nextMarkup = buildFetchOptionsSelectMarkup(fieldKey, mergedOptions, currentValue);
     if (existingSelect) {
         existingSelect.outerHTML = nextMarkup;
-        return;
+    } else {
+        fieldShell.insertAdjacentHTML("beforeend", nextMarkup);
     }
-    fieldShell.insertAdjacentHTML("beforeend", nextMarkup);
+    const nextSelect = fieldShell.querySelector(`[data-config-fetch-options-select="${fieldKey}"]`);
+    const hasCurrentValue = mergedOptions.some((option) => {
+        const optionValue = Object.prototype.hasOwnProperty.call(option, "value") ? option.value : option;
+        return JSON.stringify(optionValue) === JSON.stringify(currentValue ?? "");
+    });
+    if (nextSelect instanceof HTMLSelectElement && !hasCurrentValue) {
+        nextSelect.selectedIndex = -1;
+    }
 }
 
 function buildPluginModelOptionsRequestConfig(formElement, plugin, fieldContainer, targetInput, fieldKey, parentFieldKey) {
@@ -925,13 +952,20 @@ function buildPluginModelOptionsRequestConfig(formElement, plugin, fieldContaine
         };
     }
 
-    const rowElement = targetInput?.closest("[data-config-row]");
-    const rowElements = fieldContainer ? [...fieldContainer.querySelectorAll("[data-config-row]")] : [];
-    const rowIndex = rowElement ? rowElements.indexOf(rowElement) : -1;
-    const rowConfigs = Array.isArray(currentConfig[parentFieldKey]) ? currentConfig[parentFieldKey] : [];
-    const rowConfig = rowIndex >= 0 && rowConfigs[rowIndex] && typeof rowConfigs[rowIndex] === "object"
-        ? rowConfigs[rowIndex]
-        : {};
+    const modelField = findPluginDynamicModelField(plugin, fieldKey, parentFieldKey);
+    const rowContainer = targetInput?.closest("[data-config-row-editor]") || targetInput?.closest("[data-config-row]");
+    const rowConfig = {};
+    for (const key of [fieldKey, modelField?.base_url_key || "base_url", modelField?.api_key_key || "api_key"]) {
+        const normalizedKey = normalizeInlineText(key);
+        if (!normalizedKey) {
+            continue;
+        }
+        const rowInput = rowContainer?.querySelector(`[data-column-key="${normalizedKey}"]`);
+        if (!rowInput) {
+            continue;
+        }
+        rowConfig[normalizedKey] = readFetchOptionsRequestValue(rowInput);
+    }
     return {
         ...rowConfig,
         __model_field_key: fieldKey,

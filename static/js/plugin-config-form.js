@@ -239,7 +239,6 @@ function renderFetchOptionsTextInput(field, value, datasetKey = "data-config-key
     const currentValue = value ?? "";
     const inputType = escapeHtml(field.input_type || field.type || "text");
     const buttonLabel = String(field.fetch_options_button_label || field.button_label || "获取选项").trim() || "获取选项";
-    const selectPlaceholder = String(field.fetch_options_select_placeholder || "从已获取列表中选择").trim() || "从已获取列表中选择";
     const options = getFieldOptionItems(field);
     const normalizedValue = JSON.stringify(currentValue);
 
@@ -256,7 +255,6 @@ function renderFetchOptionsTextInput(field, value, datasetKey = "data-config-key
             </div>
             ${options.length ? `
                 <select data-config-fetch-options-select="${escapeHtml(field.key)}" style="margin-top:8px;">
-                    <option value="">${escapeHtml(selectPlaceholder)}</option>
                     ${options.map((option) => {
                         const descriptor = getFieldOptionDescriptor(option);
                         const rawValueText = String(descriptor.value ?? "").trim();
