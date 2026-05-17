@@ -807,6 +807,7 @@ async def run_openai_compatible_chat_completion(
     request_payload = {
         "model": normalized_model,
         "messages": request_messages,
+        "stream": False,
         "temperature": _clamp_float(temperature, 0.2, 0.0, 1.5),
     }
 
@@ -2199,6 +2200,7 @@ async def run_ai_assistant(
                 "messages": request_messages,
                 "tools": tool_schemas,
                 "tool_choice": "auto",
+                "stream": False,
                 "temperature": _clamp_float(selected_prompt_plugin.get("temperature"), normalized_settings["temperature"], 0.0, 1.5),
             }
             request_payload = _merge_provider_extra_body(selected_provider, request_payload)
