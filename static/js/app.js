@@ -652,9 +652,20 @@ function findPluginDynamicModelField(plugin) {
 }
 
 async function loadPluginDynamicOptionPayloads(plugin, config) {
-    const payloads = {};
+    const payloads = { ...getPluginDynamicOptionPayloads(plugin) };
     const modelField = findPluginDynamicModelField(plugin);
     if (!plugin?.module || !modelField) {
+        return payloads;
+    }
+
+    if (modelField.manual_fetch_options) {
+        if (!payloads.model_options) {
+            const currentModelKey = normalizeInlineText(modelField.key || "model") || "model";
+            payloads.model_options = {
+                options: mergeOptionsWithCurrentValues([], config?.[currentModelKey]),
+                error: "",
+            };
+        }
         return payloads;
     }
 
@@ -733,19 +744,24 @@ function renderStructuredPluginForm(formElement, renderPlugin) {
     syncScopeFieldVisibility(formElement);
 }
 
-async function preparePluginConfigRenderModel(plugin, configOverride = undefined) {
+async function preparePluginConfigRenderModel(plugin, configOverride = undefined, renderOptions = {}) {
     const sourcePlugin = {
         ...plugin,
         config: configOverride !== undefined ? configOverride : plugin?.config,
     };
-    const dynamicOptionPayloads = await loadPluginDynamicOptionPayloads(sourcePlugin, sourcePlugin.config || {});
+    const dynamicOptionPayloads = renderOptions.forceModelOptions
+        ? {
+            ...getPluginDynamicOptionPayloads(sourcePlugin),
+            model_options: await api.getPluginModelOptions(sourcePlugin.module, sourcePlugin.config || {}),
+        }
+        : await loadPluginDynamicOptionPayloads(sourcePlugin, sourcePlugin.config || {});
     return buildPluginConfigRenderModel({
         ...sourcePlugin,
         dynamic_option_payloads: dynamicOptionPayloads,
     });
 }
 
-async function preparePluginExecuteRenderModel(plugin, configOverride = undefined) {
+async function preparePluginExecuteRenderModel(plugin, configOverride = undefined, renderOptions = {}) {
     const scopeTargets = getPluginScopeTargets(plugin);
     const config = { ...(configOverride !== undefined ? configOverride : (plugin?.config || {})) };
     if (config.wxpid === undefined || config.wxpid === null || config.wxpid === "") {
@@ -758,7 +774,12 @@ async function preparePluginExecuteRenderModel(plugin, configOverride = undefine
         config._scope_friend_mode = "selected";
     }
 
-    const dynamicOptionPayloads = await loadPluginDynamicOptionPayloads(plugin, config);
+    const dynamicOptionPayloads = renderOptions.forceModelOptions
+        ? {
+            ...getPluginDynamicOptionPayloads(plugin),
+            model_options: await api.getPluginModelOptions(plugin.module, config || {}),
+        }
+        : await loadPluginDynamicOptionPayloads(plugin, config);
     return buildPluginExecuteRenderModel({
         ...plugin,
         config,
@@ -769,12 +790,12 @@ async function preparePluginExecuteRenderModel(plugin, configOverride = undefine
 async function refreshPluginModelOptionsForm(formElement) {
     const moduleName = getPluginModuleNameForForm(formElement);
     if (!moduleName) {
-        return;
+        return null;
     }
 
     const plugin = getPluginByModule(moduleName);
     if (!plugin || !findPluginDynamicModelField(plugin) || !hasStructuredPluginConfig(plugin)) {
-        return;
+        return null;
     }
 
     const currentRenderPlugin = formElement === elements.pluginConfigForm
@@ -782,18 +803,22 @@ async function refreshPluginModelOptionsForm(formElement) {
         : buildPluginExecuteRenderModel(plugin);
     const nextConfig = readStructuredPluginConfig(formElement, currentRenderPlugin);
     const renderPlugin = formElement === elements.pluginConfigForm
-        ? await preparePluginConfigRenderModel(plugin, nextConfig)
-        : await preparePluginExecuteRenderModel(plugin, nextConfig);
+        ? await preparePluginConfigRenderModel(plugin, nextConfig, { forceModelOptions: true })
+        : await preparePluginExecuteRenderModel(plugin, nextConfig, { forceModelOptions: true });
 
     if (moduleName !== getPluginModuleNameForForm(formElement)) {
-        return;
+        return null;
     }
     renderStructuredPluginForm(formElement, renderPlugin);
+    return renderPlugin;
 }
 
 function shouldRefreshPluginModelOptions(plugin, fieldKey) {
     const modelField = findPluginDynamicModelField(plugin);
     if (!modelField) {
+        return false;
+    }
+    if (modelField.manual_fetch_options) {
         return false;
     }
     const refreshOnFields = Array.isArray(modelField.refresh_on_fields)
@@ -803,6 +828,59 @@ function shouldRefreshPluginModelOptions(plugin, fieldKey) {
         return refreshOnFields.includes(normalizeInlineText(fieldKey));
     }
     return ["base_url", "api_key"].includes(normalizeInlineText(fieldKey));
+}
+
+function applyFetchOptionsSelection(selectElement) {
+    const fieldKey = normalizeInlineText(selectElement?.getAttribute("data-config-fetch-options-select") || "");
+    if (!fieldKey) {
+        return;
+    }
+    const fieldContainer = selectElement?.closest("[data-config-field]");
+    const targetInput = fieldContainer?.querySelector(`[data-config-key="${fieldKey}"]`);
+    if (!(targetInput instanceof HTMLInputElement)) {
+        return;
+    }
+    const nextValue = parseStructuredFieldValue(selectElement.value);
+    targetInput.value = nextValue === undefined || nextValue === null ? "" : String(nextValue);
+    targetInput.dispatchEvent(new Event("input", { bubbles: true }));
+    targetInput.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+async function handlePluginFetchOptions(button, formElement) {
+    const moduleName = getPluginModuleNameForForm(formElement);
+    if (!moduleName) {
+        setStatus("当前未选中插件，无法获取模型列表", "bad");
+        return true;
+    }
+
+    const plugin = getPluginByModule(moduleName);
+    if (!plugin || !findPluginDynamicModelField(plugin)) {
+        setStatus("当前插件未配置模型列表读取能力", "bad");
+        return true;
+    }
+
+    const originalText = button.textContent || "获取模型列表";
+    button.disabled = true;
+    button.textContent = "获取中...";
+    try {
+        setStatus("正在获取模型列表...");
+        const renderPlugin = await refreshPluginModelOptionsForm(formElement);
+        const modelOptionsPayload = renderPlugin?.dynamic_option_payloads?.model_options || {};
+        const optionCount = Array.isArray(modelOptionsPayload.options) ? modelOptionsPayload.options.length : 0;
+        if (modelOptionsPayload.error) {
+            setStatus(`模型列表读取失败：${modelOptionsPayload.error}`, "bad");
+        } else if (optionCount > 0) {
+            setStatus(`已获取 ${optionCount} 个模型，可继续手动输入或从下拉中选择`, "good");
+        } else {
+            setStatus("模型列表为空，请确认上游服务是否返回模型数据", "bad");
+        }
+    } catch (error) {
+        setStatus(`模型列表读取失败：${error.message}`, "bad");
+    } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+    }
+    return true;
 }
 
 function buildPluginScopeFields(plugin, modeDefaults = {}) {
@@ -3787,6 +3865,12 @@ async function handleProjectFilePick(button, formElement) {
             await handleProjectFilePick(pickFileButton, formElement);
             return;
         }
+        const fetchOptionsButton = event.target.closest("[data-config-fetch-options]");
+        if (fetchOptionsButton) {
+            event.preventDefault();
+            await handlePluginFetchOptions(fetchOptionsButton, formElement);
+            return;
+        }
         const optionButton = event.target.closest("[data-config-searchable-option]");
         if (optionButton) {
             event.preventDefault();
@@ -3854,7 +3938,11 @@ async function handleProjectFilePick(button, formElement) {
                     applySearchableChoiceFilter(searchInput);
                 }
             }
-            const fieldKey = target?.getAttribute?.("data-config-key") || "";
+            const fetchOptionsSelect = target?.closest?.("[data-config-fetch-options-select]");
+            if (fetchOptionsSelect instanceof HTMLSelectElement && event.type === "change") {
+                applyFetchOptionsSelection(fetchOptionsSelect);
+            }
+            const fieldKey = target?.getAttribute?.("data-config-key") || target?.getAttribute?.("data-config-fetch-options-select") || "";
             if (fieldKey === "_scope_room_mode" || fieldKey === "_scope_friend_mode") {
                 syncScopeFieldVisibility(formElement);
             }

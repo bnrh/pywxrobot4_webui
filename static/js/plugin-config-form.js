@@ -235,10 +235,46 @@ function renderProjectFilePickerInput(field, value, datasetKey = "data-config-ke
     `;
 }
 
+function renderFetchOptionsTextInput(field, value, datasetKey = "data-config-key") {
+    const currentValue = value ?? "";
+    const inputType = escapeHtml(field.input_type || field.type || "text");
+    const buttonLabel = String(field.fetch_options_button_label || field.button_label || "获取选项").trim() || "获取选项";
+    const selectPlaceholder = String(field.fetch_options_select_placeholder || "从已获取列表中选择").trim() || "从已获取列表中选择";
+    const options = getFieldOptionItems(field);
+    const normalizedValue = JSON.stringify(currentValue);
+
+    return `
+        <div class="config-fetch-options-field">
+            <div class="config-file-picker">
+                <input type="${inputType}" ${datasetKey}="${escapeHtml(field.key)}" value="${escapeHtml(currentValue)}" placeholder="${escapeHtml(field.placeholder || "")}" autocomplete="off">
+                <button
+                    class="button secondary compact"
+                    type="button"
+                    data-config-fetch-options
+                    data-target-key="${escapeHtml(field.key)}"
+                >${escapeHtml(buttonLabel)}</button>
+            </div>
+            ${options.length ? `
+                <select data-config-fetch-options-select="${escapeHtml(field.key)}" style="margin-top:8px;">
+                    <option value="">${escapeHtml(selectPlaceholder)}</option>
+                    ${options.map((option) => {
+                        const descriptor = getFieldOptionDescriptor(option);
+                        const rawValueText = String(descriptor.value ?? "").trim();
+                        return `<option value="${optionValueToAttribute(descriptor.value)}" ${JSON.stringify(descriptor.value) === normalizedValue ? "selected" : ""}>${escapeHtml(descriptor.label || rawValueText || String(descriptor.value ?? ""))}</option>`;
+                    }).join("")}
+                </select>
+            ` : ""}
+        </div>
+    `;
+}
+
 function renderPrimitiveInput(field, value, datasetKey = "data-config-key") {
     const currentValue = value ?? "";
     if (field.file_picker === "project-image") {
         return renderProjectFilePickerInput(field, currentValue, datasetKey);
+    }
+    if (field.fetch_options_button) {
+        return renderFetchOptionsTextInput(field, currentValue, datasetKey);
     }
     if (field.type === "textarea") {
         return `<textarea ${datasetKey}="${escapeHtml(field.key)}" rows="${escapeHtml(String(field.rows || 4))}" placeholder="${escapeHtml(field.placeholder || "")}">${escapeHtml(currentValue)}</textarea>`;
