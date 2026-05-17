@@ -640,7 +640,38 @@ function needsPluginTargets(plugin) {
     });
 }
 
-function resolveTargetOptionsBySource(optionsSource, currentValues) {
+function getPluginDynamicOptionPayloads(plugin) {
+    return plugin?.dynamic_option_payloads && typeof plugin.dynamic_option_payloads === "object"
+        ? plugin.dynamic_option_payloads
+        : {};
+}
+
+function findPluginDynamicModelField(plugin) {
+    const schema = Array.isArray(plugin?.config_schema) ? plugin.config_schema : [];
+    return schema.find((field) => field && typeof field === "object" && field.options_source === "model_options") || null;
+}
+
+async function loadPluginDynamicOptionPayloads(plugin, config) {
+    const payloads = {};
+    const modelField = findPluginDynamicModelField(plugin);
+    if (!plugin?.module || !modelField) {
+        return payloads;
+    }
+
+    try {
+        payloads.model_options = await api.getPluginModelOptions(plugin.module, config || {});
+    } catch (error) {
+        const currentModelKey = normalizeInlineText(modelField.key || "model") || "model";
+        const currentModelValue = config?.[currentModelKey];
+        payloads.model_options = {
+            options: mergeOptionsWithCurrentValues([], currentModelValue),
+            error: error.message || String(error),
+        };
+    }
+    return payloads;
+}
+
+function resolveTargetOptionsBySource(optionsSource, currentValues, plugin = null) {
     if (optionsSource === "room_options") {
         return mergeOptionsWithCurrentValues(state.pluginTargets?.room_options || [], currentValues);
     }
@@ -650,17 +681,31 @@ function resolveTargetOptionsBySource(optionsSource, currentValues) {
     if (optionsSource === "wxpid_options") {
         return mergeOptionsWithCurrentValues(state.pluginTargets?.wxpid_options || [], currentValues);
     }
+    if (optionsSource === "model_options") {
+        const modelOptions = getPluginDynamicOptionPayloads(plugin).model_options;
+        return mergeOptionsWithCurrentValues(modelOptions?.options || [], currentValues);
+    }
     return [];
 }
 
-function hydrateDynamicFieldOptions(field, configValue) {
+function hydrateDynamicFieldOptions(field, configValue, plugin = null) {
     if (!field || typeof field !== "object") {
         return field;
     }
 
     const nextField = { ...field };
     if (field.options_source) {
-        nextField.options = resolveTargetOptionsBySource(field.options_source, configValue);
+        nextField.options = resolveTargetOptionsBySource(field.options_source, configValue, plugin);
+    }
+
+    if (field.options_source === "model_options") {
+        const modelOptionsPayload = getPluginDynamicOptionPayloads(plugin).model_options;
+        if (modelOptionsPayload?.error) {
+            nextField.description = [
+                field.description,
+                `当前模型列表读取失败：${modelOptionsPayload.error}`,
+            ].filter(Boolean).join(" ");
+        }
     }
 
     if (Array.isArray(field.columns)) {
@@ -673,12 +718,91 @@ function hydrateDynamicFieldOptions(field, configValue) {
                 : [];
             return {
                 ...column,
-                options: resolveTargetOptionsBySource(column.options_source, currentValues),
+                options: resolveTargetOptionsBySource(column.options_source, currentValues, plugin),
             };
         });
     }
 
     return nextField;
+}
+
+function renderStructuredPluginForm(formElement, renderPlugin) {
+    renderPluginConfigFields(formElement, renderPlugin);
+    syncRoomMsgSummaryTimeFields(formElement);
+    initializeSearchableChoiceFilters(formElement);
+    syncScopeFieldVisibility(formElement);
+}
+
+async function preparePluginConfigRenderModel(plugin, configOverride = undefined) {
+    const sourcePlugin = {
+        ...plugin,
+        config: configOverride !== undefined ? configOverride : plugin?.config,
+    };
+    const dynamicOptionPayloads = await loadPluginDynamicOptionPayloads(sourcePlugin, sourcePlugin.config || {});
+    return buildPluginConfigRenderModel({
+        ...sourcePlugin,
+        dynamic_option_payloads: dynamicOptionPayloads,
+    });
+}
+
+async function preparePluginExecuteRenderModel(plugin, configOverride = undefined) {
+    const scopeTargets = getPluginScopeTargets(plugin);
+    const config = { ...(configOverride !== undefined ? configOverride : (plugin?.config || {})) };
+    if (config.wxpid === undefined || config.wxpid === null || config.wxpid === "") {
+        config.wxpid = WXPID_OPTION_DEFAULT;
+    }
+    if (scopeTargets.includes("rooms") && config._scope_room_mode === undefined) {
+        config._scope_room_mode = "selected";
+    }
+    if (scopeTargets.includes("friend_labels") && config._scope_friend_mode === undefined) {
+        config._scope_friend_mode = "selected";
+    }
+
+    const dynamicOptionPayloads = await loadPluginDynamicOptionPayloads(plugin, config);
+    return buildPluginExecuteRenderModel({
+        ...plugin,
+        config,
+        dynamic_option_payloads: dynamicOptionPayloads,
+    });
+}
+
+async function refreshPluginModelOptionsForm(formElement) {
+    const moduleName = getPluginModuleNameForForm(formElement);
+    if (!moduleName) {
+        return;
+    }
+
+    const plugin = getPluginByModule(moduleName);
+    if (!plugin || !findPluginDynamicModelField(plugin) || !hasStructuredPluginConfig(plugin)) {
+        return;
+    }
+
+    const currentRenderPlugin = formElement === elements.pluginConfigForm
+        ? buildPluginConfigRenderModel(plugin)
+        : buildPluginExecuteRenderModel(plugin);
+    const nextConfig = readStructuredPluginConfig(formElement, currentRenderPlugin);
+    const renderPlugin = formElement === elements.pluginConfigForm
+        ? await preparePluginConfigRenderModel(plugin, nextConfig)
+        : await preparePluginExecuteRenderModel(plugin, nextConfig);
+
+    if (moduleName !== getPluginModuleNameForForm(formElement)) {
+        return;
+    }
+    renderStructuredPluginForm(formElement, renderPlugin);
+}
+
+function shouldRefreshPluginModelOptions(plugin, fieldKey) {
+    const modelField = findPluginDynamicModelField(plugin);
+    if (!modelField) {
+        return false;
+    }
+    const refreshOnFields = Array.isArray(modelField.refresh_on_fields)
+        ? modelField.refresh_on_fields.map((item) => normalizeInlineText(item)).filter(Boolean)
+        : [];
+    if (refreshOnFields.length) {
+        return refreshOnFields.includes(normalizeInlineText(fieldKey));
+    }
+    return ["base_url", "api_key"].includes(normalizeInlineText(fieldKey));
 }
 
 function buildPluginScopeFields(plugin, modeDefaults = {}) {
@@ -965,7 +1089,7 @@ function buildPluginConfigRenderModel(plugin) {
                 return field;
             }
             const currentValue = sourcePlugin.config?.[field.key];
-            let nextField = hydrateDynamicFieldOptions(field, currentValue);
+            let nextField = hydrateDynamicFieldOptions(field, currentValue, sourcePlugin);
             if (nextField.key === "wxpid") {
                 nextField = buildWxpidFieldSchema(nextField, currentValue);
             }
@@ -1044,17 +1168,14 @@ async function openPluginConfigModal(moduleName) {
     if (needsPluginTargets(plugin)) {
         await loadPluginTargets(true);
     }
-    const renderPlugin = buildPluginConfigRenderModel(plugin);
+    const renderPlugin = await preparePluginConfigRenderModel(plugin);
     state.pluginConfigModule = moduleName;
     elements.pluginConfigModalTitle.textContent = `${plugin.name} 配置`;
     if (hasStructuredPluginConfig(renderPlugin)) {
         elements.pluginConfigMeta.textContent = "插件配置会以结构化表单保存到 SQLite，并在支持的范围内立即热重载。";
         elements.pluginConfigForm.hidden = false;
         elements.pluginConfigEditor.hidden = true;
-        renderPluginConfigFields(elements.pluginConfigForm, renderPlugin);
-        syncRoomMsgSummaryTimeFields(elements.pluginConfigForm);
-        initializeSearchableChoiceFilters(elements.pluginConfigForm);
-        syncScopeFieldVisibility(elements.pluginConfigForm);
+        renderStructuredPluginForm(elements.pluginConfigForm, renderPlugin);
     } else {
         elements.pluginConfigMeta.textContent = "当前插件尚未提供结构化配置描述，暂时仍使用 JSON 编辑。";
         elements.pluginConfigForm.hidden = true;
@@ -1099,7 +1220,7 @@ async function openPluginExecuteModal(moduleName) {
     if (needsPluginTargets(plugin)) {
         await loadPluginTargets(true);
     }
-    const renderPlugin = buildPluginExecuteRenderModel(plugin);
+    const renderPlugin = await preparePluginExecuteRenderModel(plugin);
     if (!renderPlugin.config_schema.length) {
         setStatus("正在执行功能插件...");
         await executePluginWithConfig(moduleName, {});
@@ -1108,10 +1229,7 @@ async function openPluginExecuteModal(moduleName) {
     state.pluginExecuteModule = moduleName;
     elements.pluginExecuteModalTitle.textContent = `${plugin.name} 执行范围`;
     elements.pluginExecuteMeta.textContent = "执行前选择这次运行要作用的微信进程、群聊、好友标签或公众号。本次选择不会覆盖已保存配置。";
-    renderPluginConfigFields(elements.pluginExecuteForm, renderPlugin);
-    syncRoomMsgSummaryTimeFields(elements.pluginExecuteForm);
-    initializeSearchableChoiceFilters(elements.pluginExecuteForm);
-    syncScopeFieldVisibility(elements.pluginExecuteForm);
+    renderStructuredPluginForm(elements.pluginExecuteForm, renderPlugin);
     elements.pluginExecuteModal.classList.add("is-visible");
 }
 
@@ -3742,6 +3860,13 @@ async function handleProjectFilePick(button, formElement) {
             }
             if (fieldKey === "time_range") {
                 syncRoomMsgSummaryTimeFields(formElement, { force: true });
+            }
+            if (event.type === "change") {
+                const moduleName = getPluginModuleNameForForm(formElement);
+                const plugin = moduleName ? getPluginByModule(moduleName) : null;
+                if (plugin && shouldRefreshPluginModelOptions(plugin, fieldKey)) {
+                    void refreshPluginModelOptionsForm(formElement);
+                }
             }
         });
     });

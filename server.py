@@ -24,6 +24,7 @@ from ai_assistant import (
     PROVIDER_CATALOG,
     build_ai_assistant_payload,
     get_default_ai_assistant_settings,
+    load_openai_compatible_model_options,
     normalize_ai_assistant_settings,
     resolve_ai_assistant_prompt_plugin,
     run_ai_assistant,
@@ -1436,6 +1437,35 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
             )
         return payload
 
+    def resolve_plugin_model_options_field(module_name: str) -> dict[str, Any]:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        if not normalized_module_name:
+            raise HTTPException(status_code=400, detail="插件模块不能为空")
+
+        available_modules = set(PluginManager.discover_plugin_modules()) | set(runtime.settings.plugins)
+        if normalized_module_name not in available_modules:
+            raise HTTPException(status_code=404, detail="未找到指定插件模块")
+
+        metadata_list = PluginManager.describe_modules([normalized_module_name])
+        metadata = metadata_list[0] if metadata_list else None
+        if not isinstance(metadata, dict):
+            raise HTTPException(status_code=404, detail="未找到指定插件模块")
+        if not metadata.get("loadable", True):
+            raise HTTPException(status_code=400, detail=f"插件无法加载: {metadata.get('error') or '未知错误'}")
+
+        config_schema = metadata.get("config_schema") if isinstance(metadata.get("config_schema"), list) else []
+        model_field = next(
+            (
+                field
+                for field in config_schema
+                if isinstance(field, dict) and str(field.get("options_source") or "").strip().lower() == "model_options"
+            ),
+            None,
+        )
+        if not isinstance(model_field, dict):
+            raise HTTPException(status_code=400, detail="当前插件未声明模型列表选项")
+        return model_field
+
     async def build_plugin_target_payload() -> dict:
         users_payload = await runtime.api_client.get_logged_in_users()
         users = users_payload if isinstance(users_payload, list) else []
@@ -1891,6 +1921,30 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         except Exception as exc:
             logger.exception("读取插件作用范围选项失败")
             raise HTTPException(status_code=502, detail=f"读取插件作用范围选项失败: {exc}") from exc
+
+    @app.post("/api/plugins/{module_name}/model-options")
+    async def get_plugin_model_options(module_name: str, item: PluginConfigUpdateRequest) -> dict:
+        model_field = resolve_plugin_model_options_field(module_name)
+        options_loader = str(model_field.get("options_loader") or "openai_compatible").strip().lower()
+        if options_loader != "openai_compatible":
+            raise HTTPException(status_code=400, detail="当前插件不支持该模型选项加载方式")
+
+        base_url_key = str(model_field.get("base_url_key") or "base_url").strip() or "base_url"
+        api_key_key = str(model_field.get("api_key_key") or "api_key").strip() or "api_key"
+        current_model_key = str(model_field.get("key") or "model").strip() or "model"
+        config = item.config if isinstance(item.config, dict) else {}
+
+        try:
+            return await load_openai_compatible_model_options(
+                str(config.get(base_url_key) or ""),
+                str(config.get(api_key_key) or ""),
+                str(config.get(current_model_key) or ""),
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("读取插件模型选项失败: {}", module_name)
+            raise HTTPException(status_code=502, detail=f"读取插件模型选项失败: {exc}") from exc
 
     @app.get("/api/rooms/{roomid}/members")
     async def get_room_members(roomid: str, wxpid: int | None = None) -> dict:

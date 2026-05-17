@@ -733,6 +733,108 @@ async def _load_provider_model_options(provider_key: str, provider_settings: dic
     }
 
 
+def _build_model_option_items(model_names: list[str]) -> list[dict[str, str]]:
+    return [
+        {
+            "label": model_name,
+            "value": model_name,
+            "search_text": model_name,
+        }
+        for model_name in model_names
+    ]
+
+
+async def load_openai_compatible_model_options(
+    base_url: str,
+    api_key: str,
+    current_model: str | None = None,
+) -> dict[str, Any]:
+    normalized_base_url = _normalize_provider_base_url(base_url, PROVIDER_CATALOG["openai"]["default_base_url"])
+    normalized_api_key = str(api_key or "").strip()
+    fallback_models: list[str] = []
+    normalized_current_model = str(current_model or "").strip()
+    if normalized_current_model:
+        fallback_models.append(normalized_current_model)
+    fallback_models.append(PROVIDER_CATALOG["openai"]["default_model"])
+
+    model_names = _merge_model_names([], fallback_models)
+    error_message = ""
+    if normalized_api_key:
+        try:
+            loaded_model_names = await asyncio.to_thread(
+                _request_provider_models,
+                normalized_base_url,
+                normalized_api_key,
+                _build_provider_request_headers("openai", normalized_api_key),
+                PROVIDER_CATALOG["openai"].get("models_path") or "/models",
+            )
+            model_names = _merge_model_names(loaded_model_names, fallback_models)
+        except Exception as exc:
+            error_message = str(exc)
+
+    return {
+        "base_url": normalized_base_url,
+        "options": _build_model_option_items(model_names),
+        "error": error_message,
+    }
+
+
+async def run_openai_compatible_chat_completion(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    messages: list[dict[str, Any]] | None,
+    system_prompt: str = "",
+    temperature: float = 0.2,
+) -> dict[str, Any]:
+    normalized_api_key = str(api_key or "").strip()
+    if not normalized_api_key:
+        raise RuntimeError("未配置 API Key")
+
+    normalized_base_url = _normalize_provider_base_url(base_url, PROVIDER_CATALOG["openai"]["default_base_url"])
+    normalized_model = str(model or "").strip() or PROVIDER_CATALOG["openai"]["default_model"]
+    normalized_messages = _normalize_chat_history(messages)
+    if not normalized_messages:
+        raise RuntimeError("缺少可发送给模型的消息")
+
+    request_messages: list[dict[str, Any]] = []
+    normalized_system_prompt = str(system_prompt or "").strip()
+    if normalized_system_prompt:
+        request_messages.append({"role": "system", "content": normalized_system_prompt})
+    request_messages.extend(normalized_messages)
+
+    request_payload = {
+        "model": normalized_model,
+        "messages": request_messages,
+        "temperature": _clamp_float(temperature, 0.2, 0.0, 1.5),
+    }
+
+    response_payload = await asyncio.to_thread(
+        _request_provider_json,
+        _build_provider_url(normalized_base_url, PROVIDER_CATALOG["openai"]["chat_path"]),
+        request_payload,
+        _build_provider_request_headers("openai", normalized_api_key),
+    )
+    choices = response_payload.get("choices") if isinstance(response_payload, dict) else None
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError(f"AI 接口返回异常：{response_payload}")
+
+    choice = choices[0] if isinstance(choices[0], dict) else {}
+    message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+    assistant_content = _normalize_message_content(message.get("content"))
+    assistant_reasoning_content = _normalize_reasoning_content(message.get("reasoning_content"))
+    if not assistant_content:
+        raise RuntimeError("模型未返回可展示的回复")
+
+    return {
+        "content": assistant_content,
+        "reasoning_content": assistant_reasoning_content,
+        "model": normalized_model,
+        "base_url": normalized_base_url,
+    }
+
+
 def get_default_ai_assistant_settings() -> dict[str, Any]:
     defaults = deepcopy(DEFAULT_AI_ASSISTANT_SETTINGS)
     if not defaults.get("prompt_plugins"):

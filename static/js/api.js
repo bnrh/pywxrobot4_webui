@@ -135,6 +135,12 @@ export const api = {
     getPlugins() {
         return requestJson("/api/plugins");
     },
+    getPluginModelOptions(moduleName, config = {}) {
+        return requestJson(`/api/plugins/${encodeURIComponent(moduleName)}/model-options`, {
+            method: "POST",
+            body: JSON.stringify({ config }),
+        });
+    },
     reloadPlugins() {
         return requestJson("/api/plugins/reload", { method: "POST" });
     },
