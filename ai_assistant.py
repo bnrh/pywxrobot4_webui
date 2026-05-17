@@ -755,7 +755,6 @@ async def load_openai_compatible_model_options(
     normalized_current_model = str(current_model or "").strip()
     if normalized_current_model:
         fallback_models.append(normalized_current_model)
-    fallback_models.append(PROVIDER_CATALOG["openai"]["default_model"])
 
     model_names = _merge_model_names([], fallback_models)
     error_message = ""
