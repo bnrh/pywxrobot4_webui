@@ -18,6 +18,8 @@ DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_MARKDOWN_ARTICLE_GHID = ""
 DEFAULT_MARKDOWN_ARTICLE_NICKNAME = ""
 DEFAULT_MARKDOWN_ARTICLE_COVER_URL = "https://docs.hedgedoc.org/images/hedgedoc_logo_black.svg"
+SEND_ARTICLE_COMPAT_GHID = "gh_hedgedoc_renderer"
+SEND_ARTICLE_COMPAT_NICKNAME = "HedgeDoc 渲染器"
 DEFAULT_MARKDOWN_ARTICLE_TITLE = "Markdown 回复"
 HEDGEDOC_REQUEST_TIMEOUT_SECONDS = 20.0
 REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
@@ -271,18 +273,28 @@ def extract_markdown_title(markdown_text, fallback_title=""):
     return trim_text(strip_markdown_to_text(first_line), 50, fallback_title or DEFAULT_MARKDOWN_ARTICLE_TITLE)
 
 
+def resolve_send_article_publisher(markdown_config):
+    ghid = str(markdown_config.get("article_ghid") or "").strip()
+    nickname = str(markdown_config.get("article_nickname") or "").strip()
+    return {
+        "ghid": ghid or SEND_ARTICLE_COMPAT_GHID,
+        "nickname": nickname or SEND_ARTICLE_COMPAT_NICKNAME,
+    }
+
+
 def build_markdown_article_payload(markdown_text, publish_link, roomid, event, markdown_config):
     room_name = resolve_room_name(event, roomid)
     fallback_title = f"{room_name} {DEFAULT_MARKDOWN_ARTICLE_TITLE}".strip()
     title = extract_markdown_title(markdown_text, fallback_title)
     desc = trim_text(strip_markdown_to_text(markdown_text), 200, title)
+    publisher = resolve_send_article_publisher(markdown_config)
     return {
         "title": title,
         "desc": desc,
         "url": publish_link,
         "cover": markdown_config["article_cover_url"],
-        "ghid": markdown_config["article_ghid"],
-        "nickname": markdown_config["article_nickname"],
+        "ghid": publisher["ghid"],
+        "nickname": publisher["nickname"],
     }
 
 
