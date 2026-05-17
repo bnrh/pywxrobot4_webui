@@ -1,11 +1,11 @@
-import { api } from "/static/js/api.js?v=20260514-01";
+import { api } from "/static/js/api.js?v=20260517-02";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260512-03";
+} from "/static/js/plugin-config-form.js?v=20260517-02";
 
 const OVERVIEW_POLL_INTERVAL_MS = 15000;
 const MESSAGE_POLL_INTERVAL_MS = 3000;
