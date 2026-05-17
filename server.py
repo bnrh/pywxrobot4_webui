@@ -69,6 +69,7 @@ SYSTEM_SETTINGS_FIELDS = (
 REMOVED_PLUGIN_MODULES = {normalize_plugin_module_name("webui.plugins.monitor_biz")}
 INVITE_TO_ROOM_PLUGIN_MODULE = normalize_plugin_module_name("webui.plugins.invite_to_toom")
 ENTER_ROOM_TIP_PLUGIN_MODULE = normalize_plugin_module_name("plugins.enter_room_tip")
+ROOM_AI_REPLY_PLUGIN_MODULE = normalize_plugin_module_name("plugins.room_ai_reply")
 LOG_LINE_PATTERN = re.compile(
     r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \| (?P<level>[A-Z]+)\s+\| (?P<module>[^:]+):(?P<function>[^:]+):(?P<line>\d+) - (?P<message>.*)$"
 )
@@ -1358,6 +1359,55 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 }
             return config
 
+        if normalized_module_name == ROOM_AI_REPLY_PLUGIN_MODULE and isinstance(config, dict):
+            normalized_rows: list[dict[str, Any]] = []
+
+            def append_room_config(roomid: Any, base_url: Any = "", api_key: Any = "", model: Any = "", system_prompt: Any = "") -> None:
+                normalized_roomid = str(roomid or "").strip()
+                if not normalized_roomid:
+                    return
+                row = {
+                    "roomid": normalized_roomid,
+                    "base_url": str(base_url or "").strip(),
+                    "api_key": str(api_key or "").strip(),
+                    "model": str(model or "").strip(),
+                    "system_prompt": str(system_prompt or "").strip(),
+                }
+                existing_index = next((index for index, item in enumerate(normalized_rows) if item.get("roomid") == normalized_roomid), -1)
+                if existing_index >= 0:
+                    normalized_rows[existing_index] = row
+                else:
+                    normalized_rows.append(row)
+
+            raw_rows = config.get("room_configs")
+            if isinstance(raw_rows, list):
+                for item in raw_rows:
+                    if not isinstance(item, dict):
+                        continue
+                    append_room_config(
+                        item.get("roomid") or item.get("wxid"),
+                        item.get("base_url"),
+                        item.get("api_key"),
+                        item.get("model"),
+                        item.get("system_prompt") or item.get("prompt"),
+                    )
+
+            if not normalized_rows:
+                append_room_config(
+                    config.get("roomid") or config.get("wxid"),
+                    config.get("base_url"),
+                    config.get("api_key"),
+                    config.get("model"),
+                    config.get("system_prompt") or config.get("prompt"),
+                )
+
+            if normalized_rows:
+                return {
+                    **config,
+                    "room_configs": normalized_rows,
+                }
+            return config
+
         if normalized_module_name != INVITE_TO_ROOM_PLUGIN_MODULE or not isinstance(config, dict):
             return config
 
@@ -1437,7 +1487,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
             )
         return payload
 
-    def resolve_plugin_model_options_field(module_name: str) -> dict[str, Any]:
+    def resolve_plugin_model_options_field(module_name: str, field_key: str = "", parent_field_key: str = "") -> dict[str, Any]:
         normalized_module_name = normalize_plugin_module_name(module_name)
         if not normalized_module_name:
             raise HTTPException(status_code=400, detail="插件模块不能为空")
@@ -1453,15 +1503,41 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         if not metadata.get("loadable", True):
             raise HTTPException(status_code=400, detail=f"插件无法加载: {metadata.get('error') or '未知错误'}")
 
+        normalized_field_key = str(field_key or "").strip().lower()
+        normalized_parent_field_key = str(parent_field_key or "").strip().lower()
         config_schema = metadata.get("config_schema") if isinstance(metadata.get("config_schema"), list) else []
-        model_field = next(
-            (
-                field
-                for field in config_schema
-                if isinstance(field, dict) and str(field.get("options_source") or "").strip().lower() == "model_options"
-            ),
-            None,
-        )
+
+        def match_candidate(candidate_key: Any, candidate_parent_key: Any = "") -> bool:
+            normalized_candidate_key = str(candidate_key or "").strip().lower()
+            normalized_candidate_parent_key = str(candidate_parent_key or "").strip().lower()
+            if normalized_field_key and normalized_candidate_key != normalized_field_key:
+                return False
+            if normalized_parent_field_key and normalized_candidate_parent_key != normalized_parent_field_key:
+                return False
+            return True
+
+        model_field = None
+        for field in config_schema:
+            if not isinstance(field, dict):
+                continue
+            if str(field.get("options_source") or "").strip().lower() == "model_options" and match_candidate(field.get("key")):
+                model_field = field
+                break
+            for column in field.get("columns") if isinstance(field.get("columns"), list) else []:
+                if not isinstance(column, dict):
+                    continue
+                if str(column.get("options_source") or "").strip().lower() != "model_options":
+                    continue
+                if not match_candidate(column.get("key"), field.get("key")):
+                    continue
+                model_field = {
+                    **column,
+                    "__parent_field_key": field.get("key"),
+                }
+                break
+            if isinstance(model_field, dict):
+                break
+
         if not isinstance(model_field, dict):
             raise HTTPException(status_code=400, detail="当前插件未声明模型列表选项")
         return model_field
@@ -1924,7 +2000,10 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
     @app.post("/api/plugins/{module_name}/model-options")
     async def get_plugin_model_options(module_name: str, item: PluginConfigUpdateRequest) -> dict:
-        model_field = resolve_plugin_model_options_field(module_name)
+        config = dict(item.config) if isinstance(item.config, dict) else {}
+        requested_field_key = str(config.pop("__model_field_key", "") or "").strip()
+        requested_parent_field_key = str(config.pop("__model_parent_field_key", "") or "").strip()
+        model_field = resolve_plugin_model_options_field(module_name, requested_field_key, requested_parent_field_key)
         options_loader = str(model_field.get("options_loader") or "openai_compatible").strip().lower()
         if options_loader != "openai_compatible":
             raise HTTPException(status_code=400, detail="当前插件不支持该模型选项加载方式")
@@ -1932,7 +2011,6 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         base_url_key = str(model_field.get("base_url_key") or "base_url").strip() or "base_url"
         api_key_key = str(model_field.get("api_key_key") or "api_key").strip() or "api_key"
         current_model_key = str(model_field.get("key") or "model").strip() or "model"
-        config = item.config if isinstance(item.config, dict) else {}
 
         try:
             return await load_openai_compatible_model_options(

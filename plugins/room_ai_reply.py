@@ -4,7 +4,7 @@ from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text
 
 
 name = "room_ai_reply"
-description = "监听指定群聊文本消息并调用 OpenAI-compatible 大模型自动回复"
+description = "按群聊配置 OpenAI-compatible AI 助手，自动回复群文本消息"
 event_filters = ["text"]
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -16,49 +16,75 @@ DEFAULT_SYSTEM_PROMPT = (
 
 config_schema = [
     {
-        "key": "roomid",
-        "label": "群聊",
-        "type": "select",
-        "searchable": True,
-        "options_source": "room_options",
-        "empty_option_label": "",
-        "placeholder": "输入群名称或 wxid 搜索",
-        "required": True,
-        "required_message": "群聊不能为空",
-        "description": "仅回复这个群聊中的文本消息。",
-    },
-    {
-        "key": "base_url",
-        "label": "大模型 Base URL",
-        "type": "url",
-        "default": DEFAULT_BASE_URL,
-        "placeholder": "https://api.openai.com/v1",
-        "description": "需要兼容 OpenAI Chat Completions 与 /models 接口。",
-    },
-    {
-        "key": "api_key",
-        "label": "大模型 API Key",
-        "type": "password",
-        "default": "",
-        "placeholder": "输入可用的 API Key",
-        "description": "填写后插件才会实际调用大模型。",
-    },
-    {
-        "key": "model",
-        "label": "模型",
-        "type": "text",
-        "options_source": "model_options",
-        "options_loader": "openai_compatible",
-        "manual_fetch_options": True,
-        "fetch_options_button": True,
-        "fetch_options_button_label": "获取模型列表",
-        "fetch_options_select_placeholder": "从已获取的模型列表中选择",
-        "base_url_key": "base_url",
-        "api_key_key": "api_key",
-        "placeholder": "可手动输入模型名，或点击右侧按钮获取列表后选择",
-        "required": True,
-        "required_message": "模型不能为空",
-        "description": "支持手动输入模型名；也可点击右侧按钮，根据当前 Base URL 和 API Key 获取模型列表。",
+        "key": "room_configs",
+        "aliases": ["roomid", "wxid", "base_url", "api_key", "model", "system_prompt", "prompt"],
+        "label": "群聊 AI 助手",
+        "type": "object-list",
+        "default": [],
+        "meaningful_keys": ["roomid", "base_url", "api_key", "model", "system_prompt"],
+        "unique_by": ["roomid"],
+        "unique_message": "同一个群聊只能保留一个 AI 助手配置",
+        "empty_text": "暂无群聊 AI 助手配置，点击“新增”后为目标群聊单独设置模型、Key 和提示词。",
+        "description": "每个群聊可单独配置一个 AI 助手，包括 Base URL、API Key、模型和系统提示词。模型支持手动填写，也可点击按钮获取模型列表。",
+        "columns": [
+            {
+                "key": "roomid",
+                "label": "群聊",
+                "type": "select",
+                "searchable": True,
+                "options_source": "room_options",
+                "empty_option_label": "",
+                "placeholder": "输入群名称或 wxid 搜索",
+                "required": True,
+                "required_message": "群聊不能为空",
+                "width": "wide",
+            },
+            {
+                "key": "base_url",
+                "label": "大模型 Base URL",
+                "type": "url",
+                "default": DEFAULT_BASE_URL,
+                "placeholder": "https://api.openai.com/v1",
+                "width": "wide",
+            },
+            {
+                "key": "api_key",
+                "label": "大模型 API Key",
+                "type": "password",
+                "default": "",
+                "placeholder": "输入可用的 API Key",
+                "required": True,
+                "required_message": "API Key 不能为空",
+            },
+            {
+                "key": "model",
+                "label": "模型",
+                "type": "text",
+                "options_source": "model_options",
+                "options_loader": "openai_compatible",
+                "manual_fetch_options": True,
+                "fetch_options_button": True,
+                "fetch_options_button_label": "获取模型列表",
+                "fetch_options_select_placeholder": "从已获取的模型列表中选择",
+                "base_url_key": "base_url",
+                "api_key_key": "api_key",
+                "placeholder": "可手动输入模型名，或点击右侧按钮获取列表后选择",
+                "required": True,
+                "required_message": "模型不能为空",
+                "description": "支持手动输入模型名，也可根据当前 Base URL 和 API Key 获取模型列表。",
+                "width": "wide",
+            },
+            {
+                "key": "system_prompt",
+                "label": "系统提示词",
+                "type": "textarea",
+                "rows": 5,
+                "default": DEFAULT_SYSTEM_PROMPT,
+                "placeholder": "例如：你是这个群的售后助手，回答要礼貌、简洁，并优先给出可执行步骤",
+                "description": "每个群聊都可以自定义 AI 助手提示词；留空时会使用默认提示词。",
+                "width": "wide",
+            },
+        ],
     },
 ]
 
@@ -115,18 +141,68 @@ def build_model_prompt(event, roomid, message_text):
     )
 
 
+def normalize_room_ai_entry(item):
+    if not isinstance(item, dict):
+        return None
+
+    roomid = normalize_text(item.get("roomid") or item.get("wxid"))
+    if not roomid:
+        return None
+
+    return {
+        "roomid": roomid,
+        "base_url": str(item.get("base_url") or DEFAULT_BASE_URL).strip() or DEFAULT_BASE_URL,
+        "api_key": str(item.get("api_key") or "").strip(),
+        "model": str(item.get("model") or "").strip(),
+        "system_prompt": str(item.get("system_prompt") or item.get("prompt") or DEFAULT_SYSTEM_PROMPT).strip() or DEFAULT_SYSTEM_PROMPT,
+    }
+
+
+def build_legacy_room_ai_entry(config):
+    if not isinstance(config, dict):
+        return None
+    return normalize_room_ai_entry(
+        {
+            "roomid": config.get("roomid") or config.get("wxid"),
+            "base_url": config.get("base_url"),
+            "api_key": config.get("api_key"),
+            "model": config.get("model"),
+            "system_prompt": config.get("system_prompt") or config.get("prompt"),
+        }
+    )
+
+
+def get_room_config_map(config):
+    room_config_map = {}
+    raw_room_configs = config.get("room_configs") if isinstance(config, dict) else []
+
+    if isinstance(raw_room_configs, list):
+        for item in raw_room_configs:
+            entry = normalize_room_ai_entry(item)
+            if entry is not None:
+                room_config_map[entry["roomid"]] = entry
+        if room_config_map:
+            return room_config_map
+
+    legacy_entry = build_legacy_room_ai_entry(config)
+    if legacy_entry is not None:
+        room_config_map[legacy_entry["roomid"]] = legacy_entry
+    return room_config_map
+
+
 async def handle_message(event, context):
     if get_message_type(event) != MESSAGE_TYPES.TEXT:
         return {"handled": False, "detail": ""}
 
-    target_roomid = normalize_text(context.config.get("roomid") or "")
     roomid = normalize_text(event.conversation_wxid or "")
-    if not target_roomid or roomid != target_roomid:
+    room_config = get_room_config_map(context.config).get(roomid)
+    if room_config is None:
         return {"handled": False, "detail": ""}
 
-    base_url = str(context.config.get("base_url") or DEFAULT_BASE_URL).strip() or DEFAULT_BASE_URL
-    api_key = str(context.config.get("api_key") or "").strip()
-    model = str(context.config.get("model") or "").strip()
+    base_url = room_config["base_url"]
+    api_key = room_config["api_key"]
+    model = room_config["model"]
+    system_prompt = room_config["system_prompt"] or DEFAULT_SYSTEM_PROMPT
     if not api_key or not model:
         return {"handled": False, "detail": ""}
 
@@ -142,7 +218,7 @@ async def handle_message(event, context):
             api_key=api_key,
             model=model,
             messages=[{"role": "user", "content": build_model_prompt(event, roomid, message_text)}],
-            system_prompt=DEFAULT_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             temperature=0.4,
         )
     except Exception as exc:

@@ -646,9 +646,45 @@ function getPluginDynamicOptionPayloads(plugin) {
         : {};
 }
 
-function findPluginDynamicModelField(plugin) {
+function findPluginDynamicModelField(plugin, fieldKey = "", parentFieldKey = "") {
+    const normalizedFieldKey = normalizeInlineText(fieldKey).toLowerCase();
+    const normalizedParentFieldKey = normalizeInlineText(parentFieldKey).toLowerCase();
     const schema = Array.isArray(plugin?.config_schema) ? plugin.config_schema : [];
-    return schema.find((field) => field && typeof field === "object" && field.options_source === "model_options") || null;
+    for (const field of schema) {
+        if (!field || typeof field !== "object") {
+            continue;
+        }
+        const normalizedFieldOptionsSource = normalizeInlineText(field.options_source).toLowerCase();
+        const normalizedCurrentFieldKey = normalizeInlineText(field.key).toLowerCase();
+        if (
+            normalizedFieldOptionsSource === "model_options"
+            && (!normalizedFieldKey || normalizedCurrentFieldKey === normalizedFieldKey)
+            && (!normalizedParentFieldKey || normalizedCurrentFieldKey === normalizedParentFieldKey)
+        ) {
+            return field;
+        }
+        for (const column of Array.isArray(field.columns) ? field.columns : []) {
+            if (!column || typeof column !== "object") {
+                continue;
+            }
+            const normalizedColumnOptionsSource = normalizeInlineText(column.options_source).toLowerCase();
+            const normalizedColumnKey = normalizeInlineText(column.key).toLowerCase();
+            if (normalizedColumnOptionsSource !== "model_options") {
+                continue;
+            }
+            if (normalizedFieldKey && normalizedColumnKey !== normalizedFieldKey) {
+                continue;
+            }
+            if (normalizedParentFieldKey && normalizedCurrentFieldKey !== normalizedParentFieldKey) {
+                continue;
+            }
+            return {
+                ...column,
+                __parent_field_key: field.key,
+            };
+        }
+    }
+    return null;
 }
 
 async function loadPluginDynamicOptionPayloads(plugin, config) {
@@ -830,13 +866,81 @@ function shouldRefreshPluginModelOptions(plugin, fieldKey) {
     return ["base_url", "api_key"].includes(normalizeInlineText(fieldKey));
 }
 
-function applyFetchOptionsSelection(selectElement) {
-    const fieldKey = normalizeInlineText(selectElement?.getAttribute("data-config-fetch-options-select") || "");
-    if (!fieldKey) {
+function getFetchOptionsFieldShell(element) {
+    return element?.closest(".config-fetch-options-field") || null;
+}
+
+function getFetchOptionsTargetInput(element) {
+    const fieldShell = getFetchOptionsFieldShell(element);
+    const targetInput = fieldShell?.querySelector("input[data-column-key], input[data-config-key]");
+    return targetInput instanceof HTMLInputElement ? targetInput : null;
+}
+
+function buildFetchOptionsSelectMarkup(fieldKey, options, currentValue, placeholder) {
+    const normalizedCurrentValue = JSON.stringify(currentValue ?? "");
+    return `
+        <select data-config-fetch-options-select="${escapeHtml(fieldKey)}" style="margin-top:8px;">
+            <option value="">${escapeHtml(placeholder)}</option>
+            ${options.map((option) => {
+                const optionValue = Object.prototype.hasOwnProperty.call(option, "value") ? option.value : option;
+                const optionLabel = Object.prototype.hasOwnProperty.call(option, "label") ? option.label : String(optionValue ?? "");
+                const encodedValue = escapeHtml(JSON.stringify(optionValue));
+                return `<option value="${encodedValue}" ${JSON.stringify(optionValue) === normalizedCurrentValue ? "selected" : ""}>${escapeHtml(optionLabel)}</option>`;
+            }).join("")}
+        </select>
+    `;
+}
+
+function updateFetchOptionsSelect(fieldShell, fieldKey, options, currentValue) {
+    if (!fieldShell || !fieldKey) {
         return;
     }
-    const fieldContainer = selectElement?.closest("[data-config-field]");
-    const targetInput = fieldContainer?.querySelector(`[data-config-key="${fieldKey}"]`);
+    const mergedOptions = mergeOptionsWithCurrentValues(options, currentValue);
+    const existingSelect = fieldShell.querySelector(`[data-config-fetch-options-select="${fieldKey}"]`);
+    const placeholder = normalizeInlineText(existingSelect?.querySelector("option")?.textContent || "") || "从已获取的模型列表中选择";
+    const nextMarkup = buildFetchOptionsSelectMarkup(fieldKey, mergedOptions, currentValue, placeholder);
+    if (existingSelect) {
+        existingSelect.outerHTML = nextMarkup;
+        return;
+    }
+    fieldShell.insertAdjacentHTML("beforeend", nextMarkup);
+}
+
+function buildPluginModelOptionsRequestConfig(formElement, plugin, fieldContainer, targetInput, fieldKey, parentFieldKey) {
+    if (!plugin) {
+        return {
+            __model_field_key: fieldKey,
+            __model_parent_field_key: parentFieldKey,
+        };
+    }
+
+    const renderPlugin = formElement === elements.pluginConfigForm
+        ? buildPluginConfigRenderModel(plugin)
+        : buildPluginExecuteRenderModel(plugin);
+    const currentConfig = readStructuredPluginConfig(formElement, renderPlugin);
+    if (!parentFieldKey) {
+        return {
+            ...currentConfig,
+            __model_field_key: fieldKey,
+        };
+    }
+
+    const rowElement = targetInput?.closest("[data-config-row]");
+    const rowElements = fieldContainer ? [...fieldContainer.querySelectorAll("[data-config-row]")] : [];
+    const rowIndex = rowElement ? rowElements.indexOf(rowElement) : -1;
+    const rowConfigs = Array.isArray(currentConfig[parentFieldKey]) ? currentConfig[parentFieldKey] : [];
+    const rowConfig = rowIndex >= 0 && rowConfigs[rowIndex] && typeof rowConfigs[rowIndex] === "object"
+        ? rowConfigs[rowIndex]
+        : {};
+    return {
+        ...rowConfig,
+        __model_field_key: fieldKey,
+        __model_parent_field_key: parentFieldKey,
+    };
+}
+
+function applyFetchOptionsSelection(selectElement) {
+    const targetInput = getFetchOptionsTargetInput(selectElement);
     if (!(targetInput instanceof HTMLInputElement)) {
         return;
     }
@@ -854,7 +958,13 @@ async function handlePluginFetchOptions(button, formElement) {
     }
 
     const plugin = getPluginByModule(moduleName);
-    if (!plugin || !findPluginDynamicModelField(plugin)) {
+    const targetInput = getFetchOptionsTargetInput(button);
+    const fieldKey = normalizeInlineText(button?.getAttribute("data-target-key") || targetInput?.getAttribute("data-column-key") || targetInput?.getAttribute("data-config-key") || "");
+    const fieldContainer = button?.closest("[data-config-field]");
+    const parentFieldKey = fieldContainer?.getAttribute("data-config-type") === "object-list"
+        ? normalizeInlineText(fieldContainer?.getAttribute("data-config-field") || "")
+        : "";
+    if (!plugin || !fieldKey || !(targetInput instanceof HTMLInputElement) || !findPluginDynamicModelField(plugin, fieldKey, parentFieldKey)) {
         setStatus("当前插件未配置模型列表读取能力", "bad");
         return true;
     }
@@ -864,12 +974,16 @@ async function handlePluginFetchOptions(button, formElement) {
     button.textContent = "获取中...";
     try {
         setStatus("正在获取模型列表...");
-        const renderPlugin = await refreshPluginModelOptionsForm(formElement);
-        const modelOptionsPayload = renderPlugin?.dynamic_option_payloads?.model_options || {};
-        const optionCount = Array.isArray(modelOptionsPayload.options) ? modelOptionsPayload.options.length : 0;
-        if (modelOptionsPayload.error) {
+        const requestConfig = buildPluginModelOptionsRequestConfig(formElement, plugin, fieldContainer, targetInput, fieldKey, parentFieldKey);
+        const modelOptionsPayload = await api.getPluginModelOptions(moduleName, requestConfig);
+        const nextOptions = Array.isArray(modelOptionsPayload?.options) ? modelOptionsPayload.options : [];
+        updateFetchOptionsSelect(getFetchOptionsFieldShell(button), fieldKey, nextOptions, targetInput.value);
+        if (modelOptionsPayload?.error) {
             setStatus(`模型列表读取失败：${modelOptionsPayload.error}`, "bad");
-        } else if (optionCount > 0) {
+            return true;
+        }
+        const optionCount = nextOptions.length;
+        if (optionCount > 0) {
             setStatus(`已获取 ${optionCount} 个模型，可继续手动输入或从下拉中选择`, "good");
         } else {
             setStatus("模型列表为空，请确认上游服务是否返回模型数据", "bad");
