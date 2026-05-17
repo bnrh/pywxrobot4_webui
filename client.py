@@ -325,6 +325,36 @@ class WxRobotApiClient:
         request_timeout = self._resolve_wait_request_timeout(wait=wait, timeout=timeout)
         return await self.post_json("/send/gif", payload, request_timeout=request_timeout)
 
+    async def send_article(
+        self,
+        wxid: str,
+        title: str,
+        url: str,
+        cover: str,
+        ghid: str,
+        nickname: str,
+        desc: str = "",
+        wxpid: int | None = None,
+        wait: bool = False,
+        timeout: int = 3,
+    ) -> dict[str, Any]:
+        payload = self._with_optional_wxpid(
+            {
+                "wxid": wxid,
+                "title": title,
+                "desc": desc,
+                "url": url,
+                "cover": cover,
+                "ghid": ghid,
+                "nickname": nickname,
+                "wait": wait,
+                "timeout": timeout,
+            },
+            wxpid,
+        )
+        request_timeout = self._resolve_wait_request_timeout(wait=wait, timeout=timeout)
+        return await self.post_json("/send/article", payload, request_timeout=request_timeout)
+
     async def check_user_state(self, wxid: str, wxpid: int | None = None) -> dict[str, Any]:
         return await self.post_json("/user/checkstate", self._with_optional_wxpid({"wxid": wxid}, wxpid))
 
@@ -459,6 +489,9 @@ class WxRobotApiClient:
 
     async def sendGif(self, *, wxid: str, path: str, wxpid: int | None = None, wait: bool = False, timeout: int = 3) -> dict[str, Any]:
         return await self.send_gif(wxid, path, wxpid, wait, timeout)
+
+    async def sendArticle(self, *, wxid: str, title: str, url: str, cover: str, ghid: str, nickname: str, desc: str = "", wxpid: int | None = None, wait: bool = False, timeout: int = 3) -> dict[str, Any]:
+        return await self.send_article(wxid, title, url, cover, ghid, nickname, desc, wxpid, wait, timeout)
 
     async def checkUserState(self, *, wxid: str, wxpid: int | None = None) -> dict[str, Any]:
         return await self.check_user_state(wxid, wxpid)

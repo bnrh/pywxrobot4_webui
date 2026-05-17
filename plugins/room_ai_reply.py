@@ -1,3 +1,10 @@
+import asyncio
+import json
+import re
+from http.cookiejar import CookieJar
+from urllib import error, parse, request
+from urllib.parse import urljoin
+
 from ai_assistant import run_openai_compatible_chat_completion
 
 from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text
@@ -8,6 +15,25 @@ description = "按群聊配置 OpenAI-compatible AI 助手，自动回复群文�
 event_filters = ["text"]
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_MARKDOWN_ARTICLE_GHID = "gh_markdown_renderer"
+DEFAULT_MARKDOWN_ARTICLE_NICKNAME = "Markdown 渲染器"
+DEFAULT_MARKDOWN_ARTICLE_COVER_PATH = "favicon.ico"
+DEFAULT_MARKDOWN_ARTICLE_TITLE = "Markdown 回复"
+HEDGEDOC_REQUEST_TIMEOUT_SECONDS = 20.0
+REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
+MARKDOWN_STRONG_PATTERNS = [
+    re.compile(r"```"),
+    re.compile(r"(?m)^\s*#{1,6}\s+\S"),
+    re.compile(r"(?m)^\s*>\s+\S"),
+    re.compile(r"(?m)^\s*\|.+\|\s*$"),
+    re.compile(r"\[[^\]]+\]\([^\)]+\)"),
+    re.compile(r"!\[[^\]]*\]\([^\)]+\)"),
+    re.compile(r"(?m)^\s*[-*_]{3,}\s*$"),
+]
+MARKDOWN_LIST_PATTERN = re.compile(r"(?m)^\s*(?:[-*+] |\d+\. )\S")
+FRONT_MATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*(?:\n|$)", re.S)
+FRONT_MATTER_TITLE_PATTERN = re.compile(r"(?mi)^\s*title\s*:\s*[\"']?(.*?)[\"']?\s*$")
+HEADING_PATTERN = re.compile(r"(?m)^\s*#{1,6}\s+(.+?)\s*$")
 
 config_schema = [
     {
@@ -87,7 +113,64 @@ config_schema = [
             },
         ],
     },
+    {
+        "key": "hedgedoc_url",
+        "label": "HedgeDoc URL",
+        "type": "url",
+        "default": "",
+        "placeholder": "例如：http://127.0.0.1:3000",
+        "description": "当模型回复被识别为 Markdown 时，会先上传到该 HedgeDoc 实例，再发送图文链接。",
+    },
+    {
+        "key": "hedgedoc_email",
+        "label": "HedgeDoc 邮箱",
+        "type": "text",
+        "default": "",
+        "placeholder": "输入 HedgeDoc 本地账号邮箱",
+        "description": "参考 tmp/1.py 的登录方式，使用本地邮箱密码登录 HedgeDoc。",
+        "full_width": False,
+    },
+    {
+        "key": "hedgedoc_password",
+        "label": "HedgeDoc 密码",
+        "type": "password",
+        "default": "",
+        "placeholder": "输入 HedgeDoc 本地账号密码",
+        "description": "仅在模型回复为 Markdown 且需要发送图文链接时使用。",
+        "full_width": False,
+    },
+    {
+        "key": "article_ghid",
+        "label": "图文 ghid",
+        "type": "text",
+        "default": DEFAULT_MARKDOWN_ARTICLE_GHID,
+        "placeholder": "gh_markdown_renderer",
+        "description": "发送图文消息时使用的公众号 ghid。留空时使用默认值。",
+        "full_width": False,
+    },
+    {
+        "key": "article_nickname",
+        "label": "图文昵称",
+        "type": "text",
+        "default": DEFAULT_MARKDOWN_ARTICLE_NICKNAME,
+        "placeholder": "Markdown 渲染器",
+        "description": "发送图文消息时显示的公众号昵称。",
+        "full_width": False,
+    },
+    {
+        "key": "article_cover_url",
+        "label": "图文封面 URL",
+        "type": "url",
+        "default": "",
+        "placeholder": "可选，不填时默认使用 HedgeDoc 的 favicon.ico",
+        "description": "发送图文消息时使用的封面 URL。若留空，会自动拼接 HedgeDoc 的 favicon.ico。",
+    },
 ]
+
+
+class _NoRedirectHandler(request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def strip_room_sender_prefix(content, room_sender):
@@ -140,6 +223,196 @@ def build_model_prompt(event, roomid, message_text):
         f"消息内容：{message_text}\n\n"
         "请直接给出适合发回群聊的回复。"
     )
+
+
+def normalize_markdown_delivery_config(config):
+    normalized_config = config if isinstance(config, dict) else {}
+    hedgedoc_url = str(normalized_config.get("hedgedoc_url") or "").strip().rstrip("/")
+    article_cover_url = str(normalized_config.get("article_cover_url") or "").strip()
+    return {
+        "hedgedoc_url": hedgedoc_url,
+        "hedgedoc_email": str(normalized_config.get("hedgedoc_email") or "").strip(),
+        "hedgedoc_password": str(normalized_config.get("hedgedoc_password") or "").strip(),
+        "article_ghid": str(normalized_config.get("article_ghid") or DEFAULT_MARKDOWN_ARTICLE_GHID).strip() or DEFAULT_MARKDOWN_ARTICLE_GHID,
+        "article_nickname": str(normalized_config.get("article_nickname") or DEFAULT_MARKDOWN_ARTICLE_NICKNAME).strip() or DEFAULT_MARKDOWN_ARTICLE_NICKNAME,
+        "article_cover_url": article_cover_url or (urljoin(f"{hedgedoc_url}/", DEFAULT_MARKDOWN_ARTICLE_COVER_PATH) if hedgedoc_url else ""),
+    }
+
+
+def get_missing_markdown_delivery_fields(markdown_config):
+    missing_fields = []
+    for field_key in ["hedgedoc_url", "hedgedoc_email", "hedgedoc_password", "article_cover_url", "article_ghid", "article_nickname"]:
+        if not str(markdown_config.get(field_key) or "").strip():
+            missing_fields.append(field_key)
+    return missing_fields
+
+
+def is_likely_markdown(content):
+    normalized_content = str(content or "").strip()
+    if not normalized_content:
+        return False
+    if any(pattern.search(normalized_content) for pattern in MARKDOWN_STRONG_PATTERNS):
+        return True
+    return len(MARKDOWN_LIST_PATTERN.findall(normalized_content)) >= 2
+
+
+def trim_text(value, limit, fallback=""):
+    normalized_value = str(value or "").strip() or str(fallback or "").strip()
+    if len(normalized_value) <= limit:
+        return normalized_value
+    return f"{normalized_value[: max(0, limit - 1)].rstrip()}…"
+
+
+def strip_markdown_to_text(markdown_text):
+    normalized_text = str(markdown_text or "")
+    normalized_text = re.sub(r"```[\s\S]*?```", " ", normalized_text)
+    normalized_text = re.sub(r"`([^`]+)`", r"\1", normalized_text)
+    normalized_text = re.sub(r"!\[([^\]]*)\]\([^\)]+\)", r"\1", normalized_text)
+    normalized_text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", normalized_text)
+    normalized_text = re.sub(r"(?m)^\s*#{1,6}\s*", "", normalized_text)
+    normalized_text = re.sub(r"(?m)^\s*>\s*", "", normalized_text)
+    normalized_text = re.sub(r"(?m)^\s*(?:[-*+] |\d+\. )", "", normalized_text)
+    normalized_text = re.sub(r"(?m)^\s*\|", "", normalized_text)
+    normalized_text = normalized_text.replace("|", " ")
+    normalized_text = re.sub(r"[*_~]", "", normalized_text)
+    normalized_text = re.sub(r"\s+", " ", normalized_text)
+    return normalized_text.strip()
+
+
+def extract_markdown_title(markdown_text, fallback_title=""):
+    normalized_text = str(markdown_text or "").strip()
+    if not normalized_text:
+        return trim_text(fallback_title, 50, DEFAULT_MARKDOWN_ARTICLE_TITLE)
+
+    front_matter_match = FRONT_MATTER_PATTERN.match(normalized_text)
+    if front_matter_match:
+        title_match = FRONT_MATTER_TITLE_PATTERN.search(front_matter_match.group(1))
+        if title_match:
+            return trim_text(strip_markdown_to_text(title_match.group(1)), 50, fallback_title)
+
+    heading_match = HEADING_PATTERN.search(normalized_text)
+    if heading_match:
+        return trim_text(strip_markdown_to_text(heading_match.group(1)), 50, fallback_title)
+
+    first_line = next((line for line in normalized_text.splitlines() if line.strip()), "")
+    return trim_text(strip_markdown_to_text(first_line), 50, fallback_title or DEFAULT_MARKDOWN_ARTICLE_TITLE)
+
+
+def build_markdown_article_payload(markdown_text, publish_link, roomid, event, markdown_config):
+    room_name = resolve_room_name(event, roomid)
+    fallback_title = f"{room_name} {DEFAULT_MARKDOWN_ARTICLE_TITLE}".strip()
+    title = extract_markdown_title(markdown_text, fallback_title)
+    desc = trim_text(strip_markdown_to_text(markdown_text), 200, title)
+    return {
+        "title": title,
+        "desc": desc,
+        "url": publish_link,
+        "cover": markdown_config["article_cover_url"],
+        "ghid": markdown_config["article_ghid"],
+        "nickname": markdown_config["article_nickname"],
+    }
+
+
+def build_hedgedoc_openers():
+    cookie_jar = CookieJar()
+    redirect_opener = request.build_opener(request.HTTPCookieProcessor(cookie_jar))
+    no_redirect_opener = request.build_opener(request.HTTPCookieProcessor(cookie_jar), _NoRedirectHandler())
+    return redirect_opener, no_redirect_opener
+
+
+def open_with_redirect_capture(opener, req, timeout):
+    try:
+        with opener.open(req, timeout=timeout) as response:
+            return response.getcode(), response.headers, response.read().decode("utf-8", errors="ignore")
+    except error.HTTPError as exc:
+        response_text = exc.read().decode("utf-8", errors="ignore")
+        if exc.code in REDIRECT_STATUS_CODES:
+            return exc.code, exc.headers, response_text
+        raise RuntimeError(f"HedgeDoc 请求失败，HTTP {exc.code}: {response_text[:500]}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"HedgeDoc 请求失败: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise RuntimeError("HedgeDoc 请求超时") from exc
+
+
+def login_hedgedoc(hedgedoc_url, email, password):
+    redirect_opener, no_redirect_opener = build_hedgedoc_openers()
+    login_url = urljoin(f"{hedgedoc_url}/", "login")
+    login_request = request.Request(
+        login_url,
+        data=parse.urlencode({"email": email, "password": password}).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded; charset=utf-8"},
+        method="POST",
+    )
+    try:
+        with redirect_opener.open(login_request, timeout=HEDGEDOC_REQUEST_TIMEOUT_SECONDS) as response:
+            response.read()
+    except error.HTTPError as exc:
+        response_text = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"HedgeDoc 登录失败，HTTP {exc.code}: {response_text[:500]}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"HedgeDoc 登录失败: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise RuntimeError("HedgeDoc 登录超时") from exc
+
+    me_request = request.Request(urljoin(f"{hedgedoc_url}/", "me"), method="GET")
+    try:
+        with redirect_opener.open(me_request, timeout=HEDGEDOC_REQUEST_TIMEOUT_SECONDS) as response:
+            response_text = response.read().decode("utf-8", errors="ignore")
+            if response.getcode() != 200:
+                raise RuntimeError(f"HedgeDoc 登录校验失败：/me 返回 {response.getcode()}")
+            json.loads(response_text or "{}")
+    except error.HTTPError as exc:
+        response_text = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"HedgeDoc 登录校验失败，HTTP {exc.code}: {response_text[:500]}") from exc
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError("HedgeDoc 登录成功，但 /me 返回了异常响应") from exc
+
+    return no_redirect_opener
+
+
+def create_hedgedoc_note(opener, hedgedoc_url, markdown_text):
+    create_request = request.Request(
+        urljoin(f"{hedgedoc_url}/", "new"),
+        data=str(markdown_text or "").encode("utf-8"),
+        headers={"Content-Type": "text/markdown; charset=utf-8"},
+        method="POST",
+    )
+    status_code, headers, response_text = open_with_redirect_capture(opener, create_request, HEDGEDOC_REQUEST_TIMEOUT_SECONDS)
+    if status_code not in REDIRECT_STATUS_CODES:
+        raise RuntimeError(f"HedgeDoc 创建文档失败，HTTP {status_code}: {response_text[:500]}")
+
+    location = headers.get("Location") if headers is not None else ""
+    if not location:
+        raise RuntimeError("HedgeDoc 创建文档成功但未返回 Location 头")
+
+    note_url = urljoin(f"{hedgedoc_url}/", str(location).lstrip("/"))
+    note_id = note_url.rstrip("/").split("/")[-1]
+    if not note_id:
+        raise RuntimeError("HedgeDoc 创建文档后未解析到 note_id")
+    return note_id, note_url
+
+
+def get_hedgedoc_publish_link(opener, hedgedoc_url, note_id):
+    publish_request = request.Request(urljoin(f"{hedgedoc_url}/", f"{note_id}/publish"), method="GET")
+    status_code, headers, response_text = open_with_redirect_capture(opener, publish_request, HEDGEDOC_REQUEST_TIMEOUT_SECONDS)
+    if status_code == 200:
+        return urljoin(f"{hedgedoc_url}/", f"{note_id}/publish")
+    if status_code in REDIRECT_STATUS_CODES:
+        location = headers.get("Location") if headers is not None else ""
+        if location:
+            return urljoin(f"{hedgedoc_url}/", str(location).lstrip("/"))
+    raise RuntimeError(f"HedgeDoc 获取发布链接失败，HTTP {status_code}: {response_text[:500]}")
+
+
+def upload_markdown_to_hedgedoc(markdown_text, markdown_config):
+    hedgedoc_opener = login_hedgedoc(
+        markdown_config["hedgedoc_url"],
+        markdown_config["hedgedoc_email"],
+        markdown_config["hedgedoc_password"],
+    )
+    note_id, _ = create_hedgedoc_note(hedgedoc_opener, markdown_config["hedgedoc_url"], markdown_text)
+    return get_hedgedoc_publish_link(hedgedoc_opener, markdown_config["hedgedoc_url"], note_id)
 
 
 def normalize_room_ai_entry(item):
@@ -242,8 +515,43 @@ async def handle_message(event, context):
     if not reply_text:
         return {"handled": False, "detail": "模型未返回可发送的回复"}
 
+    reply_mode = "text"
+    article_payload = {}
+    markdown_config = normalize_markdown_delivery_config(context.config)
+    markdown_detected = is_likely_markdown(reply_text)
+    if markdown_detected:
+        missing_markdown_fields = get_missing_markdown_delivery_fields(markdown_config)
+        if missing_markdown_fields:
+            context.logger.warning(
+                "检测到 Markdown 回复，但 HedgeDoc 图文配置不完整，回退为文本发送",
+                {
+                    "roomid": roomid,
+                    "model": model,
+                    "missing_fields": missing_markdown_fields,
+                },
+            )
+        else:
+            try:
+                publish_link = await asyncio.to_thread(upload_markdown_to_hedgedoc, reply_text, markdown_config)
+                article_payload = build_markdown_article_payload(reply_text, publish_link, roomid, event, markdown_config)
+                await context.api.send_article(wxid=roomid, wxpid=event.normalized_wxpid, **article_payload)
+                reply_mode = "article"
+            except Exception as exc:
+                context.logger.warning(
+                    "群聊 AI Markdown 回复转图文失败，回退为文本发送",
+                    {
+                        "roomid": roomid,
+                        "model": model,
+                        "sender": resolve_sender_name(event),
+                        "error": str(exc),
+                    },
+                )
+
     try:
-        await context.api.send_text(wxid=roomid, content=reply_text, wxpid=event.normalized_wxpid)
+        if reply_mode == "article":
+            pass
+        else:
+            await context.api.send_text(wxid=roomid, content=reply_text, wxpid=event.normalized_wxpid)
     except Exception as exc:
         context.logger.error(
             "群聊 AI 回复发送失败",
@@ -251,6 +559,7 @@ async def handle_message(event, context):
                 "roomid": roomid,
                 "model": model,
                 "sender": resolve_sender_name(event),
+                "reply_mode": reply_mode,
                 "error": str(exc),
             },
         )
@@ -260,16 +569,21 @@ async def handle_message(event, context):
             "data": {"roomid": roomid, "model": model, "error": str(exc)},
         }
 
-    context.logger.info(
-        "已发送群聊 AI 回复",
-        {
-            "roomid": roomid,
-            "model": model,
-            "sender": resolve_sender_name(event),
-            "message_length": len(message_text),
-            "reply_length": len(reply_text),
-        },
-    )
+    log_message = "已发送群聊 AI Markdown 图文回复" if reply_mode == "article" else "已发送群聊 AI 回复"
+    log_payload = {
+        "roomid": roomid,
+        "model": model,
+        "sender": resolve_sender_name(event),
+        "message_length": len(message_text),
+        "reply_length": len(reply_text),
+        "reply_mode": reply_mode,
+    }
+    if reply_mode == "article":
+        log_payload.update({
+            "article_url": article_payload.get("url"),
+            "article_title": article_payload.get("title"),
+        })
+    context.logger.info(log_message, log_payload)
     return {
         "handled": True,
         "detail": f"已对群聊 {roomid} 的文本消息发送 AI 回复",
@@ -279,5 +593,8 @@ async def handle_message(event, context):
             "sender": resolve_sender_name(event),
             "message": message_text,
             "reply": reply_text,
+            "reply_mode": reply_mode,
+            "article_url": article_payload.get("url") or "",
+            "article_title": article_payload.get("title") or "",
         },
     }
