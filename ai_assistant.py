@@ -2,6 +2,7 @@ import asyncio
 import ast
 import inspect
 import json
+import time
 from datetime import datetime
 from copy import deepcopy
 from functools import lru_cache
@@ -16,6 +17,11 @@ AI_ASSISTANT_SETTINGS_KEY = "ai_assistant_settings"
 MAX_CONVERSATION_MESSAGES = 16
 MAX_TOOL_RESULT_ITEMS = 40
 MAX_TOOL_RESULT_STRING_LENGTH = 1600
+DEFAULT_PROVIDER_REQUEST_TIMEOUT_SECONDS = 180.0
+MAX_PROVIDER_REQUEST_TIMEOUT_SECONDS = 600.0
+RETRYABLE_PROVIDER_STATUS_CODES = {502, 503, 504}
+DEFAULT_PROVIDER_RETRY_COUNT = 1
+DEFAULT_PROVIDER_RETRY_DELAY_SECONDS = 1.0
 
 DEFAULT_SYSTEM_PROMPT = (
     "你是 wxrobot_api 的智能插件助手。"
@@ -936,6 +942,23 @@ def _clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     return min(maximum, max(minimum, numeric))
 
 
+def _normalize_provider_request_timeout(value: Any, default: float = DEFAULT_PROVIDER_REQUEST_TIMEOUT_SECONDS) -> float:
+    try:
+        timeout_seconds = float(value)
+    except (TypeError, ValueError):
+        return default
+    if timeout_seconds <= 0:
+        return default
+    return min(MAX_PROVIDER_REQUEST_TIMEOUT_SECONDS, max(1.0, timeout_seconds))
+
+
+def _is_timeout_reason(reason: Any) -> bool:
+    if isinstance(reason, TimeoutError):
+        return True
+    normalized_reason = str(reason or "").strip().lower()
+    return bool(normalized_reason) and ("timed out" in normalized_reason or "timeout" in normalized_reason)
+
+
 def _build_default_provider_config(provider_key: str, provider_meta: dict[str, Any], index: int = 1) -> dict[str, Any]:
     return {
         "id": f"{provider_key}-config-{index}",
@@ -1743,19 +1766,45 @@ def _build_provider_url(base_url: str, chat_path: str) -> str:
     return f"{base_url.rstrip('/')}{normalized_path}"
 
 
-def _request_provider_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float = 90.0) -> dict[str, Any]:
+def _request_provider_json(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float = DEFAULT_PROVIDER_REQUEST_TIMEOUT_SECONDS,
+    retry_count: int = DEFAULT_PROVIDER_RETRY_COUNT,
+    retry_delay_seconds: float = DEFAULT_PROVIDER_RETRY_DELAY_SECONDS,
+) -> dict[str, Any]:
+    request_timeout = _normalize_provider_request_timeout(timeout)
+    max_retries = _clamp_int(retry_count, DEFAULT_PROVIDER_RETRY_COUNT, 0, 3)
+    retry_delay = _clamp_float(retry_delay_seconds, DEFAULT_PROVIDER_RETRY_DELAY_SECONDS, 0.0, 10.0)
     request_body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = request.Request(url, data=request_body, headers=headers, method="POST")
-    try:
-        with request.urlopen(req, timeout=timeout) as response:
-            response_text = response.read().decode("utf-8")
-    except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"AI 接口调用失败，HTTP {exc.code}: {detail}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"AI 接口调用失败: {exc.reason}") from exc
-    except TimeoutError as exc:
-        raise RuntimeError("AI 接口调用超时") from exc
+    for attempt in range(max_retries + 1):
+        req = request.Request(url, data=request_body, headers=headers, method="POST")
+        try:
+            with request.urlopen(req, timeout=request_timeout) as response:
+                response_text = response.read().decode("utf-8")
+            break
+        except error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="ignore")
+            if exc.code in RETRYABLE_PROVIDER_STATUS_CODES and attempt < max_retries:
+                if retry_delay > 0:
+                    time.sleep(retry_delay)
+                continue
+            raise RuntimeError(f"AI 接口调用失败，HTTP {exc.code}: {detail}") from exc
+        except error.URLError as exc:
+            if _is_timeout_reason(exc.reason):
+                if attempt < max_retries:
+                    if retry_delay > 0:
+                        time.sleep(retry_delay)
+                    continue
+                raise RuntimeError(f"AI 接口调用超时({request_timeout:.1f}s)") from exc
+            raise RuntimeError(f"AI 接口调用失败: {exc.reason}") from exc
+        except TimeoutError as exc:
+            if attempt < max_retries:
+                if retry_delay > 0:
+                    time.sleep(retry_delay)
+                continue
+            raise RuntimeError(f"AI 接口调用超时({request_timeout:.1f}s)") from exc
 
     try:
         payload_json = json.loads(response_text)
