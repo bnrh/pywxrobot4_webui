@@ -515,8 +515,9 @@ def prepare_markdown_reply_for_hedgedoc(markdown_text, image_items, markdown_con
         handled_sources.add(image_source)
 
     if appended_sections:
+        appended_markdown = "\n\n".join(appended_sections)
         final_markdown = f"{final_markdown}\n\n".strip() if final_markdown else ""
-        final_markdown = f"{final_markdown}{'\n\n'.join(appended_sections)}".strip()
+        final_markdown = f"{final_markdown}{appended_markdown}".strip()
 
     note_id, _ = create_hedgedoc_note(hedgedoc_opener, markdown_config["hedgedoc_url"], final_markdown)
     publish_link = get_hedgedoc_publish_link(hedgedoc_opener, markdown_config["hedgedoc_url"], note_id)
