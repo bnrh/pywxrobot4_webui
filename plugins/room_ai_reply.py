@@ -23,7 +23,7 @@ event_filters = ["text"]
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_MARKDOWN_ARTICLE_GHID = ""
 DEFAULT_MARKDOWN_ARTICLE_NICKNAME = ""
-DEFAULT_MARKDOWN_ARTICLE_COVER_URL = "https://docs.hedgedoc.org/images/hedgedoc_logo_black.svg"
+DEFAULT_MARKDOWN_ARTICLE_COVER_URL = "https://avatars.githubusercontent.com/u/67865462?s=200&v=4"
 SEND_ARTICLE_COMPAT_GHID = "gh_hedgedoc_renderer"
 SEND_ARTICLE_COMPAT_NICKNAME = "HedgeDoc 渲染器"
 DEFAULT_MARKDOWN_ARTICLE_TITLE = "Markdown 回复"
@@ -199,17 +199,6 @@ def resolve_room_name(event, roomid):
         if room_name and room_name != roomid:
             return room_name
     return roomid or "当前群聊"
-
-
-def build_model_prompt(event, roomid, message_text):
-    sender_name = resolve_sender_name(event)
-    room_name = resolve_room_name(event, roomid)
-    return (
-        f"群聊：{room_name}\n"
-        f"发送者：{sender_name}\n"
-        f"消息内容：{message_text}\n\n"
-        "请直接给出适合发回群聊的回复。"
-    )
 
 
 def normalize_markdown_delivery_config(config):
@@ -727,9 +716,8 @@ async def handle_message(event, context):
             base_url=base_url,
             api_key=api_key,
             model=model,
-            messages=[{"role": "user", "content": build_model_prompt(event, roomid, message_text)}],
+            messages=[{"role": "user", "content": message_text}],
             system_prompt=system_prompt,
-            temperature=0.4,
         )
     except Exception as exc:
         context.logger.error(

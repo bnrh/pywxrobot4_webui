@@ -791,7 +791,7 @@ async def run_openai_compatible_chat_completion(
     model: str,
     messages: list[dict[str, Any]] | None,
     system_prompt: str = "",
-    temperature: float = 0.2,
+    temperature: float | None = None,
 ) -> dict[str, Any]:
     normalized_api_key = str(api_key or "").strip()
     if not normalized_api_key:
@@ -813,8 +813,9 @@ async def run_openai_compatible_chat_completion(
         "model": normalized_model,
         "messages": request_messages,
         "stream": False,
-        "temperature": _clamp_float(temperature, 0.2, 0.0, 1.5),
     }
+    if temperature is not None:
+        request_payload["temperature"] = _clamp_float(temperature, 0.2, 0.0, 1.5)
 
     response_payload = await asyncio.to_thread(
         _request_provider_json,
