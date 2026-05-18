@@ -1,5 +1,6 @@
 wxrobot_api
 wxrobot
+Gemini-FastAPI
 
 # Python cache
 __pycache__/
@@ -13,7 +14,7 @@ webui.sqlite3
 logs/
 *.log
 uploads/
-
+tmp/
 # Editor settings
 .vscode/*
 !.vscode/settings.json
