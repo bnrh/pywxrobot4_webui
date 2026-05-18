@@ -28,10 +28,12 @@ SEND_ARTICLE_COMPAT_GHID = "gh_hedgedoc_renderer"
 SEND_ARTICLE_COMPAT_NICKNAME = "HedgeDoc 渲染器"
 DEFAULT_MARKDOWN_ARTICLE_TITLE = "Markdown 回复"
 HEDGEDOC_REQUEST_TIMEOUT_SECONDS = 20.0
+HEDGEDOC_IMAGE_UPLOAD_TIMEOUT_SECONDS = 60.0
 AI_REPLY_IMAGE_DOWNLOAD_TIMEOUT_SECONDS = 60.0
 AI_REPLY_IMAGE_UPLOAD_DIR = PROJECT_ROOT / "uploads" / "room_ai_reply"
 REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 DATA_IMAGE_URL_PATTERN = re.compile(r"^data:(?P<media_type>image/[^;]+)?;base64,(?P<data>.+)$", re.I | re.S)
+MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<url>[^)\s]+)(?P<tail>\s+\&quot;[^\&]+\&quot;|\s+\"[^\"]*\")?\)")
 MARKDOWN_STRONG_PATTERNS = [
     re.compile(r"```"),
     re.compile(r"(?m)^\s*#{1,6}\s+\S"),
@@ -291,6 +293,42 @@ def resolve_send_article_publisher(markdown_config):
     }
 
 
+def extract_markdown_image_items(markdown_text):
+    image_items = []
+    for match in MARKDOWN_IMAGE_PATTERN.finditer(str(markdown_text or "")):
+        image_url = str(match.group("url") or "").strip()
+        if not image_url:
+            continue
+        image_items.append(
+            {
+                "url": image_url,
+                "alt_text": str(match.group("alt") or "").strip(),
+                "detail": "markdown",
+            }
+        )
+    return image_items
+
+
+def strip_markdown_image_syntax(markdown_text):
+    normalized_text = MARKDOWN_IMAGE_PATTERN.sub("", str(markdown_text or ""))
+    normalized_text = re.sub(r"\n{3,}", "\n\n", normalized_text)
+    return normalized_text.strip()
+
+
+def merge_reply_image_items(reply_text, image_items):
+    merged_items = []
+    seen_sources = set()
+    for image_item in [*extract_markdown_image_items(reply_text), *(image_items or [])]:
+        if not isinstance(image_item, dict):
+            continue
+        image_source = str(image_item.get("url") or "").strip()
+        if not image_source or image_source in seen_sources:
+            continue
+        seen_sources.add(image_source)
+        merged_items.append(dict(image_item))
+    return merged_items
+
+
 def build_markdown_reply_with_images(reply_text, image_items):
     sections = []
     normalized_text = str(reply_text or "").strip()
@@ -309,6 +347,22 @@ def build_markdown_reply_with_images(reply_text, image_items):
         sections.append(f"![{alt_text}]({image_url})")
 
     return "\n\n".join(section for section in sections if str(section or "").strip()).strip()
+
+
+def replace_markdown_image_urls(markdown_text, uploaded_link_map):
+    if not uploaded_link_map:
+        return str(markdown_text or "")
+
+    def replace_match(match):
+        original_url = str(match.group("url") or "").strip()
+        replaced_url = str(uploaded_link_map.get(original_url) or original_url).strip()
+        if not replaced_url:
+            return match.group(0)
+        alt_text = str(match.group("alt") or "")
+        tail = str(match.group("tail") or "")
+        return f"![{alt_text}]({replaced_url}{tail})"
+
+    return MARKDOWN_IMAGE_PATTERN.sub(replace_match, str(markdown_text or ""))
 
 
 def guess_ai_image_suffix(image_item, response_content_type=""):
@@ -373,6 +427,100 @@ def materialize_ai_image(image_item):
     output_path = AI_REPLY_IMAGE_UPLOAD_DIR / f"{uuid.uuid4().hex}{guess_ai_image_suffix(normalized_item, response_content_type)}"
     output_path.write_bytes(image_bytes)
     return str(output_path)
+
+
+def upload_image_to_hedgedoc(opener, hedgedoc_url, image_path):
+    image_file_path = Path(image_path)
+    if not image_file_path.is_file():
+        raise RuntimeError(f"待上传的图片不存在: {image_path}")
+
+    boundary = f"----CopilotBoundary{uuid.uuid4().hex}"
+    content_type = mimetypes.guess_type(str(image_file_path))[0] or "application/octet-stream"
+    image_bytes = image_file_path.read_bytes()
+    request_body = b"".join(
+        [
+            f"--{boundary}\r\n".encode("utf-8"),
+            f"Content-Disposition: form-data; name=\"image\"; filename=\"{image_file_path.name}\"\r\n".encode("utf-8"),
+            f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
+            image_bytes,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("utf-8"),
+        ]
+    )
+    upload_request = request.Request(
+        urljoin(f"{hedgedoc_url}/", "uploadimage"),
+        data=request_body,
+        headers={
+            "Accept": "*/*",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Origin": hedgedoc_url,
+            "Referer": f"{hedgedoc_url}/",
+        },
+        method="POST",
+    )
+    try:
+        with opener.open(upload_request, timeout=HEDGEDOC_IMAGE_UPLOAD_TIMEOUT_SECONDS) as response:
+            response_text = response.read().decode("utf-8", errors="ignore")
+    except error.HTTPError as exc:
+        response_text = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"HedgeDoc 上传图片失败，HTTP {exc.code}: {response_text[:500]}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"HedgeDoc 上传图片失败: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise RuntimeError("HedgeDoc 上传图片超时") from exc
+
+    try:
+        payload = json.loads(response_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"HedgeDoc 上传图片返回了非 JSON 响应: {response_text[:500]}") from exc
+
+    uploaded_link = str(payload.get("link") or "").strip() if isinstance(payload, dict) else ""
+    if not uploaded_link:
+        raise RuntimeError(f"HedgeDoc 上传图片返回异常: {payload}")
+    return uploaded_link
+
+
+def prepare_markdown_reply_for_hedgedoc(markdown_text, image_items, markdown_config):
+    normalized_markdown = str(markdown_text or "").strip()
+    hedgedoc_opener = login_hedgedoc(
+        markdown_config["hedgedoc_url"],
+        markdown_config["hedgedoc_email"],
+        markdown_config["hedgedoc_password"],
+    )
+
+    uploaded_link_map = {}
+    embedded_image_items = extract_markdown_image_items(normalized_markdown)
+    for image_item in embedded_image_items:
+        image_source = str(image_item.get("url") or "").strip()
+        if not image_source or image_source in uploaded_link_map:
+            continue
+        local_image_path = materialize_ai_image(image_item)
+        uploaded_link_map[image_source] = upload_image_to_hedgedoc(hedgedoc_opener, markdown_config["hedgedoc_url"], local_image_path)
+
+    final_markdown = replace_markdown_image_urls(normalized_markdown, uploaded_link_map)
+    handled_sources = set(uploaded_link_map.keys())
+    appended_sections = []
+    for index, image_item in enumerate(image_items or [], start=1):
+        image_source = str((image_item or {}).get("url") or "").strip()
+        if not image_source or image_source in handled_sources:
+            continue
+        local_image_path = materialize_ai_image(image_item)
+        uploaded_link = upload_image_to_hedgedoc(hedgedoc_opener, markdown_config["hedgedoc_url"], local_image_path)
+        alt_text = trim_text(
+            strip_markdown_to_text((image_item or {}).get("alt_text") or f"图片 {index}"),
+            80,
+            f"图片 {index}",
+        )
+        appended_sections.append(f"![{alt_text}]({uploaded_link})")
+        handled_sources.add(image_source)
+
+    if appended_sections:
+        final_markdown = f"{final_markdown}\n\n".strip() if final_markdown else ""
+        final_markdown = f"{final_markdown}{'\n\n'.join(appended_sections)}".strip()
+
+    note_id, _ = create_hedgedoc_note(hedgedoc_opener, markdown_config["hedgedoc_url"], final_markdown)
+    publish_link = get_hedgedoc_publish_link(hedgedoc_opener, markdown_config["hedgedoc_url"], note_id)
+    return final_markdown, publish_link
 
 
 async def send_ai_image_reply(context, roomid, wxpid, image_items):
@@ -598,8 +746,11 @@ async def handle_message(event, context):
             "data": {"roomid": roomid, "model": model, "error": str(exc)},
         }
 
-    reply_text = str(ai_result.get("content") or "").strip()
-    reply_images = ai_result.get("image_items") if isinstance(ai_result.get("image_items"), list) else []
+    raw_reply_text = str(ai_result.get("content") or "").strip()
+    structured_reply_images = ai_result.get("image_items") if isinstance(ai_result.get("image_items"), list) else []
+    reply_images = merge_reply_image_items(raw_reply_text, structured_reply_images)
+    reply_text = strip_markdown_image_syntax(raw_reply_text) if raw_reply_text else ""
+    reply_text = str(reply_text or "").strip()
     has_reply_text = bool(reply_text)
     has_reply_images = bool(reply_images)
     if not has_reply_text and not has_reply_images:
@@ -609,9 +760,9 @@ async def handle_message(event, context):
     article_payload = {}
     sent_image_paths = []
     markdown_config = normalize_markdown_delivery_config(context.config)
-    markdown_detected = is_likely_markdown(reply_text)
-    markdown_reply_source = build_markdown_reply_with_images(reply_text, reply_images) if has_reply_text and has_reply_images else reply_text
-    should_send_article = bool(has_reply_text and has_reply_images) or markdown_detected
+    markdown_detected = is_likely_markdown(raw_reply_text)
+    markdown_reply_source = build_markdown_reply_with_images(reply_text, reply_images) if has_reply_text and has_reply_images else (raw_reply_text if has_reply_text else "")
+    should_send_article = bool(has_reply_text and has_reply_images) or (has_reply_text and markdown_detected)
     if should_send_article:
         missing_markdown_fields = get_missing_markdown_delivery_fields(markdown_config)
         if missing_markdown_fields:
@@ -626,8 +777,13 @@ async def handle_message(event, context):
             )
         else:
             try:
-                publish_link = await asyncio.to_thread(upload_markdown_to_hedgedoc, markdown_reply_source, markdown_config)
-                article_payload = build_markdown_article_payload(markdown_reply_source, publish_link, roomid, event, markdown_config)
+                prepared_markdown_text, publish_link = await asyncio.to_thread(
+                    prepare_markdown_reply_for_hedgedoc,
+                    markdown_reply_source,
+                    reply_images,
+                    markdown_config,
+                )
+                article_payload = build_markdown_article_payload(prepared_markdown_text, publish_link, roomid, event, markdown_config)
                 await context.api.send_article(wxid=roomid, wxpid=event.normalized_wxpid, **article_payload)
                 reply_mode = "article"
             except Exception as exc:
