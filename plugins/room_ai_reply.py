@@ -1,11 +1,17 @@
 import asyncio
+import base64
+import binascii
 import json
+import mimetypes
 import re
 from http.cookiejar import CookieJar
+from pathlib import Path
 from urllib import error, parse, request
 from urllib.parse import urljoin
+import uuid
 
 from ai_assistant import run_openai_compatible_chat_completion
+from config import PROJECT_ROOT
 
 from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text
 
@@ -22,7 +28,10 @@ SEND_ARTICLE_COMPAT_GHID = "gh_hedgedoc_renderer"
 SEND_ARTICLE_COMPAT_NICKNAME = "HedgeDoc 渲染器"
 DEFAULT_MARKDOWN_ARTICLE_TITLE = "Markdown 回复"
 HEDGEDOC_REQUEST_TIMEOUT_SECONDS = 20.0
+AI_REPLY_IMAGE_DOWNLOAD_TIMEOUT_SECONDS = 60.0
+AI_REPLY_IMAGE_UPLOAD_DIR = PROJECT_ROOT / "uploads" / "room_ai_reply"
 REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
+DATA_IMAGE_URL_PATTERN = re.compile(r"^data:(?P<media_type>image/[^;]+)?;base64,(?P<data>.+)$", re.I | re.S)
 MARKDOWN_STRONG_PATTERNS = [
     re.compile(r"```"),
     re.compile(r"(?m)^\s*#{1,6}\s+\S"),
@@ -282,6 +291,99 @@ def resolve_send_article_publisher(markdown_config):
     }
 
 
+def build_markdown_reply_with_images(reply_text, image_items):
+    sections = []
+    normalized_text = str(reply_text or "").strip()
+    if normalized_text:
+        sections.append(normalized_text)
+
+    for index, image_item in enumerate(image_items or [], start=1):
+        image_url = str((image_item or {}).get("url") or "").strip()
+        if not image_url:
+            continue
+        alt_text = trim_text(
+            strip_markdown_to_text((image_item or {}).get("alt_text") or f"图片 {index}"),
+            80,
+            f"图片 {index}",
+        )
+        sections.append(f"![{alt_text}]({image_url})")
+
+    return "\n\n".join(section for section in sections if str(section or "").strip()).strip()
+
+
+def guess_ai_image_suffix(image_item, response_content_type=""):
+    normalized_media_type = str((image_item or {}).get("media_type") or response_content_type or "").split(";", 1)[0].strip().lower()
+    if normalized_media_type:
+        guessed_suffix = mimetypes.guess_extension(normalized_media_type) or ""
+        if guessed_suffix == ".jpe":
+            guessed_suffix = ".jpg"
+        if guessed_suffix:
+            return guessed_suffix
+
+    source_url = str((image_item or {}).get("url") or "").strip()
+    if source_url.startswith(("http://", "https://")):
+        url_path = parse.urlparse(source_url).path
+        path_suffix = Path(url_path).suffix.lower()
+        if path_suffix:
+            return path_suffix
+    return ".png"
+
+
+def materialize_ai_image(image_item):
+    normalized_item = image_item if isinstance(image_item, dict) else {}
+    image_source = str(normalized_item.get("url") or "").strip()
+    if not image_source:
+        raise RuntimeError("AI 未返回可用的图片地址")
+
+    candidate_path = Path(image_source)
+    if candidate_path.is_file():
+        return str(candidate_path)
+
+    AI_REPLY_IMAGE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    data_url_match = DATA_IMAGE_URL_PATTERN.match(image_source)
+    if data_url_match:
+        media_type = str(data_url_match.group("media_type") or normalized_item.get("media_type") or "image/png").strip() or "image/png"
+        try:
+            image_bytes = base64.b64decode(data_url_match.group("data"), validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise RuntimeError("AI 返回的 Base64 图片数据无效") from exc
+        output_path = AI_REPLY_IMAGE_UPLOAD_DIR / f"{uuid.uuid4().hex}{guess_ai_image_suffix({**normalized_item, 'media_type': media_type})}"
+        output_path.write_bytes(image_bytes)
+        return str(output_path)
+
+    if not image_source.startswith(("http://", "https://")):
+        raise RuntimeError(f"AI 返回了当前无法处理的图片地址: {image_source}")
+
+    download_request = request.Request(image_source, headers={"User-Agent": "wxrobot_webui/room_ai_reply"}, method="GET")
+    try:
+        with request.urlopen(download_request, timeout=AI_REPLY_IMAGE_DOWNLOAD_TIMEOUT_SECONDS) as response:
+            image_bytes = response.read()
+            response_content_type = str(response.headers.get("Content-Type") or "").strip()
+    except error.HTTPError as exc:
+        response_text = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"下载 AI 图片失败，HTTP {exc.code}: {response_text[:300]}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"下载 AI 图片失败: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise RuntimeError("下载 AI 图片超时") from exc
+
+    if not image_bytes:
+        raise RuntimeError("下载 AI 图片失败：响应内容为空")
+
+    output_path = AI_REPLY_IMAGE_UPLOAD_DIR / f"{uuid.uuid4().hex}{guess_ai_image_suffix(normalized_item, response_content_type)}"
+    output_path.write_bytes(image_bytes)
+    return str(output_path)
+
+
+async def send_ai_image_reply(context, roomid, wxpid, image_items):
+    sent_paths = []
+    for image_item in image_items or []:
+        image_path = await asyncio.to_thread(materialize_ai_image, image_item)
+        await context.api.send_image(wxid=roomid, path=image_path, wxpid=wxpid)
+        sent_paths.append(image_path)
+    return sent_paths
+
+
 def build_markdown_article_payload(markdown_text, publish_link, roomid, event, markdown_config):
     room_name = resolve_room_name(event, roomid)
     fallback_title = f"{room_name} {DEFAULT_MARKDOWN_ARTICLE_TITLE}".strip()
@@ -497,14 +599,20 @@ async def handle_message(event, context):
         }
 
     reply_text = str(ai_result.get("content") or "").strip()
-    if not reply_text:
+    reply_images = ai_result.get("image_items") if isinstance(ai_result.get("image_items"), list) else []
+    has_reply_text = bool(reply_text)
+    has_reply_images = bool(reply_images)
+    if not has_reply_text and not has_reply_images:
         return {"handled": False, "detail": "模型未返回可发送的回复"}
 
     reply_mode = "text"
     article_payload = {}
+    sent_image_paths = []
     markdown_config = normalize_markdown_delivery_config(context.config)
     markdown_detected = is_likely_markdown(reply_text)
-    if markdown_detected:
+    markdown_reply_source = build_markdown_reply_with_images(reply_text, reply_images) if has_reply_text and has_reply_images else reply_text
+    should_send_article = bool(has_reply_text and has_reply_images) or markdown_detected
+    if should_send_article:
         missing_markdown_fields = get_missing_markdown_delivery_fields(markdown_config)
         if missing_markdown_fields:
             context.logger.warning(
@@ -513,12 +621,13 @@ async def handle_message(event, context):
                     "roomid": roomid,
                     "model": model,
                     "missing_fields": missing_markdown_fields,
+                    "has_images": has_reply_images,
                 },
             )
         else:
             try:
-                publish_link = await asyncio.to_thread(upload_markdown_to_hedgedoc, reply_text, markdown_config)
-                article_payload = build_markdown_article_payload(reply_text, publish_link, roomid, event, markdown_config)
+                publish_link = await asyncio.to_thread(upload_markdown_to_hedgedoc, markdown_reply_source, markdown_config)
+                article_payload = build_markdown_article_payload(markdown_reply_source, publish_link, roomid, event, markdown_config)
                 await context.api.send_article(wxid=roomid, wxpid=event.normalized_wxpid, **article_payload)
                 reply_mode = "article"
             except Exception as exc:
@@ -528,6 +637,7 @@ async def handle_message(event, context):
                         "roomid": roomid,
                         "model": model,
                         "sender": resolve_sender_name(event),
+                        "has_images": has_reply_images,
                         "error": str(exc),
                     },
                 )
@@ -535,8 +645,15 @@ async def handle_message(event, context):
     try:
         if reply_mode == "article":
             pass
+        elif has_reply_images and not has_reply_text:
+            sent_image_paths = await send_ai_image_reply(context, roomid, event.normalized_wxpid, reply_images)
+            reply_mode = "image"
         else:
-            await context.api.send_text(wxid=roomid, content=reply_text, wxpid=event.normalized_wxpid)
+            if has_reply_text:
+                await context.api.send_text(wxid=roomid, content=reply_text, wxpid=event.normalized_wxpid)
+            if has_reply_images:
+                sent_image_paths = await send_ai_image_reply(context, roomid, event.normalized_wxpid, reply_images)
+                reply_mode = "text+image" if has_reply_text else "image"
     except Exception as exc:
         context.logger.error(
             "群聊 AI 回复发送失败",
@@ -562,12 +679,15 @@ async def handle_message(event, context):
         "message_length": len(message_text),
         "reply_length": len(reply_text),
         "reply_mode": reply_mode,
+        "image_count": len(reply_images),
     }
     if reply_mode == "article":
         log_payload.update({
             "article_url": article_payload.get("url"),
             "article_title": article_payload.get("title"),
         })
+    if sent_image_paths:
+        log_payload["image_paths"] = sent_image_paths
     context.logger.info(log_message, log_payload)
     return {
         "handled": True,
@@ -581,5 +701,7 @@ async def handle_message(event, context):
             "reply_mode": reply_mode,
             "article_url": article_payload.get("url") or "",
             "article_title": article_payload.get("title") or "",
+            "image_count": len(reply_images),
+            "image_paths": sent_image_paths,
         },
     }

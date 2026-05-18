@@ -829,12 +829,20 @@ async def run_openai_compatible_chat_completion(
     choice = choices[0] if isinstance(choices[0], dict) else {}
     message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
     assistant_content = _normalize_message_content(message.get("content"))
+    assistant_images = _normalize_message_image_items(message.get("content"))
+    if not assistant_images:
+        assistant_images = _normalize_message_image_items(message.get("images"))
+    if not assistant_images:
+        assistant_images = _normalize_message_image_items(message.get("image"))
+    if not assistant_images:
+        assistant_images = _normalize_message_image_items(message.get("image_url"))
     assistant_reasoning_content = _normalize_reasoning_content(message.get("reasoning_content"))
-    if not assistant_content:
+    if not assistant_content and not assistant_images:
         raise RuntimeError("模型未返回可展示的回复")
 
     return {
         "content": assistant_content,
+        "image_items": assistant_images,
         "reasoning_content": assistant_reasoning_content,
         "model": normalized_model,
         "base_url": normalized_base_url,
@@ -1602,6 +1610,83 @@ def _normalize_message_content(value: Any) -> str:
     if value in (None, ""):
         return ""
     return str(value).strip()
+
+
+def _normalize_message_image_items(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        raw_items = [value]
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        return []
+
+    normalized_items: list[dict[str, Any]] = []
+    seen_sources: set[str] = set()
+    image_candidate_keys = ("image_url", "output_image", "image", "b64_json", "base64", "data")
+
+    def append_image_item(source: Any, media_type: Any = "", alt_text: Any = "", detail: Any = "") -> None:
+        normalized_source = str(source or "").strip()
+        if not normalized_source or normalized_source in seen_sources:
+            return
+        seen_sources.add(normalized_source)
+        normalized_items.append(
+            {
+                "url": normalized_source,
+                "media_type": str(media_type or "").strip(),
+                "alt_text": str(alt_text or "").strip(),
+                "detail": str(detail or "").strip(),
+            }
+        )
+
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type and "image" not in item_type and not any(key in item for key in image_candidate_keys):
+            continue
+
+        detail = str(item.get("detail") or "").strip()
+        alt_text = str(item.get("alt_text") or item.get("alt") or item.get("caption") or item.get("text") or "").strip()
+        media_type = str(item.get("mime_type") or item.get("media_type") or "").strip()
+
+        image_url_payload = item.get("image_url")
+        if isinstance(image_url_payload, dict):
+            append_image_item(
+                image_url_payload.get("url") or image_url_payload.get("image_url") or image_url_payload.get("src") or "",
+                image_url_payload.get("mime_type") or image_url_payload.get("media_type") or media_type,
+                alt_text or image_url_payload.get("alt") or image_url_payload.get("caption") or "",
+                detail or image_url_payload.get("detail") or "",
+            )
+        elif isinstance(image_url_payload, str):
+            append_image_item(image_url_payload, media_type, alt_text, detail)
+
+        for payload_key in ("output_image", "image"):
+            payload_value = item.get(payload_key)
+            if isinstance(payload_value, dict):
+                append_image_item(
+                    payload_value.get("url") or payload_value.get("image_url") or payload_value.get("src") or "",
+                    payload_value.get("mime_type") or payload_value.get("media_type") or media_type,
+                    alt_text or payload_value.get("alt") or payload_value.get("caption") or "",
+                    detail or payload_value.get("detail") or "",
+                )
+            elif isinstance(payload_value, str):
+                append_image_item(payload_value, media_type, alt_text, detail)
+
+        raw_data = item.get("data")
+        if isinstance(raw_data, str) and raw_data.strip().startswith("data:image/"):
+            append_image_item(raw_data.strip(), media_type, alt_text, detail)
+
+        raw_base64 = str(item.get("b64_json") or item.get("base64") or "").strip()
+        if raw_base64:
+            normalized_media_type = media_type or "image/png"
+            append_image_item(f"data:{normalized_media_type};base64,{raw_base64}", normalized_media_type, alt_text, detail)
+
+        direct_url = item.get("url")
+        if isinstance(direct_url, str) and ("image" in item_type or direct_url.strip().startswith("data:image/")):
+            append_image_item(direct_url, media_type, alt_text, detail)
+
+    return normalized_items
 
 
 def _get_current_datetime_payload() -> dict[str, Any]:
