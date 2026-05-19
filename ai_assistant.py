@@ -799,7 +799,7 @@ async def run_openai_compatible_chat_completion(
 
     normalized_base_url = _normalize_provider_base_url(base_url, PROVIDER_CATALOG["openai"]["default_base_url"])
     normalized_model = str(model or "").strip() or PROVIDER_CATALOG["openai"]["default_model"]
-    normalized_messages = _normalize_chat_history(messages)
+    normalized_messages = _normalize_openai_request_messages(messages)
     if not normalized_messages:
         raise RuntimeError("缺少可发送给模型的消息")
 
@@ -1611,6 +1611,69 @@ def _normalize_message_content(value: Any) -> str:
     if value in (None, ""):
         return ""
     return str(value).strip()
+
+
+def _normalize_openai_request_message_content(value: Any) -> str | list[dict[str, Any]]:
+    if isinstance(value, str):
+        return value.strip()
+
+    raw_items = [value] if isinstance(value, dict) else value if isinstance(value, list) else None
+    if raw_items is None:
+        if value in (None, ""):
+            return ""
+        return str(value).strip()
+
+    normalized_parts: list[dict[str, Any]] = []
+    for item in raw_items:
+        if isinstance(item, dict):
+            item_type = str(item.get("type") or "").strip().lower()
+            text = str(item.get("text") or item.get("content") or "").strip()
+            if item_type in {"text", "input_text", "output_text"}:
+                if text:
+                    normalized_parts.append({"type": "text", "text": text})
+                continue
+
+            image_url_payload = item.get("image_url")
+            if isinstance(image_url_payload, dict):
+                image_url = str(image_url_payload.get("url") or image_url_payload.get("image_url") or image_url_payload.get("src") or "").strip()
+            else:
+                image_url = str(image_url_payload or item.get("url") or "").strip()
+
+            has_image_payload = item_type in {"image_url", "input_image", "output_image", "image"} or "image_url" in item
+            if image_url and (has_image_payload or image_url.startswith(("http://", "https://", "data:image/"))):
+                normalized_parts.append({"type": "image_url", "image_url": {"url": image_url}})
+                continue
+
+            if text:
+                normalized_parts.append({"type": "text", "text": text})
+            continue
+
+        if item in (None, ""):
+            continue
+        text = str(item).strip()
+        if text:
+            normalized_parts.append({"type": "text", "text": text})
+
+    if not normalized_parts:
+        return ""
+    if len(normalized_parts) == 1 and normalized_parts[0].get("type") == "text":
+        return str(normalized_parts[0].get("text") or "")
+    return normalized_parts
+
+
+def _normalize_openai_request_messages(messages: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        content = _normalize_openai_request_message_content(message.get("content"))
+        if not content:
+            continue
+        normalized.append({"role": role, "content": content})
+    return normalized[-MAX_CONVERSATION_MESSAGES:]
 
 
 def _normalize_message_image_items(value: Any) -> list[dict[str, Any]]:
