@@ -13,11 +13,11 @@ import uuid
 from ai_assistant import run_openai_compatible_chat_completion
 from config import PROJECT_ROOT
 
-from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text
+from ._plugin_sdk import MESSAGE_TYPES, find_xml_tag_text, get_message_type, normalize_text, unique_strings
 
 
 name = "room_ai_reply"
-description = "按群聊配置 OpenAI-compatible AI 助手，自动回复群文本消息"
+description = "按群聊配置 OpenAI-compatible AI 助手，仅在被 @ 时自动回复群文本消息"
 event_filters = ["text"]
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -199,6 +199,35 @@ def resolve_room_name(event, roomid):
         if room_name and room_name != roomid:
             return room_name
     return roomid or "当前群聊"
+
+
+def resolve_current_account_wxid(event):
+    first_non_empty = getattr(event, "first_non_empty", None)
+    if callable(first_non_empty):
+        return normalize_text(
+            first_non_empty(
+                "self_wxid",
+                "current_wxid",
+                "login_wxid",
+                "account_wxid",
+                "recipient",
+            )
+        )
+    return normalize_text(
+        getattr(event, "current_account_wxid", "") or getattr(event, "recipient", "")
+    )
+
+
+def get_message_at_user_list(event):
+    msgsource = getattr(event, "msgsource", "") or getattr(event, "source", "") or ""
+    return unique_strings(find_xml_tag_text(msgsource, "atuserlist"))
+
+
+def is_at_current_account(event):
+    current_account_wxid = resolve_current_account_wxid(event)
+    if not current_account_wxid:
+        return False
+    return current_account_wxid in get_message_at_user_list(event)
 
 
 def normalize_markdown_delivery_config(config):
@@ -696,6 +725,8 @@ async def handle_message(event, context):
     roomid = normalize_text(event.conversation_wxid or "")
     room_config = get_room_config_map(context.config).get(roomid)
     if room_config is None:
+        return {"handled": False, "detail": ""}
+    if not is_at_current_account(event):
         return {"handled": False, "detail": ""}
 
     base_url = room_config["base_url"]
