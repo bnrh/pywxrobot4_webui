@@ -13,7 +13,10 @@ SETTINGS_DB_PATH = PROJECT_ROOT / "webui.sqlite3"
 WEBUI_SECTION = "webui"
 PLUGIN_PACKAGE = f"{__package__}.plugins" if __package__ else "plugins"
 PLUGIN_PACKAGE_ALIASES = tuple(dict.fromkeys((PLUGIN_PACKAGE, "plugins", "webui.plugins")))
-DEFAULT_PLUGIN_MODULES = [f"{PLUGIN_PACKAGE}.auto_download_image"]
+DEFAULT_PLUGIN_MODULES = [
+    f"{PLUGIN_PACKAGE}.auto_download_image",
+    f"{PLUGIN_PACKAGE}.global_blacklist_guard",
+]
 SYSTEM_SETTING_FIELDS = (
     "host",
     "port",
@@ -304,14 +307,22 @@ class WebuiSettingsStore:
         }
         plugin_settings: dict[str, dict[str, Any]] = {}
         enabled_plugins: list[str] = []
+        stored_plugin_ids: set[str] = set()
         for row in plugin_rows:
             plugin_id = str(row["plugin_id"] or "").strip()
             normalized_plugin_id = normalize_plugin_module_name(plugin_id) or plugin_id
+            if normalized_plugin_id:
+                stored_plugin_ids.add(normalized_plugin_id)
             config = _parse_json_object(row["config_json"])
             if normalized_plugin_id not in plugin_settings or plugin_id == normalized_plugin_id:
                 plugin_settings[normalized_plugin_id] = config
             if int(row["enabled"]) and normalized_plugin_id not in enabled_plugins:
                 enabled_plugins.append(normalized_plugin_id)
+
+        for default_plugin_id in normalize_plugin_module_names(DEFAULT_PLUGIN_MODULES):
+            if default_plugin_id in stored_plugin_ids or default_plugin_id in enabled_plugins:
+                continue
+            enabled_plugins.append(default_plugin_id)
 
         return {
             **defaults,
@@ -341,7 +352,7 @@ class WebuiSettingsStore:
 
             normalized_plugins = normalize_plugin_module_names(settings.plugins)
             normalized_plugin_settings = normalize_plugin_settings_map(settings.plugin_settings)
-            all_plugin_ids = set(existing_configs) | set(normalized_plugins) | set(normalized_plugin_settings)
+            all_plugin_ids = set(existing_configs) | set(normalized_plugins) | set(normalized_plugin_settings) | set(normalize_plugin_module_names(DEFAULT_PLUGIN_MODULES))
             if not all_plugin_ids:
                 all_plugin_ids = set(DEFAULT_PLUGIN_MODULES)
 

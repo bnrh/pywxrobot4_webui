@@ -14,6 +14,12 @@ from loguru import logger
 from config import PLUGIN_PACKAGE, normalize_plugin_module_name
 from message import MessageEvent
 from plugin_base import PluginContext, PluginExecutionContext, PluginLogger, PluginResult, PluginStateStore
+from plugins._global_blacklist import (
+    BLACKLIST_MEMBERS_NAMESPACE,
+    BLACKLIST_PLUGIN_MODULE,
+    BLACKLIST_PLUGIN_NAME,
+    resolve_blacklist_subject_wxid,
+)
 
 
 PLUGIN_DIR = Path(__file__).with_name("plugins")
@@ -483,6 +489,7 @@ class PluginManager:
         self._periodic_tasks: list[asyncio.Task] = []
         self._friend_label_cache: dict[int, tuple[float, dict[str, set[str]]]] = {}
         self._friend_label_locks: dict[int, asyncio.Lock] = {}
+        self._blacklist_state = PluginStateStore(BLACKLIST_PLUGIN_MODULE, namespace=BLACKLIST_MEMBERS_NAMESPACE)
 
     @property
     def plugins(self) -> tuple[PythonPlugin, ...]:
@@ -715,6 +722,23 @@ class PluginManager:
         self_wxid = await self._resolve_event_self_wxid(event)
         return bool(self_wxid) and sender_wxid == self_wxid
 
+    def _build_blacklist_block_result(self, subject_wxid: str) -> list[dict[str, Any]]:
+        blacklist_record = self._blacklist_state.get(subject_wxid, {})
+        display_name = _normalize_text(blacklist_record.get("display_name")) if isinstance(blacklist_record, dict) else ""
+        resolved_name = display_name or subject_wxid
+        return [
+            {
+                "plugin": BLACKLIST_PLUGIN_NAME,
+                "handled": True,
+                "stop_processing": True,
+                "detail": f"黑名单成员消息已忽略: {resolved_name}",
+                "data": {
+                    "wxid": subject_wxid,
+                    "display_name": resolved_name,
+                },
+            }
+        ]
+
     async def load_plugins(self) -> None:
         self._plugins.clear()
         for module_name in self.module_names:
@@ -761,6 +785,10 @@ class PluginManager:
     async def dispatch(self, event: MessageEvent) -> list[dict[str, Any]]:
         if await self._is_self_sent_message(event):
             return []
+
+        blacklist_subject_wxid = resolve_blacklist_subject_wxid(event)
+        if blacklist_subject_wxid and self._blacklist_state.has(blacklist_subject_wxid):
+            return self._build_blacklist_block_result(blacklist_subject_wxid)
 
         results: list[dict[str, Any]] = []
         for plugin in self._plugins:
