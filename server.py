@@ -70,6 +70,7 @@ REMOVED_PLUGIN_MODULES = {normalize_plugin_module_name("webui.plugins.monitor_bi
 INVITE_TO_ROOM_PLUGIN_MODULE = normalize_plugin_module_name("webui.plugins.invite_to_toom")
 ENTER_ROOM_TIP_PLUGIN_MODULE = normalize_plugin_module_name("plugins.enter_room_tip")
 ROOM_AI_REPLY_PLUGIN_MODULE = normalize_plugin_module_name("plugins.room_ai_reply")
+DOWNLOAD_RECENT_USER_IMAGES_PLUGIN_MODULE = normalize_plugin_module_name("plugins.download_recent_user_images")
 LOG_LINE_PATTERN = re.compile(
     r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \| (?P<level>[A-Z]+)\s+\| (?P<module>[^:]+):(?P<function>[^:]+):(?P<line>\d+) - (?P<message>.*)$"
 )
@@ -1291,6 +1292,16 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
     def normalize_plugin_config_for_payload(module_name: str, config: Any) -> Any:
         normalized_module_name = normalize_plugin_module_name(module_name)
+        if normalized_module_name == DOWNLOAD_RECENT_USER_IMAGES_PLUGIN_MODULE and isinstance(config, dict):
+            normalized_config = {
+                key: value
+                for key, value in config.items()
+                if key not in {"db_name", "wait", "timeout"}
+            }
+            if not str(normalized_config.get("start_time") or "").strip():
+                normalized_config["start_time"] = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+            return normalized_config
+
         if normalized_module_name == ENTER_ROOM_TIP_PLUGIN_MODULE and isinstance(config, dict):
             normalized_rows: list[dict[str, Any]] = []
             raw_rows = config.get("room_welcomes")

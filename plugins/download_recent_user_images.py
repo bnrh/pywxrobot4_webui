@@ -23,6 +23,11 @@ DOWNLOAD_HISTORY_RETENTION_BUFFER_SECONDS = 3600
 MAX_REPORT_ITEMS = 100
 
 
+def build_default_start_time_text(reference_time: datetime | None = None) -> str:
+    base_time = reference_time if isinstance(reference_time, datetime) else datetime.now()
+    return format_date_time(base_time - timedelta(hours=DEFAULT_LOOKBACK_HOURS))
+
+
 config_schema = [
     {
         "key": "wxpid",
@@ -38,10 +43,10 @@ config_schema = [
         "key": "start_time",
         "label": "起始时间",
         "type": "text",
-        "default": "",
+        "default": build_default_start_time_text(),
         "full_width": False,
         "placeholder": "yyyy-MM-dd HH:mm:ss",
-        "description": "留空时默认使用当前时间往前 24 小时。",
+        "description": "默认填充当前时间往前 24 小时，可手动修改。",
     },
     {
         "key": "interval_seconds",
@@ -66,14 +71,6 @@ config_schema = [
         "description": "每个命中用户在时间窗口内最多读取多少条聊天消息。",
     },
     {
-        "key": "db_name",
-        "label": "资源数据库名",
-        "type": "text",
-        "default": DEFAULT_MESSAGE_RESOURCE_DB_NAME,
-        "full_width": False,
-        "description": "默认读取 message_resource.db 中的 ChatName2Id 表。",
-    },
-    {
         "key": "flag",
         "label": "图片下载类型",
         "type": "select",
@@ -86,34 +83,7 @@ config_schema = [
             {"label": "原图", "value": 3},
         ],
     },
-    {
-        "key": "wait",
-        "label": "等待下载完成",
-        "type": "checkbox",
-        "default": True,
-        "full_width": False,
-        "description": "开启后会等待主 API 返回实际下载路径。",
-    },
-    {
-        "key": "timeout",
-        "label": "下载超时秒数",
-        "type": "number",
-        "default": 15,
-        "min": 1,
-        "max": 300,
-        "step": 1,
-        "full_width": False,
-        "description": "等待图片下载完成的最长时间。",
-    },
 ]
-
-
-def is_truthy(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return normalize_text(value).lower() in {"1", "true", "yes", "on", "y", "是"}
 
 
 def parse_int(value: Any) -> int | None:
@@ -186,31 +156,11 @@ def resolve_max_count_per_user(config: dict[str, Any]) -> int:
     return max(1, min(10000, configured))
 
 
-def resolve_db_name(config: dict[str, Any]) -> str:
-    return normalize_text(config.get("db_name")) or DEFAULT_MESSAGE_RESOURCE_DB_NAME
-
-
 def resolve_download_flag(config: dict[str, Any], context: Any) -> int:
     configured = parse_int(config.get("flag"))
     if configured is not None:
         return max(1, min(3, configured))
     return int(getattr(context.settings, "image_download_flag", 3) or 3)
-
-
-def resolve_wait(config: dict[str, Any], context: Any) -> bool:
-    if config.get("wait") is not None:
-        return is_truthy(config.get("wait"))
-    configured = getattr(context.settings, "image_download_wait", None)
-    if configured is None:
-        return True
-    return is_truthy(configured)
-
-
-def resolve_timeout(config: dict[str, Any], context: Any) -> int:
-    configured = parse_int(config.get("timeout"))
-    if configured is not None:
-        return max(1, min(300, configured))
-    return max(1, int(getattr(context.settings, "image_download_timeout", 15) or 15))
 
 
 def normalize_mapping_key(value: Any) -> str:
@@ -486,15 +436,13 @@ async def run_download_cycle(context: Any, reason: str) -> dict[str, Any]:
     end_time_text = format_date_time(end_time)
     interval_seconds = resolve_interval_seconds(context.config)
     max_count_per_user = resolve_max_count_per_user(context.config)
-    db_name = resolve_db_name(context.config)
+    db_name = DEFAULT_MESSAGE_RESOURCE_DB_NAME
     history = prune_download_history(load_download_history(history_state), int(start_time.timestamp()))
     history_keys = {item["key"] for item in history}
     update_time_scale = await query_update_time_scale(context, wxpid, db_name)
     start_update_time = int(start_time.timestamp()) * update_time_scale
     users = await query_recent_users(context, wxpid, db_name, start_update_time)
     flag = resolve_download_flag(context.config, context)
-    wait = resolve_wait(context.config, context)
-    timeout = resolve_timeout(context.config, context)
 
     report = {
         "reason": reason,
@@ -598,8 +546,7 @@ async def run_download_cycle(context: Any, reason: str) -> dict[str, Any]:
                 wxid=wxid,
                 wxpid=wxpid,
                 flag=flag,
-                wait=wait,
-                timeout=timeout,
+                wait=False,
             )
             response_payload = dict(response or {}) if isinstance(response, dict) else {}
             download_path = normalize_text(response_payload.get("path"))
