@@ -142,6 +142,7 @@
 | `room_members_deduplication` | 功能插件 | 统计多个群聊组的重复成员并导出 CSV |
 | `room_msg_summary` | 功能插件 | 导出指定群聊在时间窗口内的聊天记录 |
 | `user_msg_summary` | 功能插件 | 导出指定好友在时间窗口内的聊天记录 |
+| `download_recent_user_images` | 周期插件 | 根据 ChatName2Id 中的最近活跃用户，批量下载时间窗口内的图片消息 |
 | `classify_labels` | 功能插件 | 将群成员批量归类到好友标签 |
 | `watch_wechat_processes` | 周期插件 | 巡检微信进程与登录账号缓存变化并自动重新 hook |
 
