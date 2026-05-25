@@ -41,7 +41,7 @@ from config import (
 )
 from manager import PluginManager
 from message import MessageEvent
-from plugin_base import PluginContext
+from plugin_base import PluginContext, PluginLogger
 
 
 FRONTEND_DIR = Path(__file__).with_name("frontend")
@@ -1090,6 +1090,87 @@ class PluginRuntime:
         self.heartbeat_error = ""
         self.heartbeat_healthy = None
 
+    def _resolve_plugin_log_identity(self, module_name: str) -> tuple[str, str]:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        for plugin in self.manager.plugins:
+            if normalize_plugin_module_name(getattr(plugin, "module_name", "")) != normalized_module_name:
+                continue
+            plugin_name = str(getattr(plugin, "name", "") or "").strip()
+            if plugin_name:
+                return normalized_module_name, plugin_name
+
+        metadata_list = PluginManager.describe_modules([normalized_module_name])
+        if metadata_list:
+            plugin_name = str(metadata_list[0].get("name") or "").strip()
+            if plugin_name:
+                return normalized_module_name, plugin_name
+
+        fallback_name = normalized_module_name.rsplit(".", 1)[-1] if normalized_module_name else "plugin"
+        return normalized_module_name, fallback_name
+
+    @staticmethod
+    def _should_log_manual_plugin_execution_transition(previous_payload: dict[str, Any], current_payload: dict[str, Any]) -> bool:
+        previous_status = str(previous_payload.get("status") or "idle").strip().lower()
+        current_status = str(current_payload.get("status") or "idle").strip().lower()
+        if current_status == "idle":
+            return False
+        return (
+            previous_status != current_status
+            or str(previous_payload.get("detail") or "").strip() != str(current_payload.get("detail") or "").strip()
+            or str(previous_payload.get("error") or "").strip() != str(current_payload.get("error") or "").strip()
+        )
+
+    @staticmethod
+    def _build_manual_plugin_execution_log_message(payload: dict[str, Any]) -> tuple[str, str]:
+        status = str(payload.get("status") or "idle").strip().lower()
+        detail = str(payload.get("detail") or "").strip()
+        error = str(payload.get("error") or "").strip()
+
+        if status == "completed":
+            return "INFO", f"执行完成：{detail}" if detail else "执行完成"
+        if status == "failed":
+            return "ERROR", detail or error or "执行失败"
+        if status == "stopped":
+            return "INFO", detail or "插件已停止"
+        if status == "stopping":
+            return "INFO", detail or "正在停止插件..."
+        if status == "running":
+            return "INFO", detail or "插件正在执行..."
+        if status == "queued":
+            return "INFO", detail or "插件已开始执行"
+        return "INFO", detail or "插件状态已更新"
+
+    def _log_manual_plugin_execution_transition(self, module_name: str, payload: dict[str, Any]) -> None:
+        normalized_module_name, plugin_name = self._resolve_plugin_log_identity(module_name)
+        level, message = self._build_manual_plugin_execution_log_message(payload)
+        logger_instance = PluginLogger(
+            normalized_module_name,
+            plugin_name,
+            self._remember_plugin_log,
+            scope="manual-execution",
+        )
+        log_data = {
+            "status": str(payload.get("status") or "idle").strip().lower(),
+            "detail": str(payload.get("detail") or "").strip(),
+            "error": str(payload.get("error") or "").strip(),
+            "started_at": str(payload.get("started_at") or "").strip(),
+            "updated_at": str(payload.get("updated_at") or "").strip(),
+        }
+        result = payload.get("result")
+        if isinstance(result, dict):
+            result_detail = str(result.get("detail") or "").strip()
+            if result_detail:
+                log_data["result_detail"] = result_detail
+            if "handled" in result:
+                log_data["handled"] = bool(result.get("handled"))
+            if "stop_processing" in result:
+                log_data["stop_processing"] = bool(result.get("stop_processing"))
+
+        if level == "ERROR":
+            logger_instance.error(message, log_data)
+            return
+        logger_instance.info(message, log_data)
+
     def get_cached_login_accounts(self) -> list[dict[str, Any]]:
         return list(self.heartbeat_accounts)
 
@@ -1126,6 +1207,7 @@ class PluginRuntime:
         normalized_module_name = normalize_plugin_module_name(module_name)
         async with self._manual_plugin_execution_lock:
             current = deepcopy(self._manual_plugin_executions.get(normalized_module_name, {}))
+            previous_payload = self._normalize_manual_plugin_execution_payload(normalized_module_name, current)
             next_payload = {
                 **current,
                 **deepcopy(updates),
@@ -1136,7 +1218,9 @@ class PluginRuntime:
                 next_payload["started_at"] = _now_iso()
             normalized_payload = self._normalize_manual_plugin_execution_payload(normalized_module_name, next_payload)
             self._manual_plugin_executions[normalized_module_name] = normalized_payload
-            return deepcopy(normalized_payload)
+        if self._should_log_manual_plugin_execution_transition(previous_payload, normalized_payload):
+            self._log_manual_plugin_execution_transition(normalized_module_name, normalized_payload)
+        return deepcopy(normalized_payload)
 
     async def _set_manual_plugin_execution_task(self, module_name: str, task: asyncio.Task[Any]) -> None:
         normalized_module_name = normalize_plugin_module_name(module_name)
