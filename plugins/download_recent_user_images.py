@@ -5,13 +5,9 @@ from ._plugin_sdk import MESSAGE_TYPES, format_date_time, normalize_text, resolv
 
 
 name = "download_recent_user_images"
-description = "周期扫描 ChatName2Id 中最近活跃用户，并下载时间窗口内的图片消息"
+description = "启动时扫描 ChatName2Id 中最近活跃用户，并下载时间窗口内的图片消息"
 category = "functional"
 message_dependent = False
-schedule = {
-    "interval_field": "interval_seconds",
-    "default_interval_seconds": 3,
-}
 
 
 DEFAULT_LOOKBACK_HOURS = 24
@@ -50,14 +46,14 @@ config_schema = [
     },
     {
         "key": "interval_seconds",
-        "label": "执行间隔秒数",
+        "label": "下载间隔秒数",
         "type": "number",
         "default": DEFAULT_INTERVAL_SECONDS,
         "min": 0,
         "max": 3600,
         "step": 0.1,
         "full_width": False,
-        "description": "插件启用后每隔多少秒巡检一次；同一轮发现多张新图片时，也会按这个间隔串行下载。",
+        "description": "单次启动扫描命中多张新图片时，按这个间隔串行下载。",
     },
     {
         "key": "max_count_per_user",
@@ -616,15 +612,25 @@ async def execute(context):
     }
 
 
-async def tick(context):
-    report = await run_download_cycle(context, "tick")
+async def startup(context):
+    try:
+        report = await run_download_cycle(context, "startup")
+    except Exception as exc:
+        context.logger.warning("启动时扫描近期用户图片异常终止", {"reason": "startup", "error": str(exc)})
+        return
+
     if report.get("error"):
-        context.logger.warning("近期用户图片扫描失败", {"reason": "tick", "error": report["error"]})
-        return {"handled": False, "detail": report["error"], "data": report}
-    if report.get("downloaded_count") or report.get("failed_count"):
-        return {
-            "handled": True,
-            "detail": report.get("detail") or "周期扫描完成",
-            "data": report,
-        }
-    return {"handled": False, "detail": "", "data": report}
+        context.logger.warning("启动时扫描近期用户图片失败", {"reason": "startup", "error": report["error"]})
+        return
+
+    context.logger.info(
+        "启动时近期用户图片扫描完成",
+        {
+            "reason": "startup",
+            "detail": report.get("detail") or "扫描完成",
+            "scanned_user_count": report.get("scanned_user_count", 0),
+            "matched_image_count": report.get("matched_image_count", 0),
+            "downloaded_count": report.get("downloaded_count", 0),
+            "failed_count": report.get("failed_count", 0),
+        },
+    )
