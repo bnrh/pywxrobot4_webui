@@ -135,12 +135,24 @@ class WxRobotApiClient:
     async def post_json(self, path: str, payload: dict[str, Any], request_timeout: float | None = None) -> Any:
         return await asyncio.to_thread(self._request_json_sync, path, payload, "POST", request_timeout)
 
+    async def post_json_with_status(self, path: str, payload: dict[str, Any], request_timeout: float | None = None) -> Any:
+        return await asyncio.to_thread(
+            self._request_json_sync,
+            path,
+            payload,
+            "POST",
+            request_timeout,
+            include_status_code=True,
+        )
+
     def _request_json_sync(
         self,
         path: str,
         payload: dict[str, Any] | None,
         method: str,
         request_timeout: float | None = None,
+        *,
+        include_status_code: bool = False,
     ) -> Any:
         url = f"{self.base_url}/{path.lstrip('/')}"
         effective_timeout = self._resolve_request_timeout(request_timeout)
@@ -153,8 +165,13 @@ class WxRobotApiClient:
             headers=headers,
             method=method,
         )
+        status_code: int | None = None
         try:
             with request.urlopen(req, timeout=effective_timeout) as resp:
+                try:
+                    status_code = int(getattr(resp, "status", None) or resp.getcode())
+                except (TypeError, ValueError):
+                    status_code = None
                 response_text = resp.read().decode("utf-8")
         except TimeoutError as exc:
             raise WxRobotApiError(f"调用 {url} 超时({effective_timeout:.1f}s)") from exc
@@ -165,11 +182,22 @@ class WxRobotApiClient:
             raise WxRobotApiError(f"调用 {url} 失败: {exc.reason}") from exc
 
         if not response_text:
-            return {}
+            return {"status_code": status_code} if include_status_code and status_code is not None else {}
         try:
-            return json.loads(response_text)
+            parsed_response = json.loads(response_text)
         except json.JSONDecodeError as exc:
             raise WxRobotApiError(f"调用 {url} 返回了非 JSON 响应: {response_text}") from exc
+
+        if include_status_code and status_code is not None:
+            if isinstance(parsed_response, dict):
+                parsed_response = dict(parsed_response)
+                parsed_response.setdefault("status_code", status_code)
+            else:
+                parsed_response = {
+                    "status_code": status_code,
+                    "data": parsed_response,
+                }
+        return parsed_response
 
     @staticmethod
     def _with_optional_wxpid(payload: dict[str, Any] | None = None, wxpid: int | None = None) -> dict[str, Any]:
@@ -235,7 +263,7 @@ class WxRobotApiClient:
         if wxpid is not None:
             payload["wxpid"] = wxpid
         request_timeout = self._resolve_wait_request_timeout(wait=wait, timeout=timeout)
-        return await self.post_json("/cdn/image", payload, request_timeout=request_timeout)
+        return await self.post_json_with_status("/cdn/image", payload, request_timeout=request_timeout)
 
     async def download_cdn_video(
         self,

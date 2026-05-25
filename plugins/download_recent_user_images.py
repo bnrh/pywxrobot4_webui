@@ -332,6 +332,12 @@ def append_limited(items: list[dict[str, Any]], item: dict[str, Any]) -> None:
         items.append(item)
 
 
+def resolve_response_status_code(payload: Any) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    return parse_int(payload.get("status_code"))
+
+
 def build_message_table_name(wxid: str) -> str:
     normalized_wxid = normalize_text(wxid)
     if not normalized_wxid:
@@ -592,7 +598,8 @@ async def run_download_cycle(context: Any, reason: str) -> dict[str, Any]:
             )
             response_payload = dict(response or {}) if isinstance(response, dict) else {}
             download_path = normalize_text(response_payload.get("path"))
-            if download_path or is_success_ret(response_payload.get("ret")):
+            response_status_code = resolve_response_status_code(response_payload)
+            if response_status_code == 200:
                 history_keys.add(history_key)
                 history.append({"key": history_key, "downloaded_at": int(end_time.timestamp())})
                 history = prune_download_history(history, int(start_time.timestamp()))
@@ -602,18 +609,29 @@ async def run_download_cycle(context: Any, reason: str) -> dict[str, Any]:
                     "wxid": wxid,
                     "msgid": msgid,
                     "path": download_path,
-                    "ret": response_payload.get("ret"),
+                    "status_code": response_status_code,
                 }
                 append_limited(report["downloads"], download_record)
                 context.logger.info("已下载近期用户图片", download_record)
                 continue
 
-            error_text = extract_api_error(response_payload) or "下载接口未返回成功结果"
+            error_text = (
+                normalize_text(
+                    response_payload.get("error")
+                    or response_payload.get("errmsg")
+                    or response_payload.get("err_msg")
+                    or response_payload.get("message")
+                    or response_payload.get("msg")
+                    or response_payload.get("detail")
+                )
+                or (f"HTTP {response_status_code}" if response_status_code is not None else "下载接口未返回 HTTP 200")
+            )
             report["failed_count"] += 1
             user_report["failed_count"] += 1
             failure = {
                 "wxid": wxid,
                 "msgid": msgid,
+                "status_code": response_status_code,
                 "error": error_text,
                 "response": response_payload,
             }
