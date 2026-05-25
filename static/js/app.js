@@ -13,6 +13,9 @@ const OVERVIEW_RENDER_TICK_MS = 1000;
 const AI_ASSISTANT_JOB_POLL_INTERVAL_MS = 1200;
 const AI_ASSISTANT_ACTIVE_JOB_STATUSES = new Set(["queued", "running", "stopping"]);
 const AI_ASSISTANT_TERMINAL_JOB_STATUSES = new Set(["completed", "failed", "stopped"]);
+const MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS = 1200;
+const MANUAL_PLUGIN_EXECUTION_ACTIVE_STATUSES = new Set(["queued", "running", "stopping"]);
+const MANUAL_PLUGIN_EXECUTION_TERMINAL_STATUSES = new Set(["completed", "failed", "stopped"]);
 
 const MESSAGE_TYPE_LABELS = {
     0x0: "朋友圈",
@@ -234,6 +237,7 @@ const elements = {
 let logFilterTimerId = null;
 let pluginLogFilterTimerId = null;
 let messagePollInFlight = null;
+let manualPluginExecutionPollTimerId = null;
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -539,14 +543,97 @@ function setOverviewData(payload) {
     state.overviewFetchedAt = Date.now();
 }
 
+function normalizeManualPluginExecution(plugin) {
+    const execution = plugin?.manual_execution && typeof plugin.manual_execution === "object"
+        ? plugin.manual_execution
+        : {};
+    const status = normalizeInlineText(execution.status || "idle").toLowerCase() || "idle";
+    return {
+        ...execution,
+        status,
+        active: MANUAL_PLUGIN_EXECUTION_ACTIVE_STATUSES.has(status),
+        terminal: MANUAL_PLUGIN_EXECUTION_TERMINAL_STATUSES.has(status),
+        detail: normalizeInlineText(execution.detail || ""),
+        error: normalizeInlineText(execution.error || ""),
+    };
+}
+
+function isManualPluginExecutionActive(plugin) {
+    return normalizeManualPluginExecution(plugin).active;
+}
+
+function handleManualPluginExecutionTransitions(previousPlugins, nextPlugins) {
+    const previousPluginsByModule = new Map(
+        (Array.isArray(previousPlugins) ? previousPlugins : []).map((plugin) => [plugin?.module || "", plugin])
+    );
+    for (const plugin of Array.isArray(nextPlugins) ? nextPlugins : []) {
+        const moduleName = plugin?.module || "";
+        if (!moduleName) {
+            continue;
+        }
+        const previousPlugin = previousPluginsByModule.get(moduleName);
+        const previousExecution = normalizeManualPluginExecution(previousPlugin);
+        const nextExecution = normalizeManualPluginExecution(plugin);
+        if (!previousExecution.active || nextExecution.active || !nextExecution.terminal) {
+            continue;
+        }
+        const pluginName = normalizeInlineText(plugin?.name || moduleName) || "插件";
+        if (nextExecution.status === "completed") {
+            setStatus(
+                nextExecution.detail ? `${pluginName} 执行完成：${nextExecution.detail}` : `${pluginName} 执行完成`,
+                "good"
+            );
+            continue;
+        }
+        if (nextExecution.status === "stopped") {
+            setStatus(nextExecution.detail || `${pluginName} 已停止`);
+            continue;
+        }
+        if (nextExecution.status === "failed") {
+            setStatus(nextExecution.detail || `${pluginName} 执行失败`, "bad");
+        }
+    }
+}
+
+function scheduleManualPluginExecutionPoll() {
+    if (manualPluginExecutionPollTimerId !== null) {
+        window.clearTimeout(manualPluginExecutionPollTimerId);
+        manualPluginExecutionPollTimerId = null;
+    }
+    if (!Array.isArray(state.plugins) || !state.plugins.some(isManualPluginExecutionActive)) {
+        return;
+    }
+    manualPluginExecutionPollTimerId = window.setTimeout(() => {
+        api.getPlugins()
+            .then((payload) => {
+                if (Array.isArray(payload?.plugins)) {
+                    setPluginsPayload(payload.plugins);
+                }
+            })
+            .catch((error) => {
+                setStatus(`插件执行状态刷新失败：${error.message}`, "bad");
+                if (Array.isArray(state.plugins) && state.plugins.some(isManualPluginExecutionActive)) {
+                    scheduleManualPluginExecutionPoll();
+                }
+            });
+    }, MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS);
+}
+
+function setPluginsPayload(plugins) {
+    const previousPlugins = Array.isArray(state.plugins) ? state.plugins : [];
+    state.plugins = Array.isArray(plugins) ? plugins : [];
+    renderPlugins();
+    handleManualPluginExecutionTransitions(previousPlugins, state.plugins);
+    scheduleManualPluginExecutionPoll();
+}
+
 function applyPluginMutationResult(result) {
     if (result?.overview) {
         setOverviewData(result.overview);
         renderOverview();
     }
     if (Array.isArray(result?.plugins)) {
-        state.plugins = result.plugins;
-        renderPlugins();
+        setPluginsPayload(result.plugins);
     }
     if (result?.settings) {
         state.settings = result.settings;
@@ -1112,7 +1199,7 @@ async function loadPluginTargets(force = false) {
 const WXPID_OPTION_DEFAULT = "__default_first__";
 const WXPID_OPTION_ALL = "__all__";
 const MESSAGE_SUMMARY_PLUGIN_KEYS = new Set(["room_msg_summary", "user_msg_summary"]);
-const DIRECT_EXECUTE_PLUGIN_KEYS = new Set(["room_msg_summary", "user_msg_summary", "export_contacts"]);
+const DIRECT_EXECUTE_PLUGIN_KEYS = new Set(["room_msg_summary", "user_msg_summary", "export_contacts", "download_recent_user_images"]);
 
 function isPluginInSet(plugin, pluginKeys) {
     const name = normalizeInlineText(plugin?.name || "").toLowerCase();
@@ -1427,8 +1514,9 @@ function closePluginExecuteModal() {
 async function executePluginWithConfig(moduleName, config = {}) {
     const result = await api.executePlugin(moduleName, config);
     applyPluginMutationResult(result);
-    const detail = normalizeInlineText(result?.result?.detail || "");
-    setStatus(detail ? `插件执行完成：${detail}` : "插件执行完成", result?.result?.handled ? "good" : "");
+    const execution = normalizeManualPluginExecution({ manual_execution: result?.execution || {} });
+    const detail = execution.detail || normalizeInlineText(result?.result?.detail || "");
+    setStatus(detail ? `插件已开始执行：${detail}` : "插件已开始执行", "good");
     return result;
 }
 
@@ -1746,8 +1834,9 @@ function renderPluginCards(targetElement, plugins, emptyText, pluginKind) {
         const configSummary = configKeys.length ? `当前已配置 ${configKeys.length} 项自定义参数。` : "当前未配置自定义参数。";
         const isFeaturePlugin = pluginKind === "feature";
         const isManualExecutePlugin = isFeaturePlugin && !plugin?.capabilities?.tick_hook;
+        const manualExecution = normalizeManualPluginExecution(plugin);
         const primaryButton = isManualExecutePlugin
-            ? `<button class="button primary" type="button" data-action="execute-plugin" data-plugin="${escapeHtml(plugin.module)}">执行插件</button>`
+            ? `<button class="button ${manualExecution.active ? "secondary" : "primary"}" type="button" data-action="${manualExecution.active ? "stop-plugin-execution" : "execute-plugin"}" data-plugin="${escapeHtml(plugin.module)}">${manualExecution.active ? "停止插件" : "执行插件"}</button>`
             : `<button class="button ${plugin.enabled ? "secondary" : "primary"}" type="button" data-action="toggle-plugin" data-plugin="${escapeHtml(plugin.module)}" data-enabled="${plugin.enabled ? "0" : "1"}">${plugin.enabled ? "停止插件" : "启动插件"}</button>`;
         return `
             <article class="plugin-card">
@@ -3140,8 +3229,7 @@ async function refreshMessagesByPoll() {
 
 async function loadPlugins() {
     const payload = await api.getPlugins();
-    state.plugins = payload.plugins || [];
-    renderPlugins();
+    setPluginsPayload(payload.plugins || []);
 }
 
 async function loadPluginLogs(moduleName = state.selectedPluginLogModule, level = state.selectedPluginLogLevel, keyword = state.selectedPluginLogKeyword) {
@@ -3843,6 +3931,12 @@ async function handlePluginGridAction(event) {
                 await loadPluginTargetsIfNeeded(plugin);
             }
             await openPluginExecuteModal(moduleName);
+        } else if (button.dataset.action === "stop-plugin-execution") {
+            setStatus("正在停止功能插件...");
+            const result = await api.stopPluginExecution(moduleName);
+            applyPluginMutationResult(result);
+            const detail = normalizeInlineText(result?.execution?.detail || "");
+            setStatus(detail || "正在停止插件...");
         }
     } catch (error) {
         setStatus(`插件操作失败：${error.message}`, "bad");

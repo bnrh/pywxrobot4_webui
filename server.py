@@ -86,6 +86,8 @@ AI_ASSISTANT_MESSAGE_LIMIT = 240
 AI_ASSISTANT_JOB_LIMIT = 80
 AI_ASSISTANT_JOB_TERMINAL_STATUSES = {"completed", "failed", "stopped"}
 AI_ASSISTANT_JOB_ACTIVE_STATUSES = {"queued", "running", "stopping"}
+MANUAL_PLUGIN_EXECUTION_TERMINAL_STATUSES = {"completed", "failed", "stopped"}
+MANUAL_PLUGIN_EXECUTION_ACTIVE_STATUSES = {"queued", "running", "stopping"}
 ai_assistant_storage_lock = asyncio.Lock()
 ai_assistant_job_lock = asyncio.Lock()
 ai_assistant_jobs: dict[str, dict[str, Any]] = {}
@@ -1046,6 +1048,9 @@ class PluginRuntime:
         self.recent_plugin_logs: deque[dict[str, Any]] = deque(maxlen=PLUGIN_LOG_LIMIT)
         self.started_at: datetime | None = None
         self._heartbeat_task: asyncio.Task | None = None
+        self._manual_plugin_execution_lock = asyncio.Lock()
+        self._manual_plugin_executions: dict[str, dict[str, Any]] = {}
+        self._manual_plugin_execution_tasks: dict[str, asyncio.Task[Any]] = {}
         self.heartbeat_accounts: list[dict[str, Any]] = []
         self.heartbeat_last_checked_at: datetime | None = None
         self.heartbeat_error = ""
@@ -1081,6 +1086,197 @@ class PluginRuntime:
 
     def get_cached_login_accounts(self) -> list[dict[str, Any]]:
         return list(self.heartbeat_accounts)
+
+    def _normalize_manual_plugin_execution_payload(self, module_name: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        current = deepcopy(payload if isinstance(payload, dict) else self._manual_plugin_executions.get(normalized_module_name, {}))
+        status = str(current.get("status") or "idle").strip().lower()
+        valid_statuses = {"idle", *MANUAL_PLUGIN_EXECUTION_ACTIVE_STATUSES, *MANUAL_PLUGIN_EXECUTION_TERMINAL_STATUSES}
+        if status not in valid_statuses:
+            status = "idle"
+        if status == "idle":
+            return {
+                "module": normalized_module_name,
+                "status": "idle",
+                "active": False,
+                "detail": "",
+                "error": "",
+                "started_at": "",
+                "updated_at": "",
+                "result": None,
+            }
+        return {
+            "module": normalized_module_name,
+            "status": status,
+            "active": status in MANUAL_PLUGIN_EXECUTION_ACTIVE_STATUSES,
+            "detail": str(current.get("detail") or "").strip(),
+            "error": str(current.get("error") or "").strip(),
+            "started_at": str(current.get("started_at") or "").strip(),
+            "updated_at": str(current.get("updated_at") or "").strip(),
+            "result": deepcopy(current.get("result")) if isinstance(current.get("result"), dict) else current.get("result"),
+        }
+
+    async def _set_manual_plugin_execution(self, module_name: str, updates: dict[str, Any]) -> dict[str, Any]:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        async with self._manual_plugin_execution_lock:
+            current = deepcopy(self._manual_plugin_executions.get(normalized_module_name, {}))
+            next_payload = {
+                **current,
+                **deepcopy(updates),
+                "module": normalized_module_name,
+                "updated_at": _now_iso(),
+            }
+            if not str(next_payload.get("started_at") or "").strip() and str(next_payload.get("status") or "").strip().lower() != "idle":
+                next_payload["started_at"] = _now_iso()
+            normalized_payload = self._normalize_manual_plugin_execution_payload(normalized_module_name, next_payload)
+            self._manual_plugin_executions[normalized_module_name] = normalized_payload
+            return deepcopy(normalized_payload)
+
+    async def _set_manual_plugin_execution_task(self, module_name: str, task: asyncio.Task[Any]) -> None:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        async with self._manual_plugin_execution_lock:
+            self._manual_plugin_execution_tasks[normalized_module_name] = task
+
+    async def _get_manual_plugin_execution_task(self, module_name: str) -> asyncio.Task[Any] | None:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        async with self._manual_plugin_execution_lock:
+            return self._manual_plugin_execution_tasks.get(normalized_module_name)
+
+    async def _pop_manual_plugin_execution_task(self, module_name: str) -> asyncio.Task[Any] | None:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        async with self._manual_plugin_execution_lock:
+            return self._manual_plugin_execution_tasks.pop(normalized_module_name, None)
+
+    async def get_manual_plugin_execution(self, module_name: str) -> dict[str, Any]:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        async with self._manual_plugin_execution_lock:
+            payload = deepcopy(self._manual_plugin_executions.get(normalized_module_name, {}))
+        return self._normalize_manual_plugin_execution_payload(normalized_module_name, payload)
+
+    def get_manual_plugin_execution_snapshot(self, module_name: str) -> dict[str, Any]:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        return self._normalize_manual_plugin_execution_payload(
+            normalized_module_name,
+            deepcopy(self._manual_plugin_executions.get(normalized_module_name, {})),
+        )
+
+    async def _run_manual_plugin_execution(self, module_name: str, config_override: dict[str, Any] | None = None) -> None:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        await self._set_manual_plugin_execution(
+            normalized_module_name,
+            {
+                "status": "running",
+                "detail": "插件正在执行...",
+                "error": "",
+                "result": None,
+            },
+        )
+        try:
+            result = await self.manager.execute_plugin(normalized_module_name, dict(config_override or {}))
+        except asyncio.CancelledError:
+            await self._set_manual_plugin_execution(
+                normalized_module_name,
+                {
+                    "status": "stopped",
+                    "detail": "插件已停止",
+                    "error": "",
+                    "result": None,
+                },
+            )
+            raise
+        except ValueError as exc:
+            await self._set_manual_plugin_execution(
+                normalized_module_name,
+                {
+                    "status": "failed",
+                    "detail": str(exc),
+                    "error": str(exc),
+                    "result": None,
+                },
+            )
+        except Exception as exc:
+            logger.exception("手动执行插件失败: {}", normalized_module_name)
+            await self._set_manual_plugin_execution(
+                normalized_module_name,
+                {
+                    "status": "failed",
+                    "detail": f"执行插件失败: {exc}",
+                    "error": str(exc),
+                    "result": None,
+                },
+            )
+        else:
+            await self._set_manual_plugin_execution(
+                normalized_module_name,
+                {
+                    "status": "completed",
+                    "detail": str(result.get("detail") or "").strip() or "执行完成",
+                    "error": "",
+                    "result": result,
+                },
+            )
+        finally:
+            await self._pop_manual_plugin_execution_task(normalized_module_name)
+
+    async def start_manual_plugin_execution(self, module_name: str, config_override: dict[str, Any] | None = None) -> dict[str, Any]:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        current = await self.get_manual_plugin_execution(normalized_module_name)
+        if current.get("active"):
+            raise ValueError("插件正在执行中")
+
+        await self._set_manual_plugin_execution(
+            normalized_module_name,
+            {
+                "status": "queued",
+                "detail": "插件已开始执行",
+                "error": "",
+                "result": None,
+            },
+        )
+        task = asyncio.create_task(
+            self._run_manual_plugin_execution(normalized_module_name, dict(config_override or {})),
+            name=f"manual-plugin-{normalized_module_name.rsplit('.', 1)[-1]}",
+        )
+        await self._set_manual_plugin_execution_task(normalized_module_name, task)
+        return await self.get_manual_plugin_execution(normalized_module_name)
+
+    async def stop_manual_plugin_execution(self, module_name: str) -> dict[str, Any]:
+        normalized_module_name = normalize_plugin_module_name(module_name)
+        current = await self.get_manual_plugin_execution(normalized_module_name)
+        if not current.get("active"):
+            raise ValueError("当前没有正在执行的插件")
+        task = await self._get_manual_plugin_execution_task(normalized_module_name)
+        if task is None:
+            raise ValueError("当前没有正在执行的插件")
+
+        await self._set_manual_plugin_execution(
+            normalized_module_name,
+            {
+                "status": "stopping",
+                "detail": "正在停止插件...",
+                "error": "",
+            },
+        )
+        task.cancel()
+        return await self.get_manual_plugin_execution(normalized_module_name)
+
+    async def _cancel_manual_plugin_executions(self) -> None:
+        async with self._manual_plugin_execution_lock:
+            tasks = list(self._manual_plugin_execution_tasks.items())
+        for module_name, task in tasks:
+            if task.done():
+                continue
+            await self._set_manual_plugin_execution(
+                module_name,
+                {
+                    "status": "stopping",
+                    "detail": "正在停止插件...",
+                    "error": "",
+                },
+            )
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*(task for _, task in tasks), return_exceptions=True)
 
     async def refresh_login_account_cache(self, users: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         self.heartbeat_last_checked_at = datetime.now().astimezone()
@@ -1129,6 +1325,7 @@ class PluginRuntime:
         logger.info("插件服务已启动，消息回调地址: {}", self.settings.callback_url)
 
     async def reload(self, settings: PluginServiceSettings | None = None) -> None:
+        await self._cancel_manual_plugin_executions()
         next_settings = settings or PluginServiceSettings.from_storage()
         next_api_client = WxRobotApiClient(next_settings.wxrobot_api_base_url, next_settings.request_timeout)
         next_directory_cache = ContactDirectoryCache(next_api_client)
@@ -1158,6 +1355,7 @@ class PluginRuntime:
         logger.info("插件配置已重载，当前启用插件: {}", [plugin.name for plugin in self.manager.plugins])
 
     async def stop(self) -> None:
+        await self._cancel_manual_plugin_executions()
         if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()
             await asyncio.gather(self._heartbeat_task, return_exceptions=True)
@@ -1545,6 +1743,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                     "config": config,
                     "config_schema": item.get("config_schema") or [],
                     "scope_targets": item.get("scope_targets") or [],
+                    "manual_execution": runtime.get_manual_plugin_execution_snapshot(item["module"]),
                 }
             )
         return payload
@@ -2490,8 +2689,15 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         if module_name not in available_modules:
             raise HTTPException(status_code=404, detail="未找到指定插件模块")
 
+        metadata_list = PluginManager.describe_modules([module_name])
+        metadata = metadata_list[0] if metadata_list else None
+        if not isinstance(metadata, dict):
+            raise HTTPException(status_code=404, detail="未找到指定插件模块")
+        if metadata.get("message_dependent"):
+            raise HTTPException(status_code=400, detail="消息插件不支持手动执行")
+
         try:
-            result = await runtime.manager.execute_plugin(module_name, item.config)
+            execution = await runtime.start_manual_plugin_execution(module_name, item.config)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
@@ -2499,7 +2705,29 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
             raise HTTPException(status_code=500, detail=f"执行插件失败: {exc}") from exc
 
         return {
-            "result": result,
+            "execution": execution,
+            "result": execution.get("result"),
+            "overview": build_overview(),
+            "plugins": build_plugin_payload(),
+            "settings": build_settings_payload(),
+        }
+
+    @app.post("/api/plugins/{module_name}/stop")
+    async def stop_plugin_execution(module_name: str) -> dict:
+        available_modules = set(PluginManager.discover_plugin_modules())
+        if module_name not in available_modules:
+            raise HTTPException(status_code=404, detail="未找到指定插件模块")
+
+        try:
+            execution = await runtime.stop_manual_plugin_execution(module_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("停止手动执行插件失败: {}", module_name)
+            raise HTTPException(status_code=500, detail=f"停止插件失败: {exc}") from exc
+
+        return {
+            "execution": execution,
             "overview": build_overview(),
             "plugins": build_plugin_payload(),
             "settings": build_settings_payload(),

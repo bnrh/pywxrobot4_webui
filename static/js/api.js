@@ -170,6 +170,11 @@ export const api = {
             body: JSON.stringify({ config }),
         });
     },
+    stopPluginExecution(moduleName) {
+        return requestJson(`/api/plugins/${encodeURIComponent(moduleName)}/stop`, {
+            method: "POST",
+        });
+    },
     getSettings() {
         return requestJson("/api/settings");
     },
