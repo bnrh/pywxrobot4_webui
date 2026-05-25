@@ -72,6 +72,12 @@ INVITE_TO_ROOM_PLUGIN_MODULE = normalize_plugin_module_name("webui.plugins.invit
 ENTER_ROOM_TIP_PLUGIN_MODULE = normalize_plugin_module_name("plugins.enter_room_tip")
 ROOM_AI_REPLY_PLUGIN_MODULE = normalize_plugin_module_name("plugins.room_ai_reply")
 DOWNLOAD_RECENT_USER_IMAGES_PLUGIN_MODULE = normalize_plugin_module_name("plugins.download_recent_user_images")
+DIRECT_EXECUTE_PLUGIN_MODULES = {
+    normalize_plugin_module_name("plugins.room_msg_summary"),
+    normalize_plugin_module_name("plugins.user_msg_summary"),
+    normalize_plugin_module_name("plugins.export_contacts"),
+    DOWNLOAD_RECENT_USER_IMAGES_PLUGIN_MODULE,
+}
 LOG_LINE_PATTERN = re.compile(
     r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \| (?P<level>[A-Z]+)\s+\| (?P<module>[^:]+):(?P<function>[^:]+):(?P<line>\d+) - (?P<message>.*)$"
 )
@@ -1743,6 +1749,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                     "config": config,
                     "config_schema": item.get("config_schema") or [],
                     "scope_targets": item.get("scope_targets") or [],
+                    "direct_execute": normalize_plugin_module_name(item["module"]) in DIRECT_EXECUTE_PLUGIN_MODULES,
                     "manual_execution": runtime.get_manual_plugin_execution_snapshot(item["module"]),
                 }
             )

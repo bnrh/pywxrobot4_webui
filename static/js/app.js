@@ -1,11 +1,11 @@
-import { api } from "/static/js/api.js?v=20260517-03";
+import { api } from "/static/js/api.js?v=20260525-01";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260517-03";
+} from "/static/js/plugin-config-form.js?v=20260525-01";
 
 const OVERVIEW_POLL_INTERVAL_MS = 15000;
 const MESSAGE_POLL_INTERVAL_MS = 3000;
@@ -1212,7 +1212,7 @@ function isMessageSummaryPlugin(plugin) {
 }
 
 function isDirectExecutePlugin(plugin) {
-    return isPluginInSet(plugin, DIRECT_EXECUTE_PLUGIN_KEYS);
+    return Boolean(plugin?.direct_execute) || isPluginInSet(plugin, DIRECT_EXECUTE_PLUGIN_KEYS);
 }
 
 function getRoomMsgSummaryLookbackSeconds(rangeKey) {
@@ -3925,12 +3925,17 @@ async function handlePluginGridAction(event) {
             const suffix = result.restart_required ? `，需要重启字段：${result.restart_required_fields.join(", ")}` : "";
             setStatus(`插件状态已更新${suffix}`, result.restart_required ? "bad" : "good");
         } else if (button.dataset.action === "execute-plugin") {
-            setStatus("正在准备执行范围...");
             const plugin = getPluginByModule(moduleName);
-            if (plugin) {
-                await loadPluginTargetsIfNeeded(plugin);
+            if (plugin && isDirectExecutePlugin(plugin)) {
+                setStatus("正在执行功能插件...");
+                await executePluginWithConfig(moduleName, {});
+            } else {
+                setStatus("正在准备执行范围...");
+                if (plugin) {
+                    await loadPluginTargetsIfNeeded(plugin);
+                }
+                await openPluginExecuteModal(moduleName);
             }
-            await openPluginExecuteModal(moduleName);
         } else if (button.dataset.action === "stop-plugin-execution") {
             setStatus("正在停止功能插件...");
             const result = await api.stopPluginExecution(moduleName);
