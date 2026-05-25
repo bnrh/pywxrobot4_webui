@@ -9,6 +9,7 @@ from itertools import count
 from os import PathLike
 from pathlib import Path
 import re
+from time import monotonic
 from typing import Any
 from uuid import uuid4
 
@@ -734,10 +735,16 @@ class RoomMemberProfile:
     room_nick_name: str = ""
 
 
+CONTACT_MISS_CACHE_TTL_SECONDS = 30.0
+CONTACT_REFRESH_COOLDOWN_SECONDS = 3.0
+
+
 class ContactDirectoryCache:
     def __init__(self, api_client: WxRobotApiClient):
         self.api_client = api_client
         self._contacts: dict[int, dict[str, ContactProfile]] = {}
+        self._contact_miss_cache: dict[int, dict[str, float]] = {}
+        self._contact_refresh_attempted_at: dict[int, float] = {}
         self._room_members: dict[tuple[int, str], dict[str, RoomMemberProfile]] = {}
         self._contact_locks: dict[int, asyncio.Lock] = {}
         self._room_member_locks: dict[tuple[int, str], asyncio.Lock] = {}
@@ -753,6 +760,38 @@ class ContactDirectoryCache:
             lock = asyncio.Lock()
             self._contact_locks[key] = lock
         return lock
+
+    def _clear_contact_miss_cache(self, wxpid: int | None) -> None:
+        self._contact_miss_cache.pop(self._pid_key(wxpid), None)
+
+    def _remember_contact_miss(self, wxid: str, wxpid: int | None) -> None:
+        normalized_wxid = str(wxid or "").strip()
+        if not normalized_wxid:
+            return
+        pid_key = self._pid_key(wxpid)
+        miss_cache = self._contact_miss_cache.get(pid_key)
+        if miss_cache is None:
+            miss_cache = {}
+            self._contact_miss_cache[pid_key] = miss_cache
+        miss_cache[normalized_wxid] = monotonic() + CONTACT_MISS_CACHE_TTL_SECONDS
+
+    def _is_contact_miss_cached(self, wxid: str, wxpid: int | None) -> bool:
+        normalized_wxid = str(wxid or "").strip()
+        if not normalized_wxid:
+            return False
+        pid_key = self._pid_key(wxpid)
+        miss_cache = self._contact_miss_cache.get(pid_key)
+        if not miss_cache:
+            return False
+        expires_at = miss_cache.get(normalized_wxid)
+        if expires_at is None:
+            return False
+        if expires_at <= monotonic():
+            miss_cache.pop(normalized_wxid, None)
+            if not miss_cache:
+                self._contact_miss_cache.pop(pid_key, None)
+            return False
+        return True
 
     def _get_room_member_lock(self, roomid: str, wxpid: int | None) -> asyncio.Lock:
         key = (self._pid_key(wxpid), roomid)
@@ -826,6 +865,9 @@ class ContactDirectoryCache:
         lock = self._get_contact_lock(wxpid)
         pid_key = self._pid_key(wxpid)
         async with lock:
+            last_attempted_at = self._contact_refresh_attempted_at.get(pid_key)
+            if last_attempted_at is not None and (monotonic() - last_attempted_at) < CONTACT_REFRESH_COOLDOWN_SECONDS:
+                return self._contacts.get(pid_key, {})
             try:
                 user_list, room_list, biz_list = await asyncio.gather(
                     self.api_client.get_user_list(wxpid),
@@ -833,6 +875,7 @@ class ContactDirectoryCache:
                     self.api_client.get_biz_list(wxpid),
                 )
             except Exception as exc:
+                self._contact_refresh_attempted_at[pid_key] = monotonic()
                 logger.warning("刷新联系人缓存失败(wxpid={}): {}", wxpid, exc)
                 return self._contacts.get(pid_key, {})
 
@@ -846,25 +889,33 @@ class ContactDirectoryCache:
             # Cache empty results as well so repeated message enrichment does not
             # fan out into the same contact refresh storm on every lookup.
             self._contacts[pid_key] = profiles
+            self._clear_contact_miss_cache(wxpid)
+            self._contact_refresh_attempted_at[pid_key] = monotonic()
             return self._contacts.get(pid_key, {})
 
     async def get_contact(self, wxid: str, wxpid: int | None) -> ContactProfile | None:
-        if not wxid:
+        normalized_wxid = str(wxid or "").strip()
+        if not normalized_wxid:
             return None
         pid_keys = [self._pid_key(wxpid)]
         if wxpid not in (None, ""):
             pid_keys.append(self._pid_key(None))
 
         for pid_key in pid_keys:
-            profile = self._contacts.get(pid_key, {}).get(wxid)
+            profile = self._contacts.get(pid_key, {}).get(normalized_wxid)
             if profile is not None:
                 return profile
 
+        if self._is_contact_miss_cached(normalized_wxid, wxpid):
+            return None
+
         await self.refresh_contacts(wxpid)
         for pid_key in pid_keys:
-            profile = self._contacts.get(pid_key, {}).get(wxid)
+            profile = self._contacts.get(pid_key, {}).get(normalized_wxid)
             if profile is not None:
                 return profile
+
+        self._remember_contact_miss(normalized_wxid, wxpid)
         return None
 
     async def refresh_room_members(self, roomid: str, wxpid: int | None) -> dict[str, RoomMemberProfile]:
