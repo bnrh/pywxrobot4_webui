@@ -14,6 +14,12 @@ from loguru import logger
 from config import PLUGIN_PACKAGE, normalize_plugin_module_name
 from message import MessageEvent
 from plugin_base import PluginContext, PluginExecutionContext, PluginLogger, PluginResult, PluginStateStore
+from plugins._global_blacklist import (
+    BLACKLIST_MEMBERS_NAMESPACE,
+    BLACKLIST_PLUGIN_MODULE,
+    BLACKLIST_PLUGIN_NAME,
+    resolve_blacklist_subject_wxid,
+)
 
 
 PLUGIN_DIR = Path(__file__).with_name("plugins")
@@ -278,6 +284,99 @@ class PythonPlugin:
         self.schedule = dict(metadata.get("schedule") or {})
         self._logger = PluginLogger(self.module_name, self.name, self._plugin_log_sink)
 
+    @staticmethod
+    def _preview_text(value: Any, limit: int = 120) -> str:
+        normalized = " ".join(str(value or "").split())
+        if not normalized:
+            return ""
+        return normalized if len(normalized) <= limit else f"{normalized[:limit]}..."
+
+    @classmethod
+    def _summarize_log_value(cls, value: Any, depth: int = 0) -> Any:
+        if value in (None, "", [], {}):
+            return value
+        if isinstance(value, (bool, int, float)):
+            return value
+        if isinstance(value, str):
+            return cls._preview_text(value, 200)
+        if isinstance(value, dict):
+            if depth >= 1:
+                keys = [str(key) for key in list(value.keys())[:10]]
+                if len(value) > 10:
+                    keys.append(f"...({len(value) - 10} more)")
+                return {"type": "dict", "size": len(value), "keys": keys}
+            summary: dict[str, Any] = {}
+            for index, (key, item) in enumerate(value.items()):
+                if index >= 10:
+                    summary["__truncated_items__"] = len(value) - 10
+                    break
+                summary[str(key)] = cls._summarize_log_value(item, depth + 1)
+            return summary
+        if isinstance(value, (list, tuple, set)):
+            items = list(value)
+            summary = [cls._summarize_log_value(item, depth + 1) for item in items[:5]]
+            if len(items) > 5:
+                summary.append(f"...({len(items) - 5} more)")
+            return summary
+        return cls._preview_text(value, 200)
+
+    def _build_plugin_log_data(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "module": self.module_name,
+            "plugin": self.name,
+            "category": self.category,
+            "message_dependent": self.message_dependent,
+            "event_filters": list(self.event_filters),
+            "scope_targets": list(self.scope_targets),
+            "config_keys": sorted(str(key) for key in self.config.keys()),
+        }
+        if self.supports_tick:
+            data["tick_interval_seconds"] = self.get_tick_interval_seconds()
+        description = self._preview_text(self.description, 160)
+        if description:
+            data["description"] = description
+        return data
+
+    def _build_event_log_data(self, event: MessageEvent) -> dict[str, Any]:
+        return {
+            "msgid": event.normalized_msgid,
+            "wxpid": event.normalized_wxpid,
+            "conversation_wxid": event.conversation_wxid,
+            "sender_wxid": event.sender_wxid,
+            "current_account_wxid": event.current_account_wxid,
+            "is_group_message": event.is_group_message,
+            "is_self_message": event.is_self_message,
+            "msg_type": event.normalized_msg_type,
+            "local_type": event.normalized_local_type,
+            "content_preview": self._preview_text(event.normalized_content, 160),
+        }
+
+    def _build_result_log_data(self, result: PluginResult) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "handled": result.handled,
+            "stop_processing": result.stop_processing,
+        }
+        detail = self._preview_text(result.detail, 200)
+        if detail:
+            data["detail"] = detail
+        if result.data:
+            data["data"] = self._summarize_log_value(result.data)
+            data["data_keys"] = sorted(str(key) for key in result.data.keys())
+        return data
+
+    @staticmethod
+    def _build_error_log_data(exc: Exception) -> dict[str, Any]:
+        return {
+            "error_type": exc.__class__.__name__,
+            "error": str(exc),
+        }
+
+    def log_scope_skip(self, event: MessageEvent, reason: str) -> None:
+        message_logger = self._logger.scope("message")
+        payload = self._build_event_log_data(event)
+        payload["reason"] = reason
+        message_logger.info("消息命中过滤器，但未命中插件作用范围", payload)
+
     def _matches_event_filter(self, event: MessageEvent, event_filter: str) -> bool:
         normalized_filter = str(event_filter or "").strip().lower()
         if not normalized_filter:
@@ -356,28 +455,44 @@ class PythonPlugin:
         return await _await_if_needed(hook(*args, execution_context))
 
     async def startup(self, context: PluginContext) -> None:
-        await self._call_hook(
-            ("startup",),
-            context,
-            hot_reload=self._build_hot_reload_info(
-                changed=False,
-                reason="startup",
-                current_revision=self._loaded_revision,
-                previous_revision=self._loaded_revision,
-            ),
-        )
+        lifecycle_logger = self._logger.scope("lifecycle")
+        lifecycle_payload = self._build_plugin_log_data()
+        lifecycle_payload["hook"] = "startup"
+        try:
+            await self._call_hook(
+                ("startup",),
+                context,
+                hot_reload=self._build_hot_reload_info(
+                    changed=False,
+                    reason="startup",
+                    current_revision=self._loaded_revision,
+                    previous_revision=self._loaded_revision,
+                ),
+            )
+        except Exception as exc:
+            lifecycle_logger.error("插件启动失败", {**lifecycle_payload, **self._build_error_log_data(exc)})
+            raise
+        lifecycle_logger.info("插件启动完成", lifecycle_payload)
 
     async def shutdown(self, context: PluginContext) -> None:
-        await self._call_hook(
-            ("shutdown",),
-            context,
-            hot_reload=self._build_hot_reload_info(
-                changed=False,
-                reason="shutdown",
-                current_revision=self._loaded_revision,
-                previous_revision=self._loaded_revision,
-            ),
-        )
+        lifecycle_logger = self._logger.scope("lifecycle")
+        lifecycle_payload = self._build_plugin_log_data()
+        lifecycle_payload["hook"] = "shutdown"
+        try:
+            await self._call_hook(
+                ("shutdown",),
+                context,
+                hot_reload=self._build_hot_reload_info(
+                    changed=False,
+                    reason="shutdown",
+                    current_revision=self._loaded_revision,
+                    previous_revision=self._loaded_revision,
+                ),
+            )
+        except Exception as exc:
+            lifecycle_logger.error("插件关闭失败", {**lifecycle_payload, **self._build_error_log_data(exc)})
+            raise
+        lifecycle_logger.info("插件关闭完成", lifecycle_payload)
 
     async def _refresh_if_needed(self, context: PluginContext) -> dict[str, Any]:
         current_revision = self._current_revision()
@@ -401,7 +516,21 @@ class PythonPlugin:
                 "previous_description": previous_description,
             }
         )
-        await self._call_hook(("on_hot_reload", "onHotReload"), context, hot_reload, hot_reload=hot_reload)
+        hot_reload_logger = self._logger.scope("hot-reload")
+        hot_reload_payload = {
+            "previous_name": previous_name,
+            "previous_description": self._preview_text(previous_description, 160),
+            "current_name": self.name,
+            "current_description": self._preview_text(self.description, 160),
+            "current_revision": current_revision,
+            "previous_revision": self._loaded_revision,
+        }
+        try:
+            await self._call_hook(("on_hot_reload", "onHotReload"), context, hot_reload, hot_reload=hot_reload)
+        except Exception as exc:
+            hot_reload_logger.error("插件热重载失败", {**hot_reload_payload, **self._build_error_log_data(exc)})
+            raise
+        hot_reload_logger.info("插件已热重载", hot_reload_payload)
         logger.info("Python 插件已热重载: {}", self.module_name)
         self._loaded_revision = current_revision
         return hot_reload
@@ -423,8 +552,18 @@ class PythonPlugin:
 
     async def handle_message(self, event: MessageEvent, context: PluginContext) -> PluginResult:
         hot_reload = await self._refresh_if_needed(context)
-        result = await self._call_hook(("handle_message", "handleMessage"), context, event, hot_reload=hot_reload)
-        return self._normalize_result(result)
+        message_logger = self._logger.scope("message")
+        event_payload = self._build_event_log_data(event)
+        event_payload["hot_reload_changed"] = bool(hot_reload.get("changed"))
+        message_logger.info("插件开始处理消息", event_payload)
+        try:
+            result = await self._call_hook(("handle_message", "handleMessage"), context, event, hot_reload=hot_reload)
+        except Exception as exc:
+            message_logger.error("插件处理消息失败", {**event_payload, **self._build_error_log_data(exc)})
+            raise
+        normalized_result = self._normalize_result(result)
+        message_logger.info("插件消息处理完成", {**event_payload, **self._build_result_log_data(normalized_result)})
+        return normalized_result
 
     @property
     def supports_tick(self) -> bool:
@@ -446,8 +585,18 @@ class PythonPlugin:
 
     async def tick(self, context: PluginContext) -> PluginResult:
         hot_reload = await self._refresh_if_needed(context)
-        result = await self._call_hook(("tick",), context, hot_reload=hot_reload)
-        return self._normalize_result(result)
+        tick_logger = self._logger.scope("tick")
+        tick_payload = self._build_plugin_log_data()
+        tick_payload["hot_reload_changed"] = bool(hot_reload.get("changed"))
+        try:
+            result = await self._call_hook(("tick",), context, hot_reload=hot_reload)
+        except Exception as exc:
+            tick_logger.error("插件周期执行失败", {**tick_payload, **self._build_error_log_data(exc)})
+            raise
+        normalized_result = self._normalize_result(result)
+        if normalized_result.handled or normalized_result.detail or tick_payload["hot_reload_changed"]:
+            tick_logger.info("插件周期执行完成", {**tick_payload, **self._build_result_log_data(normalized_result)})
+        return normalized_result
 
     async def execute(self, context: PluginContext) -> PluginResult:
         hot_reload = self._build_hot_reload_info(
@@ -456,15 +605,34 @@ class PythonPlugin:
             current_revision=self._loaded_revision,
             previous_revision=self._loaded_revision,
         )
+        execute_logger = self._logger.scope("manual")
+        execute_payload = self._build_plugin_log_data()
         if self.capabilities.get("execute_hook"):
-            result = await self._call_hook(("execute",), context, hot_reload=hot_reload)
-            return self._normalize_result(result)
-        if self.capabilities.get("startup_hook"):
-            await self._call_hook(("startup",), context, hot_reload=hot_reload)
-            return PluginResult.handled_result("插件执行完成")
-        if self.supports_tick:
-            return await self.tick(context)
-        return PluginResult.skipped("插件未提供可执行入口")
+            execute_mode = "execute_hook"
+        elif self.capabilities.get("startup_hook"):
+            execute_mode = "startup_hook"
+        elif self.supports_tick:
+            execute_mode = "tick_hook"
+        else:
+            execute_mode = "unsupported"
+        execute_payload["execute_mode"] = execute_mode
+        execute_logger.info("插件开始手动执行", execute_payload)
+        try:
+            if self.capabilities.get("execute_hook"):
+                result = await self._call_hook(("execute",), context, hot_reload=hot_reload)
+                normalized_result = self._normalize_result(result)
+            elif self.capabilities.get("startup_hook"):
+                await self._call_hook(("startup",), context, hot_reload=hot_reload)
+                normalized_result = PluginResult.handled_result("插件执行完成")
+            elif self.supports_tick:
+                normalized_result = await self.tick(context)
+            else:
+                normalized_result = PluginResult.skipped("插件未提供可执行入口")
+        except Exception as exc:
+            execute_logger.error("插件手动执行失败", {**execute_payload, **self._build_error_log_data(exc)})
+            raise
+        execute_logger.info("插件手动执行完成", {**execute_payload, **self._build_result_log_data(normalized_result)})
+        return normalized_result
 
 
 class PluginManager:
@@ -483,6 +651,7 @@ class PluginManager:
         self._periodic_tasks: list[asyncio.Task] = []
         self._friend_label_cache: dict[int, tuple[float, dict[str, set[str]]]] = {}
         self._friend_label_locks: dict[int, asyncio.Lock] = {}
+        self._blacklist_state = PluginStateStore(BLACKLIST_PLUGIN_MODULE, namespace=BLACKLIST_MEMBERS_NAMESPACE)
 
     @property
     def plugins(self) -> tuple[PythonPlugin, ...]:
@@ -715,6 +884,23 @@ class PluginManager:
         self_wxid = await self._resolve_event_self_wxid(event)
         return bool(self_wxid) and sender_wxid == self_wxid
 
+    def _build_blacklist_block_result(self, subject_wxid: str) -> list[dict[str, Any]]:
+        blacklist_record = self._blacklist_state.get(subject_wxid, {})
+        display_name = _normalize_text(blacklist_record.get("display_name")) if isinstance(blacklist_record, dict) else ""
+        resolved_name = display_name or subject_wxid
+        return [
+            {
+                "plugin": BLACKLIST_PLUGIN_NAME,
+                "handled": True,
+                "stop_processing": True,
+                "detail": f"黑名单成员消息已忽略: {resolved_name}",
+                "data": {
+                    "wxid": subject_wxid,
+                    "display_name": resolved_name,
+                },
+            }
+        ]
+
     async def load_plugins(self) -> None:
         self._plugins.clear()
         for module_name in self.module_names:
@@ -762,11 +948,16 @@ class PluginManager:
         if await self._is_self_sent_message(event):
             return []
 
+        blacklist_subject_wxid = resolve_blacklist_subject_wxid(event)
+        if blacklist_subject_wxid and self._blacklist_state.has(blacklist_subject_wxid):
+            return self._build_blacklist_block_result(blacklist_subject_wxid)
+
         results: list[dict[str, Any]] = []
         for plugin in self._plugins:
             if not plugin.should_handle_message(event):
                 continue
             if not await self._matches_plugin_scope(plugin, event):
+                plugin.log_scope_skip(event, "scope_mismatch")
                 continue
             try:
                 result = await plugin.handle_message(event, self.context)

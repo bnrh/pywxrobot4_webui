@@ -6,6 +6,7 @@ import mimetypes
 import re
 from http.cookiejar import CookieJar
 from pathlib import Path
+from time import time
 from urllib import error, parse, request
 from urllib.parse import urljoin
 import uuid
@@ -13,25 +14,33 @@ import uuid
 from ai_assistant import run_openai_compatible_chat_completion
 from config import PROJECT_ROOT
 
-from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text
+from ._plugin_sdk import MESSAGE_TYPES, find_xml_tag_text, get_message_type, normalize_text, random_between, sleep, unique_strings
 
 
 name = "room_ai_reply"
-description = "按群聊配置 OpenAI-compatible AI 助手，自动回复群文本消息"
-event_filters = ["text"]
+description = "按群聊配置 OpenAI-compatible AI 助手，仅在被 @ 时自动回复群文本消息"
+event_filters = ["text", "image"]
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_MARKDOWN_ARTICLE_GHID = ""
 DEFAULT_MARKDOWN_ARTICLE_NICKNAME = ""
-DEFAULT_MARKDOWN_ARTICLE_COVER_URL = "https://docs.hedgedoc.org/images/hedgedoc_logo_black.svg"
-SEND_ARTICLE_COMPAT_GHID = "gh_hedgedoc_renderer"
+DEFAULT_MARKDOWN_ARTICLE_COVER_URL = "https://avatars.githubusercontent.com/u/67865462?s=200&v=4"
+SEND_ARTICLE_COMPAT_GHID = "gh_98e6c50f500b"
 SEND_ARTICLE_COMPAT_NICKNAME = "HedgeDoc 渲染器"
 DEFAULT_MARKDOWN_ARTICLE_TITLE = "Markdown 回复"
 HEDGEDOC_REQUEST_TIMEOUT_SECONDS = 20.0
+HEDGEDOC_IMAGE_UPLOAD_TIMEOUT_SECONDS = 60.0
 AI_REPLY_IMAGE_DOWNLOAD_TIMEOUT_SECONDS = 60.0
 AI_REPLY_IMAGE_UPLOAD_DIR = PROJECT_ROOT / "uploads" / "room_ai_reply"
+DEFAULT_PENDING_IMAGE_WAIT_SECONDS = 8
+PENDING_IMAGE_STATE_NAMESPACE = "pending_room_images"
+PENDING_IMAGE_DOWNLOAD_DELAY_MIN_SECONDS = 1
+PENDING_IMAGE_DOWNLOAD_DELAY_MAX_SECONDS = 2
+PENDING_IMAGE_DOWNLOAD_FLAG = 3
 REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 DATA_IMAGE_URL_PATTERN = re.compile(r"^data:(?P<media_type>image/[^;]+)?;base64,(?P<data>.+)$", re.I | re.S)
+AT_MENTION_PATTERN = re.compile(r"(?<!\S)@[^@\n]+?(?=\u2005|$)")
+MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<url>[^)\s]+)(?P<tail>\s+\&quot;[^\&]+\&quot;|\s+\"[^\"]*\")?\)")
 MARKDOWN_STRONG_PATTERNS = [
     re.compile(r"```"),
     re.compile(r"(?m)^\s*#{1,6}\s+\S"),
@@ -133,6 +142,17 @@ config_schema = [
         "description": "当模型回复被识别为 Markdown 时，会先上传到该 HedgeDoc 实例，再发送图文链接。",
     },
     {
+        "key": "pending_image_wait_seconds",
+        "label": "图片关联等待时间(秒)",
+        "type": "number",
+        "default": DEFAULT_PENDING_IMAGE_WAIT_SECONDS,
+        "min": 1,
+        "max": 60,
+        "step": 1,
+        "full_width": False,
+        "description": "群成员先发图片后，再在该时间窗口内发送 @ 消息时，会把该图片和文本一起发送给模型。",
+    },
+    {
         "key": "hedgedoc_email",
         "label": "HedgeDoc 邮箱",
         "type": "text",
@@ -199,15 +219,229 @@ def resolve_room_name(event, roomid):
     return roomid or "当前群聊"
 
 
-def build_model_prompt(event, roomid, message_text):
-    sender_name = resolve_sender_name(event)
-    room_name = resolve_room_name(event, roomid)
-    return (
-        f"群聊：{room_name}\n"
-        f"发送者：{sender_name}\n"
-        f"消息内容：{message_text}\n\n"
-        "请直接给出适合发回群聊的回复。"
+def resolve_current_account_wxid(event):
+    first_non_empty = getattr(event, "first_non_empty", None)
+    if callable(first_non_empty):
+        return normalize_text(
+            first_non_empty(
+                "self_wxid",
+                "current_wxid",
+                "login_wxid",
+                "account_wxid",
+                "recipient",
+            )
+        )
+    return normalize_text(
+        getattr(event, "current_account_wxid", "") or getattr(event, "recipient", "")
     )
+
+
+def get_message_at_user_list(event):
+    msgsource = getattr(event, "msgsource", "") or getattr(event, "source", "") or ""
+    return unique_strings(find_xml_tag_text(msgsource, "atuserlist"))
+
+
+def is_at_current_account(event):
+    current_account_wxid = resolve_current_account_wxid(event)
+    if not current_account_wxid:
+        return False
+    return current_account_wxid in get_message_at_user_list(event)
+
+
+def remove_msg_at_text(content):
+    normalized_content = str(content or "")
+    cleaned_content = AT_MENTION_PATTERN.sub("", normalized_content)
+    cleaned_content = cleaned_content.replace("\u2005", " ")
+    return normalize_text(cleaned_content)
+
+
+def now_milliseconds():
+    return int(time() * 1000)
+
+
+def resolve_pending_image_wait_seconds(config):
+    raw_value = config.get("pending_image_wait_seconds") if isinstance(config, dict) else None
+    try:
+        wait_seconds = int(float(raw_value)) if raw_value not in (None, "") else DEFAULT_PENDING_IMAGE_WAIT_SECONDS
+    except (TypeError, ValueError):
+        wait_seconds = DEFAULT_PENDING_IMAGE_WAIT_SECONDS
+    return max(1, min(60, wait_seconds))
+
+
+def build_pending_room_image_key(roomid, sender_wxid):
+    return f"{roomid}::{sender_wxid}"
+
+
+def normalize_pending_room_image_record(value):
+    payload = value if isinstance(value, dict) else {}
+    try:
+        created_at_ms = int(payload.get("created_at_ms") or 0)
+    except (TypeError, ValueError):
+        created_at_ms = 0
+    try:
+        expires_at_ms = int(payload.get("expires_at_ms") or 0)
+    except (TypeError, ValueError):
+        expires_at_ms = 0
+    try:
+        wxpid = int(payload.get("wxpid")) if payload.get("wxpid") not in (None, "") else None
+    except (TypeError, ValueError):
+        wxpid = None
+    return {
+        "msgid": normalize_text(payload.get("msgid")),
+        "roomid": normalize_text(payload.get("roomid")),
+        "sender_wxid": normalize_text(payload.get("sender_wxid")),
+        "image_path": normalize_text(payload.get("image_path")),
+        "download_error": normalize_text(payload.get("download_error")),
+        "created_at_ms": created_at_ms,
+        "expires_at_ms": expires_at_ms,
+        "wxpid": wxpid,
+    }
+
+
+def cleanup_stale_pending_room_images(pending_state, now_ms):
+    for pending_key, pending_value in pending_state.entries():
+        pending = normalize_pending_room_image_record(pending_value)
+        expires_at_ms = pending["expires_at_ms"] or pending["created_at_ms"]
+        if expires_at_ms > 0 and now_ms <= expires_at_ms:
+            continue
+        pending_state.delete(pending_key)
+
+
+def get_active_pending_room_image(pending_state, pending_key, now_ms):
+    pending = normalize_pending_room_image_record(pending_state.get(pending_key))
+    if not pending["msgid"] and not pending["image_path"]:
+        pending_state.delete(pending_key)
+        return None
+
+    expires_at_ms = pending["expires_at_ms"] or pending["created_at_ms"]
+    if expires_at_ms <= 0 or now_ms > expires_at_ms:
+        pending_state.delete(pending_key)
+        return None
+    return pending
+
+
+def resolve_local_image_path(raw_path):
+    path_text = normalize_text(raw_path)
+    if not path_text:
+        return None
+    candidate = Path(path_text)
+    if not candidate.is_absolute():
+        candidate = PROJECT_ROOT / candidate
+    if candidate.exists():
+        return candidate
+    return None
+
+
+def resolve_downloaded_image_path(response):
+    if not isinstance(response, dict):
+        return None
+
+    candidates = []
+    for key in ("path", "save_path", "file_path", "download_path"):
+        value = response.get(key)
+        if value not in (None, ""):
+            candidates.append(value)
+
+    payload = response.get("data")
+    if isinstance(payload, dict):
+        for key in ("path", "save_path", "file_path", "download_path"):
+            value = payload.get(key)
+            if value not in (None, ""):
+                candidates.append(value)
+
+    for raw_path in candidates:
+        candidate = resolve_local_image_path(raw_path)
+        if candidate is not None:
+            return candidate
+    return None
+
+
+async def download_room_message_image(context, roomid, msgid, wxpid):
+    timeout_seconds = int(getattr(getattr(context, "settings", None), "image_download_timeout", 15) or 15)
+    response = await context.api.download_cdn_image(
+        msgid=msgid,
+        wxid=roomid,
+        wxpid=wxpid,
+        flag=PENDING_IMAGE_DOWNLOAD_FLAG,
+        wait=True,
+        timeout=timeout_seconds,
+    )
+    image_path = resolve_downloaded_image_path(response)
+    if image_path is None:
+        raise RuntimeError(f"下载图片成功但未找到可用文件路径: {response}")
+    return image_path, response
+
+
+async def prime_pending_room_image(context, pending_state, pending_key, roomid, sender_wxid, msgid, wxpid, expires_at_ms):
+    pending_state.set(
+        pending_key,
+        {
+            "msgid": msgid,
+            "roomid": roomid,
+            "sender_wxid": sender_wxid,
+            "image_path": "",
+            "download_error": "",
+            "created_at_ms": now_milliseconds(),
+            "expires_at_ms": expires_at_ms,
+            "wxpid": wxpid,
+        },
+    )
+
+    delay_seconds = random_between(PENDING_IMAGE_DOWNLOAD_DELAY_MIN_SECONDS, PENDING_IMAGE_DOWNLOAD_DELAY_MAX_SECONDS)
+    await sleep(delay_seconds * 1000)
+
+    try:
+        image_path, _ = await download_room_message_image(context, roomid, msgid, wxpid)
+    except Exception as exc:
+        latest_pending = get_active_pending_room_image(pending_state, pending_key, now_milliseconds())
+        if latest_pending is not None and latest_pending["msgid"] == msgid:
+            pending_state.set(pending_key, {**latest_pending, "download_error": str(exc)})
+        context.logger.warning(
+            "群聊 AI 回复预下载上一条图片失败，等待后续消息时将按需重试",
+            {"roomid": roomid, "sender_wxid": sender_wxid, "msgid": msgid, "wxpid": wxpid, "error": str(exc)},
+        )
+        return
+
+    latest_pending = get_active_pending_room_image(pending_state, pending_key, now_milliseconds())
+    if latest_pending is None or latest_pending["msgid"] != msgid:
+        return
+    pending_state.set(pending_key, {**latest_pending, "image_path": str(image_path), "download_error": ""})
+
+
+async def ensure_pending_room_image_path(context, roomid, pending_image_record):
+    local_image_path = resolve_local_image_path(pending_image_record.get("image_path"))
+    if local_image_path is not None:
+        return str(local_image_path)
+
+    msgid = normalize_text(pending_image_record.get("msgid"))
+    if not msgid:
+        return ""
+
+    image_path, _ = await download_room_message_image(context, roomid, msgid, pending_image_record.get("wxpid"))
+    return str(image_path)
+
+
+def build_local_image_data_url(image_path):
+    image_file_path = resolve_local_image_path(image_path)
+    if image_file_path is None or not image_file_path.is_file():
+        raise RuntimeError(f"待发送给模型的图片不存在: {image_path}")
+
+    media_type = mimetypes.guess_type(str(image_file_path))[0] or "image/png"
+    image_base64 = base64.b64encode(image_file_path.read_bytes()).decode("ascii")
+    return f"data:{media_type};base64,{image_base64}"
+
+
+def build_ai_user_message(message_text, image_path=""):
+    normalized_text = str(message_text or "").strip()
+    normalized_image_path = str(image_path or "").strip()
+    if not normalized_image_path:
+        return {"role": "user", "content": normalized_text}
+
+    content_blocks = []
+    if normalized_text:
+        content_blocks.append({"type": "text", "text": normalized_text})
+    content_blocks.append({"type": "image_url", "image_url": {"url": build_local_image_data_url(normalized_image_path)}})
+    return {"role": "user", "content": content_blocks}
 
 
 def normalize_markdown_delivery_config(config):
@@ -291,6 +525,42 @@ def resolve_send_article_publisher(markdown_config):
     }
 
 
+def extract_markdown_image_items(markdown_text):
+    image_items = []
+    for match in MARKDOWN_IMAGE_PATTERN.finditer(str(markdown_text or "")):
+        image_url = str(match.group("url") or "").strip()
+        if not image_url:
+            continue
+        image_items.append(
+            {
+                "url": image_url,
+                "alt_text": str(match.group("alt") or "").strip(),
+                "detail": "markdown",
+            }
+        )
+    return image_items
+
+
+def strip_markdown_image_syntax(markdown_text):
+    normalized_text = MARKDOWN_IMAGE_PATTERN.sub("", str(markdown_text or ""))
+    normalized_text = re.sub(r"\n{3,}", "\n\n", normalized_text)
+    return normalized_text.strip()
+
+
+def merge_reply_image_items(reply_text, image_items):
+    merged_items = []
+    seen_sources = set()
+    for image_item in [*extract_markdown_image_items(reply_text), *(image_items or [])]:
+        if not isinstance(image_item, dict):
+            continue
+        image_source = str(image_item.get("url") or "").strip()
+        if not image_source or image_source in seen_sources:
+            continue
+        seen_sources.add(image_source)
+        merged_items.append(dict(image_item))
+    return merged_items
+
+
 def build_markdown_reply_with_images(reply_text, image_items):
     sections = []
     normalized_text = str(reply_text or "").strip()
@@ -309,6 +579,22 @@ def build_markdown_reply_with_images(reply_text, image_items):
         sections.append(f"![{alt_text}]({image_url})")
 
     return "\n\n".join(section for section in sections if str(section or "").strip()).strip()
+
+
+def replace_markdown_image_urls(markdown_text, uploaded_link_map):
+    if not uploaded_link_map:
+        return str(markdown_text or "")
+
+    def replace_match(match):
+        original_url = str(match.group("url") or "").strip()
+        replaced_url = str(uploaded_link_map.get(original_url) or original_url).strip()
+        if not replaced_url:
+            return match.group(0)
+        alt_text = str(match.group("alt") or "")
+        tail = str(match.group("tail") or "")
+        return f"![{alt_text}]({replaced_url}{tail})"
+
+    return MARKDOWN_IMAGE_PATTERN.sub(replace_match, str(markdown_text or ""))
 
 
 def guess_ai_image_suffix(image_item, response_content_type=""):
@@ -373,6 +659,101 @@ def materialize_ai_image(image_item):
     output_path = AI_REPLY_IMAGE_UPLOAD_DIR / f"{uuid.uuid4().hex}{guess_ai_image_suffix(normalized_item, response_content_type)}"
     output_path.write_bytes(image_bytes)
     return str(output_path)
+
+
+def upload_image_to_hedgedoc(opener, hedgedoc_url, image_path):
+    image_file_path = Path(image_path)
+    if not image_file_path.is_file():
+        raise RuntimeError(f"待上传的图片不存在: {image_path}")
+
+    boundary = f"----CopilotBoundary{uuid.uuid4().hex}"
+    content_type = mimetypes.guess_type(str(image_file_path))[0] or "application/octet-stream"
+    image_bytes = image_file_path.read_bytes()
+    request_body = b"".join(
+        [
+            f"--{boundary}\r\n".encode("utf-8"),
+            f"Content-Disposition: form-data; name=\"image\"; filename=\"{image_file_path.name}\"\r\n".encode("utf-8"),
+            f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
+            image_bytes,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("utf-8"),
+        ]
+    )
+    upload_request = request.Request(
+        urljoin(f"{hedgedoc_url}/", "uploadimage"),
+        data=request_body,
+        headers={
+            "Accept": "*/*",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Origin": hedgedoc_url,
+            "Referer": f"{hedgedoc_url}/",
+        },
+        method="POST",
+    )
+    try:
+        with opener.open(upload_request, timeout=HEDGEDOC_IMAGE_UPLOAD_TIMEOUT_SECONDS) as response:
+            response_text = response.read().decode("utf-8", errors="ignore")
+    except error.HTTPError as exc:
+        response_text = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"HedgeDoc 上传图片失败，HTTP {exc.code}: {response_text[:500]}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"HedgeDoc 上传图片失败: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise RuntimeError("HedgeDoc 上传图片超时") from exc
+
+    try:
+        payload = json.loads(response_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"HedgeDoc 上传图片返回了非 JSON 响应: {response_text[:500]}") from exc
+
+    uploaded_link = str(payload.get("link") or "").strip() if isinstance(payload, dict) else ""
+    if not uploaded_link:
+        raise RuntimeError(f"HedgeDoc 上传图片返回异常: {payload}")
+    return uploaded_link
+
+
+def prepare_markdown_reply_for_hedgedoc(markdown_text, image_items, markdown_config):
+    normalized_markdown = str(markdown_text or "").strip()
+    hedgedoc_opener = login_hedgedoc(
+        markdown_config["hedgedoc_url"],
+        markdown_config["hedgedoc_email"],
+        markdown_config["hedgedoc_password"],
+    )
+
+    uploaded_link_map = {}
+    embedded_image_items = extract_markdown_image_items(normalized_markdown)
+    for image_item in embedded_image_items:
+        image_source = str(image_item.get("url") or "").strip()
+        if not image_source or image_source in uploaded_link_map:
+            continue
+        local_image_path = materialize_ai_image(image_item)
+        uploaded_link_map[image_source] = upload_image_to_hedgedoc(hedgedoc_opener, markdown_config["hedgedoc_url"], local_image_path)
+
+    final_markdown = replace_markdown_image_urls(normalized_markdown, uploaded_link_map)
+    handled_sources = set(uploaded_link_map.keys())
+    appended_sections = []
+    for index, image_item in enumerate(image_items or [], start=1):
+        image_source = str((image_item or {}).get("url") or "").strip()
+        if not image_source or image_source in handled_sources:
+            continue
+        local_image_path = materialize_ai_image(image_item)
+        uploaded_link = upload_image_to_hedgedoc(hedgedoc_opener, markdown_config["hedgedoc_url"], local_image_path)
+        alt_text = trim_text(
+            strip_markdown_to_text((image_item or {}).get("alt_text") or f"图片 {index}"),
+            80,
+            f"图片 {index}",
+        )
+        appended_sections.append(f"![{alt_text}]({uploaded_link})")
+        handled_sources.add(image_source)
+
+    if appended_sections:
+        appended_markdown = "\n\n".join(appended_sections)
+        final_markdown = f"{final_markdown}\n\n".strip() if final_markdown else ""
+        final_markdown = f"{final_markdown}{appended_markdown}".strip()
+
+    note_id, _ = create_hedgedoc_note(hedgedoc_opener, markdown_config["hedgedoc_url"], final_markdown)
+    publish_link = get_hedgedoc_publish_link(hedgedoc_opener, markdown_config["hedgedoc_url"], note_id)
+    return final_markdown, publish_link
 
 
 async def send_ai_image_reply(context, roomid, wxpid, image_items):
@@ -552,12 +933,46 @@ def get_room_config_map(config):
 
 
 async def handle_message(event, context):
-    if get_message_type(event) != MESSAGE_TYPES.TEXT:
-        return {"handled": False, "detail": ""}
-
     roomid = normalize_text(event.conversation_wxid or "")
     room_config = get_room_config_map(context.config).get(roomid)
     if room_config is None:
+        return {"handled": False, "detail": ""}
+
+    pending_image_state = context.state.namespace(PENDING_IMAGE_STATE_NAMESPACE)
+    cleanup_stale_pending_room_images(pending_image_state, now_milliseconds())
+
+    sender_wxid = normalize_text(event.sender_wxid)
+    current_account_wxid = resolve_current_account_wxid(event)
+
+    if event.is_image:
+        msgid = normalize_text(event.normalized_msgid)
+        if not roomid or not sender_wxid or not msgid:
+            return {"handled": False, "detail": ""}
+        if current_account_wxid and sender_wxid == current_account_wxid:
+            return {"handled": False, "detail": ""}
+
+        pending_key = build_pending_room_image_key(roomid, sender_wxid)
+        expires_at_ms = now_milliseconds() + resolve_pending_image_wait_seconds(context.config) * 1000
+        await prime_pending_room_image(
+            context,
+            pending_image_state,
+            pending_key,
+            roomid,
+            sender_wxid,
+            msgid,
+            event.normalized_wxpid,
+            expires_at_ms,
+        )
+        return {"handled": False, "detail": ""}
+
+    if get_message_type(event) != MESSAGE_TYPES.TEXT:
+        return {"handled": False, "detail": ""}
+
+    pending_key = build_pending_room_image_key(roomid, sender_wxid) if roomid and sender_wxid else ""
+    pending_image_record = get_active_pending_room_image(pending_image_state, pending_key, now_milliseconds()) if pending_key else None
+    if not is_at_current_account(event):
+        if pending_key and pending_image_record is not None:
+            pending_image_state.delete(pending_key)
         return {"handled": False, "detail": ""}
 
     base_url = room_config["base_url"]
@@ -569,18 +984,51 @@ async def handle_message(event, context):
 
     raw_content = getattr(event, "content", "") or getattr(event, "normalized_content", "") or ""
     room_sender = getattr(event, "room_sender", "") or getattr(event, "sender_wxid", "") or ""
-    message_text = strip_room_sender_prefix(raw_content, room_sender)
-    if not message_text:
+    message_text = remove_msg_at_text(strip_room_sender_prefix(raw_content, room_sender))
+    prompt_image_path = ""
+    if pending_key and pending_image_record is not None:
+        try:
+            prompt_image_path = await ensure_pending_room_image_path(context, roomid, pending_image_record)
+        except Exception as exc:
+            context.logger.warning(
+                "群聊 AI 回复关联上一条图片失败，回退为纯文本提问",
+                {
+                    "roomid": roomid,
+                    "model": model,
+                    "sender": resolve_sender_name(event),
+                    "pending_msgid": pending_image_record.get("msgid"),
+                    "error": str(exc),
+                },
+            )
+        finally:
+            pending_image_state.delete(pending_key)
+
+    if not message_text and not prompt_image_path:
         return {"handled": False, "detail": ""}
+
+    try:
+        user_message = build_ai_user_message(message_text, prompt_image_path)
+    except Exception as exc:
+        if not message_text:
+            return {
+                "handled": False,
+                "detail": f"群聊 AI 回复准备图片输入失败: {exc}",
+                "data": {"roomid": roomid, "model": model, "error": str(exc)},
+            }
+        prompt_image_path = ""
+        user_message = build_ai_user_message(message_text)
+        context.logger.warning(
+            "群聊 AI 回复读取关联图片失败，已回退为纯文本提问",
+            {"roomid": roomid, "model": model, "sender": resolve_sender_name(event), "error": str(exc)},
+        )
 
     try:
         ai_result = await run_openai_compatible_chat_completion(
             base_url=base_url,
             api_key=api_key,
             model=model,
-            messages=[{"role": "user", "content": build_model_prompt(event, roomid, message_text)}],
+            messages=[user_message],
             system_prompt=system_prompt,
-            temperature=0.4,
         )
     except Exception as exc:
         context.logger.error(
@@ -598,8 +1046,11 @@ async def handle_message(event, context):
             "data": {"roomid": roomid, "model": model, "error": str(exc)},
         }
 
-    reply_text = str(ai_result.get("content") or "").strip()
-    reply_images = ai_result.get("image_items") if isinstance(ai_result.get("image_items"), list) else []
+    raw_reply_text = str(ai_result.get("content") or "").strip()
+    structured_reply_images = ai_result.get("image_items") if isinstance(ai_result.get("image_items"), list) else []
+    reply_images = merge_reply_image_items(raw_reply_text, structured_reply_images)
+    reply_text = strip_markdown_image_syntax(raw_reply_text) if raw_reply_text else ""
+    reply_text = str(reply_text or "").strip()
     has_reply_text = bool(reply_text)
     has_reply_images = bool(reply_images)
     if not has_reply_text and not has_reply_images:
@@ -609,9 +1060,9 @@ async def handle_message(event, context):
     article_payload = {}
     sent_image_paths = []
     markdown_config = normalize_markdown_delivery_config(context.config)
-    markdown_detected = is_likely_markdown(reply_text)
-    markdown_reply_source = build_markdown_reply_with_images(reply_text, reply_images) if has_reply_text and has_reply_images else reply_text
-    should_send_article = bool(has_reply_text and has_reply_images) or markdown_detected
+    markdown_detected = is_likely_markdown(raw_reply_text)
+    markdown_reply_source = build_markdown_reply_with_images(reply_text, reply_images) if has_reply_text and has_reply_images else (raw_reply_text if has_reply_text else "")
+    should_send_article = bool(has_reply_text and has_reply_images) or (has_reply_text and markdown_detected)
     if should_send_article:
         missing_markdown_fields = get_missing_markdown_delivery_fields(markdown_config)
         if missing_markdown_fields:
@@ -626,8 +1077,13 @@ async def handle_message(event, context):
             )
         else:
             try:
-                publish_link = await asyncio.to_thread(upload_markdown_to_hedgedoc, markdown_reply_source, markdown_config)
-                article_payload = build_markdown_article_payload(markdown_reply_source, publish_link, roomid, event, markdown_config)
+                prepared_markdown_text, publish_link = await asyncio.to_thread(
+                    prepare_markdown_reply_for_hedgedoc,
+                    markdown_reply_source,
+                    reply_images,
+                    markdown_config,
+                )
+                article_payload = build_markdown_article_payload(prepared_markdown_text, publish_link, roomid, event, markdown_config)
                 await context.api.send_article(wxid=roomid, wxpid=event.normalized_wxpid, **article_payload)
                 reply_mode = "article"
             except Exception as exc:
@@ -680,23 +1136,27 @@ async def handle_message(event, context):
         "reply_length": len(reply_text),
         "reply_mode": reply_mode,
         "image_count": len(reply_images),
+        "has_prompt_image": bool(prompt_image_path),
     }
     if reply_mode == "article":
         log_payload.update({
             "article_url": article_payload.get("url"),
             "article_title": article_payload.get("title"),
         })
+    if prompt_image_path:
+        log_payload["prompt_image_path"] = prompt_image_path
     if sent_image_paths:
         log_payload["image_paths"] = sent_image_paths
     context.logger.info(log_message, log_payload)
     return {
         "handled": True,
-        "detail": f"已对群聊 {roomid} 的文本消息发送 AI 回复",
+        "detail": f"已对群聊 {roomid} 的消息发送 AI 回复",
         "data": {
             "roomid": roomid,
             "model": model,
             "sender": resolve_sender_name(event),
             "message": message_text,
+            "prompt_image_path": prompt_image_path,
             "reply": reply_text,
             "reply_mode": reply_mode,
             "article_url": article_payload.get("url") or "",
