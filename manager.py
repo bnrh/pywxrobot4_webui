@@ -588,14 +588,14 @@ class PythonPlugin:
         tick_logger = self._logger.scope("tick")
         tick_payload = self._build_plugin_log_data()
         tick_payload["hot_reload_changed"] = bool(hot_reload.get("changed"))
-        tick_logger.info("插件开始周期执行", tick_payload)
         try:
             result = await self._call_hook(("tick",), context, hot_reload=hot_reload)
         except Exception as exc:
             tick_logger.error("插件周期执行失败", {**tick_payload, **self._build_error_log_data(exc)})
             raise
         normalized_result = self._normalize_result(result)
-        tick_logger.info("插件周期执行完成", {**tick_payload, **self._build_result_log_data(normalized_result)})
+        if normalized_result.handled or normalized_result.detail or tick_payload["hot_reload_changed"]:
+            tick_logger.info("插件周期执行完成", {**tick_payload, **self._build_result_log_data(normalized_result)})
         return normalized_result
 
     async def execute(self, context: PluginContext) -> PluginResult:
