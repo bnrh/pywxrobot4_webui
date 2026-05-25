@@ -512,8 +512,18 @@ async def run_download_cycle(context: Any, reason: str) -> dict[str, Any]:
     }
 
     download_attempt_count = 0
-    for user in users:
+    total_users = len(users)
+    for user_index, user in enumerate(users, start=1):
         wxid = user["wxid"]
+        context.logger.info(
+            "开始查询近期用户图片",
+            {
+                "wxid": wxid,
+                "update_time": user["update_time"],
+                "user_index": user_index,
+                "total_users": total_users,
+            },
+        )
         try:
             messages = await query_recent_image_messages(
                 context=context,
@@ -549,6 +559,16 @@ async def run_download_cycle(context: Any, reason: str) -> dict[str, Any]:
         report["scanned_message_count"] += len(messages)
         image_messages = [message for message in messages if isinstance(message, dict) and is_image_message(message)]
         if not image_messages:
+            context.logger.info(
+                "近期用户图片查询无图片",
+                {
+                    "wxid": wxid,
+                    "update_time": user["update_time"],
+                    "user_index": user_index,
+                    "total_users": total_users,
+                    "scanned_message_count": len(messages),
+                },
+            )
             continue
 
         report["matched_user_count"] += 1
@@ -633,6 +653,16 @@ async def run_download_cycle(context: Any, reason: str) -> dict[str, Any]:
             }
             append_limited(report["failures"], failure)
             context.logger.warning("下载近期用户图片失败", failure)
+        if (
+            user_report["downloaded_count"] == 0
+            and user_report["failed_count"] == 0
+            and user_report["image_count"] > 0
+            and user_report["skipped_missing_msgid_count"] == 0
+            and user_report["skipped_downloaded_count"] == user_report["image_count"]
+        ):
+            context.logger.info("近期用户图片查询全部已下载", user_report)
+        else:
+            context.logger.info("近期用户图片查询完成", user_report)
 
         append_limited(report["users"], user_report)
 
