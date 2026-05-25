@@ -6,7 +6,7 @@ from ._plugin_sdk import MESSAGE_TYPES, format_date_time, normalize_text, resolv
 
 
 name = "download_recent_user_images"
-description = "启动时扫描 ChatName2Id 中最近活跃用户，并下载时间窗口内的图片消息"
+description = "手动扫描 ChatName2Id 中最近活跃用户，并下载时间窗口内的图片消息"
 category = "functional"
 message_dependent = False
 
@@ -55,7 +55,7 @@ config_schema = [
         "max": 3600,
         "step": 0.1,
         "full_width": False,
-        "description": "单次启动扫描命中多张新图片时，按这个间隔串行下载。",
+        "description": "单次手动扫描命中多张新图片时，按这个间隔串行下载。",
     },
     {
         "key": "max_count_per_user",
@@ -674,27 +674,3 @@ async def execute(context):
         "detail": report.get("detail") or "执行完成",
         "data": report,
     }
-
-
-async def startup(context):
-    try:
-        report = await run_download_cycle(context, "startup")
-    except Exception as exc:
-        context.logger.warning("启动时扫描近期用户图片异常终止", {"reason": "startup", "error": str(exc)})
-        return
-
-    if report.get("error"):
-        context.logger.warning("启动时扫描近期用户图片失败", {"reason": "startup", "error": report["error"]})
-        return
-
-    context.logger.info(
-        "启动时近期用户图片扫描完成",
-        {
-            "reason": "startup",
-            "detail": report.get("detail") or "扫描完成",
-            "scanned_user_count": report.get("scanned_user_count", 0),
-            "matched_image_count": report.get("matched_image_count", 0),
-            "downloaded_count": report.get("downloaded_count", 0),
-            "failed_count": report.get("failed_count", 0),
-        },
-    )
