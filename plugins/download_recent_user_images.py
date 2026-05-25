@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -13,7 +14,8 @@ message_dependent = False
 DEFAULT_LOOKBACK_HOURS = 24
 DEFAULT_INTERVAL_SECONDS = 3.0
 DEFAULT_MAX_COUNT_PER_USER = 2000
-DEFAULT_MESSAGE_RESOURCE_DB_NAME = "message_resource.db"
+DEFAULT_MESSAGE_RESOURCE_DB_NAME = "message_resource"
+DEFAULT_MESSAGE_DB_NAME = "message"
 DOWNLOAD_HISTORY_LIMIT = 5000
 DOWNLOAD_HISTORY_RETENTION_BUFFER_SECONDS = 3600
 MAX_REPORT_ITEMS = 100
@@ -330,6 +332,13 @@ def append_limited(items: list[dict[str, Any]], item: dict[str, Any]) -> None:
         items.append(item)
 
 
+def build_message_table_name(wxid: str) -> str:
+    normalized_wxid = normalize_text(wxid)
+    if not normalized_wxid:
+        return ""
+    return f"Msg_{hashlib.md5(normalized_wxid.encode('utf-8')).hexdigest()}"
+
+
 async def resolve_wxpid(context: Any) -> int | None:
     targets = await resolve_wxpid_targets(context.api, context.config.get("wxpid"))
     return targets[0] if targets else None
@@ -383,6 +392,39 @@ async def query_recent_users(context: Any, wxpid: int, db_name: str, start_updat
     return users
 
 
+async def query_recent_image_messages(
+    context: Any,
+    wxpid: int,
+    db_name: str,
+    wxid: str,
+    start_timestamp: int,
+    end_timestamp: int,
+    max_count: int,
+) -> list[dict[str, Any]]:
+    table_name = build_message_table_name(wxid)
+    if not table_name:
+        return []
+
+    sql = (
+        "SELECT server_id, create_time, local_type "
+        f"FROM {table_name} "
+        f"WHERE create_time BETWEEN {int(start_timestamp)} AND {int(end_timestamp)} "
+        f"AND local_type = {int(MESSAGE_TYPES.IMAGE)} "
+        "AND server_id IS NOT NULL "
+        "ORDER BY create_time DESC "
+        f"LIMIT {int(max_count)}"
+    )
+    payload = await context.api.exec_sql(sql=sql, db_name=db_name, wxpid=wxpid)
+    rows = extract_sql_rows(payload)
+    if rows:
+        return rows
+
+    error_text = extract_api_error(payload)
+    if error_text:
+        raise RuntimeError(error_text)
+    return []
+
+
 def build_report_detail(report: dict[str, Any]) -> str:
     downloaded_count = int(report.get("downloaded_count") or 0)
     failed_count = int(report.get("failed_count") or 0)
@@ -432,19 +474,21 @@ async def run_download_cycle(context: Any, reason: str) -> dict[str, Any]:
     end_time_text = format_date_time(end_time)
     interval_seconds = resolve_interval_seconds(context.config)
     max_count_per_user = resolve_max_count_per_user(context.config)
-    db_name = DEFAULT_MESSAGE_RESOURCE_DB_NAME
+    activity_db_name = DEFAULT_MESSAGE_RESOURCE_DB_NAME
+    message_db_name = DEFAULT_MESSAGE_DB_NAME
     history = prune_download_history(load_download_history(history_state), int(start_time.timestamp()))
     history_keys = {item["key"] for item in history}
-    update_time_scale = await query_update_time_scale(context, wxpid, db_name)
+    update_time_scale = await query_update_time_scale(context, wxpid, activity_db_name)
     start_update_time = int(start_time.timestamp()) * update_time_scale
-    users = await query_recent_users(context, wxpid, db_name, start_update_time)
+    users = await query_recent_users(context, wxpid, activity_db_name, start_update_time)
     flag = resolve_download_flag(context.config, context)
 
     report = {
         "reason": reason,
         "error": "",
         "wxpid": wxpid,
-        "db_name": db_name,
+        "activity_db_name": activity_db_name,
+        "message_db_name": message_db_name,
         "start_time": start_time_text,
         "end_time": end_time_text,
         "start_update_time": start_update_time,
@@ -469,12 +513,14 @@ async def run_download_cycle(context: Any, reason: str) -> dict[str, Any]:
     for user in users:
         wxid = user["wxid"]
         try:
-            messages = await context.api.get_chat_messages(
-                wxid=wxid,
-                start_time=start_time_text,
-                end_time=end_time_text,
-                max_count=max_count_per_user,
+            messages = await query_recent_image_messages(
+                context=context,
                 wxpid=wxpid,
+                db_name=message_db_name,
+                wxid=wxid,
+                start_timestamp=int(start_time.timestamp()),
+                end_timestamp=int(end_time.timestamp()),
+                max_count=max_count_per_user,
             )
         except Exception as exc:
             report["failed_user_count"] += 1
@@ -484,7 +530,7 @@ async def run_download_cycle(context: Any, reason: str) -> dict[str, Any]:
                 "error": str(exc),
             }
             append_limited(report["failures"], failure)
-            context.logger.warning("读取用户聊天记录失败", failure)
+            context.logger.warning("查询用户图片消息失败", failure)
             continue
 
         if not isinstance(messages, list):
@@ -492,10 +538,10 @@ async def run_download_cycle(context: Any, reason: str) -> dict[str, Any]:
             failure = {
                 "wxid": wxid,
                 "update_time": user["update_time"],
-                "error": "聊天记录接口未返回列表",
+                "error": "图片消息 SQL 接口未返回列表",
             }
             append_limited(report["failures"], failure)
-            context.logger.warning("读取用户聊天记录失败", failure)
+            context.logger.warning("查询用户图片消息失败", failure)
             continue
 
         report["scanned_message_count"] += len(messages)
