@@ -260,10 +260,6 @@ def detect_update_time_scale(max_update_time: Any) -> int:
     return 1
 
 
-def is_chatroom_wxid(wxid: str) -> bool:
-    return normalize_text(wxid).endswith("@chatroom")
-
-
 def resolve_message_type(message: dict[str, Any]) -> int | None:
     for key in ("local_type", "msg_type", "type", "localtype", "msgtype"):
         numeric_value = parse_int(get_mapping_value(message, key))
@@ -386,7 +382,7 @@ async def query_recent_users(context: Any, wxpid: int, db_name: str, start_updat
     seen_wxids: set[str] = set()
     for row in rows:
         wxid = normalize_text(get_mapping_value(row, "user_name"))
-        if not wxid or is_chatroom_wxid(wxid) or wxid in seen_wxids:
+        if not wxid or wxid in seen_wxids:
             continue
         seen_wxids.add(wxid)
         users.append(
