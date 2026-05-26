@@ -439,6 +439,10 @@ class WxRobotApiClient:
     async def exec_sql(self, sql: str, db_name: str | None = None, wxpid: int | None = None) -> dict[str, Any]:
         return await self.post_json("/other/execsql", self._with_optional_wxpid({"sql": sql, "db_name": db_name}, wxpid))
 
+    async def dont_revoke(self, revoke: bool = True, wxpid: int | None = None) -> dict[str, Any]:
+        payload = {"revoke": bool(revoke)}
+        return await self.post_json("/other/dontrevoke", self._with_optional_wxpid(payload, wxpid))
+
     async def get_chat_messages(
         self,
         wxid: str,
@@ -550,6 +554,9 @@ class WxRobotApiClient:
 
     async def execSql(self, *, sql: str, db_name: str | None = None, wxpid: int | None = None) -> dict[str, Any]:
         return await self.exec_sql(sql, db_name, wxpid)
+
+    async def dontRevoke(self, *, revoke: bool = True, wxpid: int | None = None) -> dict[str, Any]:
+        return await self.dont_revoke(revoke, wxpid)
 
     async def getChatMessages(self, *, wxid: str, start_time: str | int, end_time: str | int, max_count: int = 500, wxpid: int | None = None) -> list[dict[str, Any]]:
         return await self.get_chat_messages(wxid, start_time, end_time, max_count, wxpid)
