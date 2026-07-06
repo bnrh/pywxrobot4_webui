@@ -27,6 +27,7 @@ SYSTEM_SETTING_FIELDS = (
     "request_timeout",
     "worker_count",
     "queue_size",
+    "queue_enqueue_wait_seconds",
     "heartbeat_interval_seconds",
     "image_download_flag",
     "image_download_wait",
@@ -128,6 +129,7 @@ def _read_legacy_webui_config(config_path: str | Path | None = None) -> dict[str
         "request_timeout": float(webui_config.get("request_timeout", 10)),
         "worker_count": int(webui_config.get("worker_count", 2)),
         "queue_size": int(webui_config.get("queue_size", 1000)),
+        "queue_enqueue_wait_seconds": float(webui_config.get("queue_enqueue_wait_seconds", 0.5)),
         "heartbeat_interval_seconds": int(webui_config.get("heartbeat_interval_seconds", 30)),
         "image_download_flag": int(webui_config.get("image_download_flag", 3)),
         "image_download_wait": _parse_bool(webui_config.get("image_download_wait", True), True),
@@ -448,6 +450,7 @@ class PluginServiceSettings(BaseModel):
     request_timeout: float = Field(10.0, gt=0, le=120, description="调用 wxrobot_api 接口的超时")
     worker_count: int = Field(2, ge=1, le=32, description="后台消息处理协程数")
     queue_size: int = Field(1000, ge=1, le=100000, description="消息队列长度")
+    queue_enqueue_wait_seconds: float = Field(0.5, ge=0, le=30, description="队列满时等待入队的秒数，0 表示不等待")
     heartbeat_interval_seconds: int = Field(30, ge=0, le=3600, description="心跳检测间隔秒数，0 表示关闭")
     image_download_flag: int = Field(3, ge=1, le=3, description="图片下载类型，1 缩略图，2 压缩图，3 原图")
     image_download_wait: bool = Field(True, description="是否等待图片下载完成")

@@ -3459,6 +3459,7 @@ function readSettingsForm() {
         request_timeout: Number(form.request_timeout.value),
         worker_count: Number(form.worker_count.value),
         queue_size: Number(form.queue_size.value),
+        queue_enqueue_wait_seconds: Number(form.queue_enqueue_wait_seconds.value),
         heartbeat_interval_seconds: Number(form.heartbeat_interval_seconds.value),
         api_token: form.api_token.value.trim(),
         callback_secret: form.callback_secret.value.trim(),

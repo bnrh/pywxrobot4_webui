@@ -1,0 +1,13 @@
+.git
+.github
+__pycache__
+*.py[cod]
+*.sqlite3
+.env
+.venv
+venv
+node_modules
+uploads
+*.log
+AGENTS.md
+_extract_*.py
