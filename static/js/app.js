@@ -1,11 +1,11 @@
-import { api } from "/static/js/api.js?v=20260525-01";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-01";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260525-01";
+} from "/static/js/plugin-config-form.js?v=20260706-01";
 
 const OVERVIEW_POLL_INTERVAL_MS = 15000;
 const MESSAGE_POLL_INTERVAL_MS = 3000;
@@ -2176,9 +2176,20 @@ function renderSettings() {
     if (state.settings.restart_required) {
         elements.settingsAlert.className = "settings-alert is-visible bad";
         elements.settingsAlert.textContent = `检测到需要重启的字段：${state.settings.restart_required_fields.join(", ")}。当前运行值仍为 ${runtimeSettings.host}:${runtimeSettings.port}。`;
+    } else if (state.settings.api_auth_enabled && !getStoredApiToken()) {
+        elements.settingsAlert.className = "settings-alert is-visible bad";
+        elements.settingsAlert.textContent = "已启用 Web API 访问令牌，但当前浏览器尚未保存令牌。请填写 api_token 并保存系统设置。";
     } else {
         elements.settingsAlert.className = "settings-alert is-visible good";
-        elements.settingsAlert.textContent = "当前 SQLite 配置与运行时配置一致。保存后可热重载的字段会立即生效。";
+        const authHints = [];
+        if (state.settings.api_auth_enabled) {
+            authHints.push("Web API 鉴权已启用");
+        }
+        if (state.settings.callback_auth_enabled) {
+            authHints.push("消息回调密钥已启用");
+        }
+        const suffix = authHints.length ? ` ${authHints.join("，")}。` : "";
+        elements.settingsAlert.textContent = `当前 SQLite 配置与运行时配置一致。保存后可热重载的字段会立即生效。${suffix}`;
     }
 }
 
@@ -3013,6 +3024,18 @@ function renderAiAssistant() {
                     </div>
                 </div>
             </section>
+            <section class="config-field-shell field-span-2">
+                <div class="config-field-head smart-provider-head">
+                    <div>
+                        <h5 class="detail-section-title">工具权限</h5>
+                        <div class="detail-meta">默认仅允许只读查询工具。启用后，模型才可调用发消息、改标签等写操作工具。</div>
+                    </div>
+                </div>
+                <label class="field-group field-span-2">
+                    <span class="field-label">允许写操作工具 allow_write_tools</span>
+                    <input data-field="allow_write_tools" type="checkbox" ${getAiAssistantSettings().allow_write_tools ? "checked" : ""}>
+                </label>
+            </section>
         `;
         elements.aiAssistantSettingsForm.querySelectorAll("[data-ai-prompt-plugin-row]").forEach((card) => {
             syncAiAssistantPromptPluginCardState(card);
@@ -3418,6 +3441,8 @@ function readSettingsForm() {
         worker_count: Number(form.worker_count.value),
         queue_size: Number(form.queue_size.value),
         heartbeat_interval_seconds: Number(form.heartbeat_interval_seconds.value),
+        api_token: form.api_token.value.trim(),
+        callback_secret: form.callback_secret.value.trim(),
     };
 }
 
@@ -3431,6 +3456,7 @@ function readAiAssistantSettingsForm() {
         system_prompt: "",
         temperature: 0.2,
         max_tool_rounds: 20,
+        allow_write_tools: false,
         prompt_plugins: [],
         providers: normalizedProviders,
     };
@@ -3480,6 +3506,7 @@ function readAiAssistantSettingsForm() {
     payload.system_prompt = selectedPromptPlugin.prompt;
     payload.temperature = Number(selectedPromptPlugin.temperature ?? 0.2);
     payload.max_tool_rounds = Number(selectedPromptPlugin.max_tool_rounds ?? 20);
+    payload.allow_write_tools = Boolean(form.querySelector('[data-field="allow_write_tools"]')?.checked);
 
     const configRows = Array.from(form.querySelectorAll("[data-ai-config-row]"));
     for (const row of configRows) {
@@ -4312,7 +4339,11 @@ elements.settingsForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
         setStatus("正在保存系统设置...");
-        const result = await api.saveSettings(readSettingsForm());
+        const formPayload = readSettingsForm();
+        const result = await api.saveSettings(formPayload);
+        if (formPayload.api_token && formPayload.api_token !== SECRET_SETTINGS_PLACEHOLDER) {
+            setStoredApiToken(formPayload.api_token);
+        }
         setOverviewData(result.overview);
         state.settings = result.settings;
         renderOverview();

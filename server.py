@@ -42,6 +42,13 @@ from config import (
 from manager import PluginManager
 from message import MessageEvent
 from plugin_base import PluginContext, PluginLogger
+from security import (
+    is_api_auth_enabled,
+    is_callback_auth_enabled,
+    is_public_request_path,
+    verify_api_token,
+    verify_callback_secret,
+)
 
 
 FRONTEND_DIR = Path(__file__).with_name("frontend")
@@ -66,7 +73,10 @@ SYSTEM_SETTINGS_FIELDS = (
     "image_download_flag",
     "image_download_wait",
     "image_download_timeout",
+    "api_token",
+    "callback_secret",
 )
+SECRET_SETTINGS_PLACEHOLDER = "******"
 REMOVED_PLUGIN_MODULES = {normalize_plugin_module_name("webui.plugins.monitor_biz")}
 INVITE_TO_ROOM_PLUGIN_MODULE = normalize_plugin_module_name("webui.plugins.invite_to_toom")
 ENTER_ROOM_TIP_PLUGIN_MODULE = normalize_plugin_module_name("plugins.enter_room_tip")
@@ -123,6 +133,8 @@ class SystemSettingsUpdateRequest(BaseModel):
     worker_count: int = Field(..., ge=1, le=32)
     queue_size: int = Field(..., ge=1, le=100000)
     heartbeat_interval_seconds: int = Field(..., ge=0, le=3600)
+    api_token: str = ""
+    callback_secret: str = ""
 
 
 class AiAssistantSettingsUpdateRequest(BaseModel):
@@ -747,6 +759,8 @@ class RoomMemberProfile:
 
 CONTACT_MISS_CACHE_TTL_SECONDS = 30.0
 CONTACT_REFRESH_COOLDOWN_SECONDS = 3.0
+ROOM_MEMBER_CACHE_TTL_SECONDS = 300.0
+PLUGIN_TARGETS_CACHE_TTL_SECONDS = 60.0
 
 
 class ContactDirectoryCache:
@@ -756,6 +770,7 @@ class ContactDirectoryCache:
         self._contact_miss_cache: dict[int, dict[str, float]] = {}
         self._contact_refresh_attempted_at: dict[int, float] = {}
         self._room_members: dict[tuple[int, str], dict[str, RoomMemberProfile]] = {}
+        self._room_member_expires_at: dict[tuple[int, str], float] = {}
         self._contact_locks: dict[int, asyncio.Lock] = {}
         self._room_member_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
@@ -928,13 +943,22 @@ class ContactDirectoryCache:
         self._remember_contact_miss(normalized_wxid, wxpid)
         return None
 
+    def _is_room_member_cache_valid(self, cache_key: tuple[int, str]) -> bool:
+        expires_at = self._room_member_expires_at.get(cache_key)
+        if expires_at is None:
+            return False
+        if expires_at <= monotonic():
+            self._room_member_expires_at.pop(cache_key, None)
+            self._room_members.pop(cache_key, None)
+            return False
+        return cache_key in self._room_members
+
     async def refresh_room_members(self, roomid: str, wxpid: int | None) -> dict[str, RoomMemberProfile]:
         lock = self._get_room_member_lock(roomid, wxpid)
         cache_key = (self._pid_key(wxpid), roomid)
         async with lock:
-            cached_profiles = self._room_members.get(cache_key)
-            if cached_profiles is not None:
-                return cached_profiles
+            if self._is_room_member_cache_valid(cache_key):
+                return self._room_members.get(cache_key, {})
             try:
                 members = await self.api_client.get_room_members(roomid, wxpid)
             except Exception as exc:
@@ -950,15 +974,15 @@ class ContactDirectoryCache:
             # Mirror contact-cache behavior: even an empty member list should
             # suppress repeated refreshes until a later explicit invalidation.
             self._room_members[cache_key] = profiles
+            self._room_member_expires_at[cache_key] = monotonic() + ROOM_MEMBER_CACHE_TTL_SECONDS
             return self._room_members.get(cache_key, {})
 
     async def get_room_member(self, roomid: str, wxid: str, wxpid: int | None) -> RoomMemberProfile | None:
         if not roomid or not wxid:
             return None
         cache_key = (self._pid_key(wxpid), roomid)
-        cached_profiles = self._room_members.get(cache_key)
-        if cached_profiles is not None:
-            return cached_profiles.get(wxid)
+        if self._is_room_member_cache_valid(cache_key):
+            return self._room_members.get(cache_key, {}).get(wxid)
 
         await self.refresh_room_members(roomid, wxpid)
         return self._room_members.get(cache_key, {}).get(wxid)
@@ -1063,6 +1087,8 @@ class PluginRuntime:
         self.heartbeat_last_checked_at: datetime | None = None
         self.heartbeat_error = ""
         self.heartbeat_healthy: bool | None = None
+        self._plugin_targets_cache_at = 0.0
+        self._plugin_targets_cache: dict[str, Any] | None = None
 
     @staticmethod
     def _serialize_login_accounts(users: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1443,6 +1469,7 @@ class PluginRuntime:
         self.directory_cache = next_directory_cache
         self.context = next_context
         self.manager = next_manager
+        await self.invalidate_plugin_targets_cache()
         await old_manager.shutdown()
         logger.info("插件配置已重载，当前启用插件: {}", [plugin.name for plugin in self.manager.plugins])
 
@@ -1549,6 +1576,10 @@ class PluginRuntime:
             return []
         return await asyncio.gather(*(self.directory_cache.enrich_message(item) for item in messages))
 
+    async def invalidate_plugin_targets_cache(self) -> None:
+        self._plugin_targets_cache = None
+        self._plugin_targets_cache_at = 0.0
+
     async def _worker(self, index: int) -> None:
         while True:
             queued_item = await self.queue.get()
@@ -1618,6 +1649,23 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         version="0.2.0",
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def enforce_security_middleware(request, call_next):
+        request_path = str(request.url.path or "")
+        if is_public_request_path(request_path):
+            return await call_next(request)
+
+        current_settings = getattr(app.state, "plugin_runtime", runtime).settings
+        callback_path = str(current_settings.callback_path or "/messages").rstrip("/") or "/messages"
+        normalized_request_path = request_path.rstrip("/") or "/"
+        if request.method.upper() == "POST" and normalized_request_path == callback_path:
+            verify_callback_secret(request, current_settings)
+            return await call_next(request)
+
+        verify_api_token(request, current_settings)
+        return await call_next(request)
+
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     def normalize_wxpid(value: Any) -> int | None:
@@ -1897,6 +1945,13 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         return model_field
 
     async def build_plugin_target_payload() -> dict:
+        now = monotonic()
+        if (
+            runtime._plugin_targets_cache is not None
+            and now - runtime._plugin_targets_cache_at <= PLUGIN_TARGETS_CACHE_TTL_SECONDS
+        ):
+            return dict(runtime._plugin_targets_cache)
+
         users_payload = await runtime.api_client.get_logged_in_users()
         users = users_payload if isinstance(users_payload, list) else []
         wxpids: list[int] = []
@@ -1963,12 +2018,15 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                         }
                     )
 
-        return {
+        payload = {
             "default_wxpid": wxpids[0] if wxpids else None,
             "wxpid_options": sort_option_items(wxpid_options),
             "room_options": sort_option_items(room_options),
             "label_options": sort_option_items(label_options),
         }
+        runtime._plugin_targets_cache = payload
+        runtime._plugin_targets_cache_at = monotonic()
+        return dict(payload)
 
     def build_user_payload() -> dict:
         heartbeat_interval_seconds = max(0, int(getattr(runtime.settings, "heartbeat_interval_seconds", 0) or 0))
@@ -2012,10 +2070,26 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
             },
         }
 
-    def serialize_system_settings(settings_obj: PluginServiceSettings) -> dict[str, Any]:
+    def serialize_system_settings(settings_obj: PluginServiceSettings, *, mask_secrets: bool = True) -> dict[str, Any]:
         payload = {field: getattr(settings_obj, field) for field in SYSTEM_SETTINGS_FIELDS if field != "wxrobot_api_base_url"}
         payload["api_base_url"] = settings_obj.wxrobot_api_base_url
+        if mask_secrets:
+            payload["api_token"] = SECRET_SETTINGS_PLACEHOLDER if str(payload.get("api_token") or "").strip() else ""
+            payload["callback_secret"] = SECRET_SETTINGS_PLACEHOLDER if str(payload.get("callback_secret") or "").strip() else ""
+            payload["api_token_configured"] = bool(str(getattr(settings_obj, "api_token", "") or "").strip())
+            payload["callback_secret_configured"] = bool(str(getattr(settings_obj, "callback_secret", "") or "").strip())
         return payload
+
+    def merge_secret_settings_updates(
+        configured_settings: PluginServiceSettings,
+        updates: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged_updates = dict(updates)
+        for field_name in ("api_token", "callback_secret"):
+            incoming_value = str(merged_updates.get(field_name) or "").strip()
+            if not incoming_value or incoming_value == SECRET_SETTINGS_PLACEHOLDER:
+                merged_updates[field_name] = getattr(configured_settings, field_name, "")
+        return merged_updates
 
     def build_settings_payload() -> dict:
         configured_settings = PluginServiceSettings.from_storage()
@@ -2024,13 +2098,15 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         restart_required_fields = [
             field
             for field in RESTART_REQUIRED_FIELDS
-            if runtime_payload.get(field) != configured_payload.get(field)
+            if getattr(runtime.settings, field) != getattr(configured_settings, field)
         ]
         return {
             "runtime": runtime_payload,
             "config": configured_payload,
             "restart_required": bool(restart_required_fields),
             "restart_required_fields": restart_required_fields,
+            "api_auth_enabled": is_api_auth_enabled(configured_settings),
+            "callback_auth_enabled": is_callback_auth_enabled(configured_settings),
         }
 
     async def build_ai_assistant_settings_payload(settings: dict[str, Any] | None = None) -> dict:
@@ -2472,6 +2548,13 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
     @app.post("/api/settings")
     async def update_settings(item: SystemSettingsUpdateRequest) -> dict:
         configured_settings = PluginServiceSettings.from_storage()
+        secret_updates = merge_secret_settings_updates(
+            configured_settings,
+            {
+                "api_token": item.api_token,
+                "callback_secret": item.callback_secret,
+            },
+        )
         next_settings = configured_settings.model_copy(
             update={
                 "host": item.host,
@@ -2482,6 +2565,8 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 "worker_count": item.worker_count,
                 "queue_size": item.queue_size,
                 "heartbeat_interval_seconds": item.heartbeat_interval_seconds,
+                "api_token": secret_updates["api_token"],
+                "callback_secret": secret_updates["callback_secret"],
             }
         )
         next_settings.save_to_storage()

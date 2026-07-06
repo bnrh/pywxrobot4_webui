@@ -1,3 +1,28 @@
+const API_TOKEN_STORAGE_KEY = "wxrobot_webui_api_token";
+export const SECRET_SETTINGS_PLACEHOLDER = "******";
+
+export function getStoredApiToken() {
+    return String(window.sessionStorage.getItem(API_TOKEN_STORAGE_KEY) || "").trim();
+}
+
+export function setStoredApiToken(token) {
+    const normalized = String(token || "").trim();
+    if (!normalized) {
+        window.sessionStorage.removeItem(API_TOKEN_STORAGE_KEY);
+        return;
+    }
+    window.sessionStorage.setItem(API_TOKEN_STORAGE_KEY, normalized);
+}
+
+function buildAuthHeaders(extraHeaders = {}) {
+    const headers = { ...extraHeaders };
+    const token = getStoredApiToken();
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+    return headers;
+}
+
 async function extractErrorDetail(response) {
     const fallbackDetail = response.statusText || `HTTP ${response.status}`;
     let detail = fallbackDetail;
@@ -27,10 +52,10 @@ async function extractErrorDetail(response) {
 
 async function requestJson(url, options = {}) {
     const response = await fetch(url, {
-        headers: {
+        headers: buildAuthHeaders({
             "Content-Type": "application/json",
             ...(options.headers || {}),
-        },
+        }),
         ...options,
     });
 
@@ -44,6 +69,7 @@ async function requestJson(url, options = {}) {
 async function requestForm(url, formData, options = {}) {
     const response = await fetch(url, {
         ...options,
+        headers: buildAuthHeaders(options.headers || {}),
         body: formData,
     });
 

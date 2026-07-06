@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>wxrobot_api 控制台</title>
-    <link rel="stylesheet" href="/static/css/app.css?v=20260525-01">
+    <link rel="stylesheet" href="/static/css/app.css?v=20260706-01">
 </head>
 <body>
     <div class="app-shell">
@@ -218,6 +218,14 @@
                             <span class="field-label">心跳间隔 heartbeat_interval_seconds</span>
                             <input name="heartbeat_interval_seconds" type="number" min="0" max="3600" required>
                         </label>
+                        <label class="field-group field-span-2">
+                            <span class="field-label">Web API 访问令牌 api_token</span>
+                            <input name="api_token" type="password" autocomplete="new-password" placeholder="留空表示不启用；已配置时输入新值可覆盖">
+                        </label>
+                        <label class="field-group field-span-2">
+                            <span class="field-label">消息回调密钥 callback_secret</span>
+                            <input name="callback_secret" type="password" autocomplete="new-password" placeholder="留空表示不校验；wxrobot_api 需在请求头携带 X-Callback-Secret">
+                        </label>
                         <div class="field-actions field-span-2">
                             <button class="button primary" type="submit">保存系统设置</button>
                         </div>
@@ -371,6 +379,6 @@
         </div>
     </div>
 
-    <script type="module" src="/static/js/app.js?v=20260525-01"></script>
+    <script type="module" src="/static/js/app.js?v=20260706-01"></script>
 </body>
 </html>
