@@ -43,6 +43,8 @@ def verify_api_token(request: Request, settings: PluginServiceSettings) -> None:
 
     provided_token = extract_bearer_token(request.headers.get(API_TOKEN_HEADER))
     if not provided_token:
+        provided_token = str(request.query_params.get("access_token") or "").strip()
+    if not provided_token:
         raise HTTPException(status_code=401, detail="缺少 API Token，请在 Authorization 头中携带 Bearer Token")
     if not secrets.compare_digest(provided_token, expected_token):
         raise HTTPException(status_code=403, detail="API Token 无效")

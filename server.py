@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -41,7 +41,9 @@ from config import (
 )
 from manager import PluginManager
 from message import MessageEvent
+from message_store import RecentMessageStore
 from plugin_base import PluginContext, PluginLogger
+from runtime_events import RuntimeEventHub
 from security import (
     is_api_auth_enabled,
     is_callback_auth_enabled,
@@ -61,6 +63,18 @@ PLUGIN_ASSET_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp
 RECENT_MESSAGE_LIMIT = 200
 PLUGIN_LOG_LIMIT = 1000
 RESTART_REQUIRED_FIELDS = {"host", "port", "callback_path", "worker_count", "queue_size"}
+RUNTIME_LIGHT_REFRESH_FIELDS = {
+    "api_token",
+    "callback_secret",
+    "request_timeout",
+    "wxrobot_api_base_url",
+    "heartbeat_interval_seconds",
+    "image_download_flag",
+    "image_download_wait",
+    "image_download_timeout",
+}
+PLUGIN_MANAGER_RELOAD_FIELDS = {"plugins", "plugin_settings"}
+QUEUE_ENQUEUE_WAIT_SECONDS = 0.5
 SYSTEM_SETTINGS_FIELDS = (
     "host",
     "port",
@@ -994,13 +1008,26 @@ class ContactDirectoryCache:
         sender_wxid = str(enriched.get("sender_wxid") or "").strip()
         is_group_message = bool(enriched.get("is_group_message"))
 
-        conversation_profile = await self.get_contact(conversation_wxid, wxpid) if conversation_wxid else None
-        sender_profile = None if is_group_message else (await self.get_contact(sender_wxid, wxpid) if sender_wxid else None)
-        room_member_profile = (
-            await self.get_room_member(conversation_wxid, sender_wxid, wxpid)
+        conversation_task = self.get_contact(conversation_wxid, wxpid) if conversation_wxid else None
+        sender_task = (
+            None
+            if is_group_message
+            else (self.get_contact(sender_wxid, wxpid) if sender_wxid else None)
+        )
+        room_member_task = (
+            self.get_room_member(conversation_wxid, sender_wxid, wxpid)
             if is_group_message and conversation_wxid and sender_wxid
             else None
         )
+        pending_tasks = [task for task in (conversation_task, sender_task, room_member_task) if task is not None]
+        if pending_tasks:
+            resolved = await asyncio.gather(*pending_tasks)
+        else:
+            resolved = []
+        resolved_iter = iter(resolved)
+        conversation_profile = next(resolved_iter) if conversation_task is not None else None
+        sender_profile = next(resolved_iter) if sender_task is not None else None
+        room_member_profile = next(resolved_iter) if room_member_task is not None else None
 
         conversation_display_name = (
             conversation_profile.display_name if conversation_profile is not None else conversation_wxid or "未知会话"
@@ -1089,6 +1116,42 @@ class PluginRuntime:
         self.heartbeat_healthy: bool | None = None
         self._plugin_targets_cache_at = 0.0
         self._plugin_targets_cache: dict[str, Any] | None = None
+        self.message_store = RecentMessageStore(limit=RECENT_MESSAGE_LIMIT)
+        self.event_hub = RuntimeEventHub()
+        self.wxrobot_api_reachable: bool | None = None
+        self._restore_recent_messages()
+
+    def _restore_recent_messages(self) -> None:
+        stored_messages = self.message_store.load_recent(RECENT_MESSAGE_LIMIT)
+        if not stored_messages:
+            return
+        self.recent_messages.extend(reversed(stored_messages))
+        max_internal_id = max(int(item.get("internal_id") or 0) for item in stored_messages)
+        self._message_sequence = count(max_internal_id + 1)
+
+    async def publish_runtime_event(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
+        await self.event_hub.publish(event_type, payload)
+
+    async def apply_light_settings(self, configured_settings: PluginServiceSettings, fields: list[str]) -> None:
+        if not fields:
+            return
+        updates = {field: getattr(configured_settings, field) for field in fields}
+        next_settings = self.settings.model_copy(update=updates)
+        if {"wxrobot_api_base_url", "request_timeout"} & set(fields):
+            await self.api_client.aclose()
+            self.api_client = WxRobotApiClient(next_settings.wxrobot_api_base_url, next_settings.request_timeout)
+            self.directory_cache = ContactDirectoryCache(self.api_client)
+            self.context = PluginContext(
+                settings=next_settings,
+                api_client=self.api_client,
+                login_account_cache_getter=self.get_cached_login_accounts,
+                login_account_cache_refresher=self.refresh_login_account_cache,
+                login_account_serializer=self._serialize_login_accounts,
+            )
+        else:
+            self.context.settings = next_settings
+        self.settings = next_settings
+        self.manager.context = self.context
 
     @staticmethod
     def _serialize_login_accounts(users: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1402,14 +1465,18 @@ class PluginRuntime:
         try:
             if login_users is None:
                 login_users = await self.api_client.get_logged_in_users()
+            await self.api_client.get_wx_pids()
+            self.wxrobot_api_reachable = True
         except Exception as exc:
             self.heartbeat_error = str(exc)
             self.heartbeat_healthy = False
+            self.wxrobot_api_reachable = False
             return list(self.heartbeat_accounts)
 
         self.heartbeat_accounts = self._serialize_login_accounts(login_users if isinstance(login_users, list) else [])
         self.heartbeat_error = ""
         self.heartbeat_healthy = True
+        self.wxrobot_api_reachable = True
         return list(self.heartbeat_accounts)
 
     async def _run_heartbeat_check(self) -> None:
@@ -1464,6 +1531,7 @@ class PluginRuntime:
         await next_directory_cache.warmup()
 
         old_manager = self.manager
+        old_api_client = self.api_client
         self.settings = next_settings
         self.api_client = next_api_client
         self.directory_cache = next_directory_cache
@@ -1471,6 +1539,7 @@ class PluginRuntime:
         self.manager = next_manager
         await self.invalidate_plugin_targets_cache()
         await old_manager.shutdown()
+        await old_api_client.aclose()
         logger.info("插件配置已重载，当前启用插件: {}", [plugin.name for plugin in self.manager.plugins])
 
     async def stop(self) -> None:
@@ -1484,48 +1553,61 @@ class PluginRuntime:
         if self._workers:
             await asyncio.gather(*self._workers, return_exceptions=True)
         await self.manager.shutdown()
+        await self.api_client.aclose()
 
     async def enqueue(self, event: MessageEvent) -> int:
         internal_id = self._remember_message(event)
+        await self.publish_runtime_event(
+            "message_queued",
+            {
+                "internal_id": internal_id,
+                "msgid": event.normalized_msgid,
+                "conversation_wxid": event.conversation_wxid,
+            },
+        )
         try:
             self.queue.put_nowait((internal_id, event))
-        except asyncio.QueueFull as exc:
-            self._patch_message(
-                internal_id,
-                status="rejected",
-                processed_at=self._now_iso(),
-                error="插件消息队列已满",
-            )
-            raise HTTPException(status_code=503, detail="插件消息队列已满") from exc
+        except asyncio.QueueFull:
+            try:
+                await asyncio.wait_for(self.queue.put((internal_id, event)), timeout=QUEUE_ENQUEUE_WAIT_SECONDS)
+            except asyncio.TimeoutError as exc:
+                self._patch_message(
+                    internal_id,
+                    status="rejected",
+                    processed_at=self._now_iso(),
+                    error="插件消息队列已满",
+                )
+                raise HTTPException(status_code=503, detail="插件消息队列已满") from exc
         return internal_id
 
     def _remember_message(self, event: MessageEvent) -> int:
         internal_id = next(self._message_sequence)
-        self.recent_messages.appendleft(
-            {
-                "internal_id": internal_id,
-                "received_at": self._now_iso(),
-                "processed_at": None,
-                "status": "queued",
-                "error": "",
-                "msgid": event.normalized_msgid,
-                "conversation_wxid": event.conversation_wxid,
-                "sender_wxid": event.sender_wxid,
-                "msg_type": event.normalized_msg_type,
-                "local_type": event.normalized_local_type,
-                "wxpid": event.normalized_wxpid,
-                "is_group_message": event.is_group_message,
-                "content": event.normalized_content,
-                "plugin_results": [],
-                "payload": event.raw_payload,
-            }
-        )
+        record = {
+            "internal_id": internal_id,
+            "received_at": self._now_iso(),
+            "processed_at": None,
+            "status": "queued",
+            "error": "",
+            "msgid": event.normalized_msgid,
+            "conversation_wxid": event.conversation_wxid,
+            "sender_wxid": event.sender_wxid,
+            "msg_type": event.normalized_msg_type,
+            "local_type": event.normalized_local_type,
+            "wxpid": event.normalized_wxpid,
+            "is_group_message": event.is_group_message,
+            "content": event.normalized_content,
+            "plugin_results": [],
+            "payload": event.raw_payload,
+        }
+        self.recent_messages.appendleft(record)
+        self.message_store.upsert_message(record)
         return internal_id
 
     def _patch_message(self, internal_id: int, **updates: Any) -> None:
         for item in self.recent_messages:
             if item["internal_id"] == internal_id:
                 item.update(updates)
+                self.message_store.patch_message(internal_id, **updates)
                 return
 
     def _now_iso(self) -> str:
@@ -1595,6 +1677,14 @@ class PluginRuntime:
                     processed_at=self._now_iso(),
                     plugin_results=results,
                 )
+                await self.publish_runtime_event(
+                    "message_processed",
+                    {
+                        "internal_id": internal_id,
+                        "msgid": event.normalized_msgid,
+                        "plugin_result_count": len(results),
+                    },
+                )
                 if results:
                     logger.debug(
                         "worker={} msgid={} plugins={}",
@@ -1604,11 +1694,16 @@ class PluginRuntime:
                     )
             except Exception as exc:
                 if queued_item is not None:
+                    internal_id = queued_item[0]
                     self._patch_message(
-                        queued_item[0],
+                        internal_id,
                         status="failed",
                         processed_at=self._now_iso(),
                         error=str(exc),
+                    )
+                    await self.publish_runtime_event(
+                        "message_failed",
+                        {"internal_id": internal_id, "error": str(exc)},
                     )
                 logger.exception("插件 worker 处理消息失败")
             finally:
@@ -2067,6 +2162,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
                 "last_checked_at": user_payload["last_checked_at"],
                 "account_count": user_payload["total"],
                 "error": user_payload["error"],
+                "wxrobot_api_reachable": runtime.wxrobot_api_reachable,
             },
         }
 
@@ -2390,8 +2486,12 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
     async def sync_runtime_with_config(configured_settings: PluginServiceSettings) -> dict:
         effective_settings, changed_fields, hot_reload_fields, restart_required_fields = plan_runtime_reload(configured_settings)
-        if hot_reload_fields:
-            await runtime.reload(effective_settings)
+        manager_reload_needed = any(field in PLUGIN_MANAGER_RELOAD_FIELDS for field in hot_reload_fields)
+        light_fields = [field for field in hot_reload_fields if field in RUNTIME_LIGHT_REFRESH_FIELDS]
+        if manager_reload_needed:
+            await runtime.reload(configured_settings)
+        elif light_fields:
+            await runtime.apply_light_settings(configured_settings, light_fields)
         return {
             "changed_fields": changed_fields,
             "applied_fields": hot_reload_fields,
@@ -2786,11 +2886,36 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
     async def get_plugin_logs(module_name: str | None = None, level: str = "", keyword: str = "", limit: int = 200) -> dict:
         return build_plugin_log_payload(module_name, level, keyword, limit)
 
+    @app.get("/api/events/stream")
+    async def stream_runtime_events() -> StreamingResponse:
+        async def event_generator():
+            queue = await runtime.event_hub.subscribe()
+            try:
+                connected_event = json.dumps({"type": "connected", "payload": {}}, ensure_ascii=False)
+                yield f"data: {connected_event}\n\n"
+                while True:
+                    event = await queue.get()
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            except asyncio.CancelledError:
+                raise
+            finally:
+                await runtime.event_hub.unsubscribe(queue)
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
     @app.get("/health")
     async def health() -> dict:
+        uptime_seconds = int((datetime.now().astimezone() - runtime.started_at).total_seconds()) if runtime.started_at else 0
         return {
             "status": "ok",
             "queued_messages": runtime.queue.qsize(),
+            "queue_size": runtime.settings.queue_size,
+            "worker_count": runtime.settings.worker_count,
+            "loaded_plugin_count": len(runtime.manager.plugins),
+            "enabled_plugin_count": len(runtime.settings.plugins),
+            "uptime_seconds": uptime_seconds,
+            "wxrobot_api_reachable": runtime.wxrobot_api_reachable,
+            "heartbeat_healthy": runtime.heartbeat_healthy,
             "plugins": [plugin.name for plugin in runtime.manager.plugins],
         }
 
