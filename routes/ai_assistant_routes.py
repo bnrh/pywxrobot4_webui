@@ -20,18 +20,18 @@ from ai_assistant_jobs import build_ai_assistant_page_payload, run_ai_assistant_
 from ai_assistant_store import (
     AI_ASSISTANT_JOB_ACTIVE_STATUSES,
     AI_ASSISTANT_JOB_TERMINAL_STATUSES,
-    _activate_ai_assistant_conversation_payload,
-    _append_ai_assistant_chat_placeholders,
-    _clear_ai_assistant_conversation_payload,
-    _create_ai_assistant_conversation_payload,
-    _ensure_ai_assistant_conversation_payload,
-    _get_ai_assistant_job,
-    _get_ai_assistant_job_task,
-    _mark_ai_assistant_job_stopped,
-    _now_iso,
-    _set_ai_assistant_job,
-    _set_ai_assistant_job_task,
-    _update_ai_assistant_message_payload,
+    activate_ai_assistant_conversation_payload,
+    append_ai_assistant_chat_placeholders,
+    clear_ai_assistant_conversation_payload,
+    create_ai_assistant_conversation_payload,
+    ensure_ai_assistant_conversation_payload,
+    get_ai_assistant_job,
+    get_ai_assistant_job_task,
+    mark_ai_assistant_job_stopped,
+    now_iso,
+    set_ai_assistant_job,
+    set_ai_assistant_job_task,
+    update_ai_assistant_message_payload,
 )
 from api_schemas import AiAssistantChatJobCreateRequest, AiAssistantChatRequest, AiAssistantSettingsUpdateRequest
 from config import WebuiSettingsStore
@@ -51,19 +51,19 @@ def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:
 
     @app.post("/api/ai-assistant/conversations")
     async def create_ai_assistant_conversation() -> dict:
-        return await _create_ai_assistant_conversation_payload()
+        return await create_ai_assistant_conversation_payload()
 
     @app.post("/api/ai-assistant/conversations/{conversation_id}/activate")
     async def activate_ai_assistant_conversation(conversation_id: str) -> dict:
         try:
-            return await _activate_ai_assistant_conversation_payload(conversation_id)
+            return await activate_ai_assistant_conversation_payload(conversation_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/api/ai-assistant/conversations/{conversation_id}/clear")
     async def clear_ai_assistant_conversation(conversation_id: str) -> dict:
         try:
-            return await _clear_ai_assistant_conversation_payload(conversation_id)
+            return await clear_ai_assistant_conversation_payload(conversation_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -87,7 +87,7 @@ def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:
             or ""
         ).strip()
         try:
-            placeholder_context, conversation_payload = await _append_ai_assistant_chat_placeholders(
+            placeholder_context, conversation_payload = await append_ai_assistant_chat_placeholders(
                 item.conversation_id,
                 item.prompt,
                 selected_provider,
@@ -99,7 +99,7 @@ def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         job_id = uuid4().hex
-        job = await _set_ai_assistant_job(
+        job = await set_ai_assistant_job(
             job_id,
             {
                 "conversation_id": str(item.conversation_id or "").strip(),
@@ -113,7 +113,7 @@ def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:
                 "prompt_plugin_id": selected_prompt_plugin_id,
                 "prompt_plugin_name": selected_prompt_plugin_name,
                 "model": selected_model,
-                "created_at": _now_iso(),
+                "created_at": now_iso(),
             },
         )
         task = asyncio.create_task(
@@ -129,7 +129,7 @@ def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:
                 selected_model,
             )
         )
-        await _set_ai_assistant_job_task(job_id, task)
+        await set_ai_assistant_job_task(job_id, task)
         return {
             "job": job,
             **conversation_payload,
@@ -137,10 +137,10 @@ def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:
 
     @app.get("/api/ai-assistant/chat-jobs/{job_id}")
     async def get_ai_assistant_chat_job(job_id: str) -> dict:
-        job = await _get_ai_assistant_job(job_id)
+        job = await get_ai_assistant_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="未找到指定智能插件任务")
-        conversation_payload = await _ensure_ai_assistant_conversation_payload()
+        conversation_payload = await ensure_ai_assistant_conversation_payload()
         return {
             "job": job,
             **conversation_payload,
@@ -148,7 +148,7 @@ def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:
 
     @app.post("/api/ai-assistant/chat-jobs/{job_id}/stop")
     async def stop_ai_assistant_chat_job(job_id: str) -> dict:
-        job = await _get_ai_assistant_job(job_id)
+        job = await get_ai_assistant_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="未找到指定智能插件任务")
 
@@ -167,7 +167,7 @@ def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:
         selected_model = str(job.get("model") or "").strip()
 
         if conversation_id and assistant_message_id:
-            await _update_ai_assistant_message_payload(
+            await update_ai_assistant_message_payload(
                 conversation_id,
                 assistant_message_id,
                 {
@@ -177,7 +177,7 @@ def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:
                 },
             )
 
-        job = await _set_ai_assistant_job(
+        job = await set_ai_assistant_job(
             job_id,
             {
                 "status": "stopping",
@@ -187,14 +187,14 @@ def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:
             },
         )
 
-        task = await _get_ai_assistant_job_task(job_id)
+        task = await get_ai_assistant_job_task(job_id)
         if task is not None and not task.done():
             task.cancel()
             await asyncio.sleep(0)
 
-        current_job = await _get_ai_assistant_job(job_id)
+        current_job = await get_ai_assistant_job(job_id)
         if current_job is not None and str(current_job.get("status") or "") == "stopping" and conversation_id and assistant_message_id:
-            current_job = await _mark_ai_assistant_job_stopped(
+            current_job = await mark_ai_assistant_job_stopped(
                 job_id,
                 conversation_id,
                 assistant_message_id,
@@ -205,7 +205,7 @@ def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:
                 selected_model,
             )
 
-        conversation_payload = await _ensure_ai_assistant_conversation_payload()
+        conversation_payload = await ensure_ai_assistant_conversation_payload()
         return {
             "job": current_job or job,
             **conversation_payload,

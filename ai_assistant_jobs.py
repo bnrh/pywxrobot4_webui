@@ -16,12 +16,12 @@ from ai_assistant import (
     run_ai_assistant,
 )
 from ai_assistant_store import (
-    _ensure_ai_assistant_conversation_payload,
-    _get_ai_assistant_conversation_history,
-    _mark_ai_assistant_job_stopped,
-    _pop_ai_assistant_job_task,
-    _set_ai_assistant_job,
-    _update_ai_assistant_message_payload,
+    ensure_ai_assistant_conversation_payload,
+    get_ai_assistant_conversation_history,
+    mark_ai_assistant_job_stopped,
+    pop_ai_assistant_job_task,
+    set_ai_assistant_job,
+    update_ai_assistant_message_payload,
 )
 from config import WebuiSettingsStore
 from runtime import PluginRuntime
@@ -41,7 +41,7 @@ async def build_ai_assistant_settings_payload(settings: dict[str, Any] | None = 
 
 async def build_ai_assistant_page_payload(settings: dict[str, Any] | None = None) -> dict:
     settings_payload = await build_ai_assistant_settings_payload(settings)
-    conversation_payload = await _ensure_ai_assistant_conversation_payload()
+    conversation_payload = await ensure_ai_assistant_conversation_payload()
     return {
         **settings_payload,
         **conversation_payload,
@@ -68,7 +68,7 @@ async def run_ai_assistant_chat_job(
     async def handle_progress(progress: dict[str, Any]) -> None:
         progress_status = str(progress.get("status") or "running").strip().lower()
         message_status = "running" if progress_status == "running" else "completed"
-        await _update_ai_assistant_message_payload(
+        await update_ai_assistant_message_payload(
             conversation_id,
             assistant_message_id,
             {
@@ -86,7 +86,7 @@ async def run_ai_assistant_chat_job(
                 "model": selected_model,
             },
         )
-        await _set_ai_assistant_job(
+        await set_ai_assistant_job(
             job_id,
             {
                 "conversation_id": conversation_id,
@@ -104,7 +104,7 @@ async def run_ai_assistant_chat_job(
         )
 
     try:
-        await _set_ai_assistant_job(
+        await set_ai_assistant_job(
             job_id,
             {
                 "conversation_id": conversation_id,
@@ -120,7 +120,7 @@ async def run_ai_assistant_chat_job(
                 "model": selected_model,
             },
         )
-        history = await _get_ai_assistant_conversation_history(conversation_id)
+        history = await get_ai_assistant_conversation_history(conversation_id)
         result = await run_ai_assistant(
             normalized_settings,
             runtime.api_client,
@@ -132,7 +132,7 @@ async def run_ai_assistant_chat_job(
             handle_progress,
         )
         final_model = str(result.get("model") or selected_model)
-        await _update_ai_assistant_message_payload(
+        await update_ai_assistant_message_payload(
             conversation_id,
             assistant_message_id,
             {
@@ -150,7 +150,7 @@ async def run_ai_assistant_chat_job(
                 "model": final_model,
             },
         )
-        await _set_ai_assistant_job(
+        await set_ai_assistant_job(
             job_id,
             {
                 "conversation_id": conversation_id,
@@ -167,7 +167,7 @@ async def run_ai_assistant_chat_job(
             },
         )
     except asyncio.CancelledError:
-        await _mark_ai_assistant_job_stopped(
+        await mark_ai_assistant_job_stopped(
             job_id,
             conversation_id,
             assistant_message_id,
@@ -181,7 +181,7 @@ async def run_ai_assistant_chat_job(
     except Exception as exc:
         error_message = str(exc)
         logger.exception("智能插件异步任务执行失败")
-        await _update_ai_assistant_message_payload(
+        await update_ai_assistant_message_payload(
             conversation_id,
             assistant_message_id,
             {
@@ -197,7 +197,7 @@ async def run_ai_assistant_chat_job(
                 "model": selected_model,
             },
         )
-        await _set_ai_assistant_job(
+        await set_ai_assistant_job(
             job_id,
             {
                 "conversation_id": conversation_id,
@@ -214,4 +214,4 @@ async def run_ai_assistant_chat_job(
             },
         )
     finally:
-        await _pop_ai_assistant_job_task(job_id)
+        await pop_ai_assistant_job_task(job_id)

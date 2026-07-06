@@ -23,8 +23,31 @@ ai_assistant_job_lock = asyncio.Lock()
 ai_assistant_jobs: dict[str, dict[str, Any]] = {}
 ai_assistant_job_tasks: dict[str, asyncio.Task[Any]] = {}
 
+__all__ = [
+    "AI_ASSISTANT_CONVERSATIONS_KEY",
+    "AI_ASSISTANT_CONVERSATION_LIMIT",
+    "AI_ASSISTANT_MESSAGE_LIMIT",
+    "AI_ASSISTANT_JOB_LIMIT",
+    "AI_ASSISTANT_JOB_TERMINAL_STATUSES",
+    "AI_ASSISTANT_JOB_ACTIVE_STATUSES",
+    "activate_ai_assistant_conversation_payload",
+    "append_ai_assistant_chat_placeholders",
+    "clear_ai_assistant_conversation_payload",
+    "create_ai_assistant_conversation_payload",
+    "ensure_ai_assistant_conversation_payload",
+    "get_ai_assistant_conversation_history",
+    "get_ai_assistant_job",
+    "get_ai_assistant_job_task",
+    "mark_ai_assistant_job_stopped",
+    "now_iso",
+    "pop_ai_assistant_job_task",
+    "set_ai_assistant_job",
+    "set_ai_assistant_job_task",
+    "update_ai_assistant_message_payload",
+]
 
-def _now_iso() -> str:
+
+def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
@@ -74,7 +97,7 @@ def _normalize_ai_assistant_message_payload(message: Any) -> dict[str, Any]:
     role = str(payload.get("role") or "assistant").strip().lower()
     if role not in {"user", "assistant"}:
         role = "assistant"
-    created_at = str(payload.get("created_at") or "").strip() or _now_iso()
+    created_at = str(payload.get("created_at") or "").strip() or now_iso()
     updated_at = str(payload.get("updated_at") or "").strip() or created_at
     status = str(payload.get("status") or ("running" if role == "assistant" and payload.get("progress_message") else "completed")).strip().lower()
     if status not in {"running", "completed", "failed", "stopped"}:
@@ -104,7 +127,7 @@ def _normalize_ai_assistant_message_payload(message: Any) -> dict[str, Any]:
 
 
 def _build_new_ai_assistant_conversation(title: str = "") -> dict[str, Any]:
-    created_at = _now_iso()
+    created_at = now_iso()
     normalized_title = _safe_conversation_label(title, limit=40) or _default_ai_assistant_conversation_title(created_at)
     return {
         "id": uuid4().hex,
@@ -117,7 +140,7 @@ def _build_new_ai_assistant_conversation(title: str = "") -> dict[str, Any]:
 
 def _normalize_ai_assistant_conversation_payload(conversation: Any) -> dict[str, Any]:
     payload = conversation if isinstance(conversation, dict) else {}
-    created_at = str(payload.get("created_at") or "").strip() or _now_iso()
+    created_at = str(payload.get("created_at") or "").strip() or now_iso()
     messages = [_normalize_ai_assistant_message_payload(item) for item in (payload.get("messages") if isinstance(payload.get("messages"), list) else [])]
     title = _safe_conversation_label(payload.get("title"), limit=40) or _derive_ai_assistant_conversation_title(messages, _default_ai_assistant_conversation_title(created_at))
     return {
@@ -217,13 +240,13 @@ async def _mutate_ai_assistant_conversation_store(mutator) -> tuple[Any, dict[st
     return result, normalized_store
 
 
-async def _ensure_ai_assistant_conversation_payload() -> dict[str, Any]:
+async def ensure_ai_assistant_conversation_payload() -> dict[str, Any]:
     async with ai_assistant_storage_lock:
         store = _save_ai_assistant_conversation_store(_load_ai_assistant_conversation_store())
     return _build_ai_assistant_conversation_payload(store)
 
 
-async def _create_ai_assistant_conversation_payload() -> dict[str, Any]:
+async def create_ai_assistant_conversation_payload() -> dict[str, Any]:
     def mutator(store: dict[str, Any]) -> None:
         conversation = _build_new_ai_assistant_conversation()
         store["conversations"].insert(0, conversation)
@@ -233,7 +256,7 @@ async def _create_ai_assistant_conversation_payload() -> dict[str, Any]:
     return _build_ai_assistant_conversation_payload(store)
 
 
-async def _activate_ai_assistant_conversation_payload(conversation_id: str) -> dict[str, Any]:
+async def activate_ai_assistant_conversation_payload(conversation_id: str) -> dict[str, Any]:
     normalized_id = str(conversation_id or "").strip()
 
     def mutator(store: dict[str, Any]) -> None:
@@ -247,7 +270,7 @@ async def _activate_ai_assistant_conversation_payload(conversation_id: str) -> d
     return _build_ai_assistant_conversation_payload(store)
 
 
-async def _clear_ai_assistant_conversation_payload(conversation_id: str) -> dict[str, Any]:
+async def clear_ai_assistant_conversation_payload(conversation_id: str) -> dict[str, Any]:
     normalized_id = str(conversation_id or "").strip()
 
     def mutator(store: dict[str, Any]) -> None:
@@ -255,7 +278,7 @@ async def _clear_ai_assistant_conversation_payload(conversation_id: str) -> dict
         if conversation is None:
             raise ValueError("未找到指定对话")
         conversation["messages"] = []
-        conversation["updated_at"] = _now_iso()
+        conversation["updated_at"] = now_iso()
         conversation["title"] = _default_ai_assistant_conversation_title(conversation["updated_at"])
         store["active_conversation_id"] = normalized_id
         _move_ai_assistant_conversation_to_front(store, normalized_id)
@@ -264,7 +287,7 @@ async def _clear_ai_assistant_conversation_payload(conversation_id: str) -> dict
     return _build_ai_assistant_conversation_payload(store)
 
 
-async def _append_ai_assistant_chat_placeholders(
+async def append_ai_assistant_chat_placeholders(
     conversation_id: str,
     prompt: str,
     provider: str,
@@ -283,7 +306,7 @@ async def _append_ai_assistant_chat_placeholders(
         conversation = _get_ai_assistant_conversation(store, normalized_id)
         if conversation is None:
             raise ValueError("未找到指定对话")
-        now = _now_iso()
+        now = now_iso()
         user_message = _normalize_ai_assistant_message_payload(
             {
                 "id": uuid4().hex,
@@ -323,7 +346,7 @@ async def _append_ai_assistant_chat_placeholders(
     return context, _build_ai_assistant_conversation_payload(store)
 
 
-async def _update_ai_assistant_message_payload(conversation_id: str, message_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+async def update_ai_assistant_message_payload(conversation_id: str, message_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     normalized_conversation_id = str(conversation_id or "").strip()
     normalized_message_id = str(message_id or "").strip()
     normalized_updates = dict(updates or {})
@@ -337,7 +360,7 @@ async def _update_ai_assistant_message_payload(conversation_id: str, message_id:
             raise ValueError("未找到指定消息")
         for key, value in normalized_updates.items():
             target_message[key] = value
-        target_message["updated_at"] = _now_iso()
+        target_message["updated_at"] = now_iso()
         conversation["updated_at"] = target_message["updated_at"]
         if conversation.get("messages") and (not conversation.get("title") or str(conversation.get("title") or "").startswith("新对话")):
             conversation["title"] = _derive_ai_assistant_conversation_title(conversation["messages"], _default_ai_assistant_conversation_title(conversation["updated_at"]))
@@ -347,7 +370,7 @@ async def _update_ai_assistant_message_payload(conversation_id: str, message_id:
     return _build_ai_assistant_conversation_payload(store)
 
 
-async def _get_ai_assistant_message_payload(conversation_id: str, message_id: str) -> dict[str, Any] | None:
+async def get_ai_assistant_message_payload(conversation_id: str, message_id: str) -> dict[str, Any] | None:
     normalized_conversation_id = str(conversation_id or "").strip()
     normalized_message_id = str(message_id or "").strip()
     async with ai_assistant_storage_lock:
@@ -359,7 +382,7 @@ async def _get_ai_assistant_message_payload(conversation_id: str, message_id: st
     return deepcopy(message) if message is not None else None
 
 
-async def _get_ai_assistant_conversation_history(conversation_id: str) -> list[dict[str, Any]]:
+async def get_ai_assistant_conversation_history(conversation_id: str) -> list[dict[str, Any]]:
     async with ai_assistant_storage_lock:
         store = _load_ai_assistant_conversation_store()
     conversation = _get_ai_assistant_conversation(store, conversation_id)
@@ -385,18 +408,18 @@ def _normalize_ai_assistant_job_payload(job: dict[str, Any]) -> dict[str, Any]:
     payload.setdefault("provider_config_id", "")
     payload.setdefault("prompt_plugin_id", "")
     payload.setdefault("prompt_plugin_name", "")
-    payload.setdefault("created_at", _now_iso())
+    payload.setdefault("created_at", now_iso())
     payload.setdefault("updated_at", payload["created_at"])
     return payload
 
 
-async def _set_ai_assistant_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+async def set_ai_assistant_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     normalized_job_id = str(job_id or "").strip() or uuid4().hex
     async with ai_assistant_job_lock:
         current = _normalize_ai_assistant_job_payload(ai_assistant_jobs.get(normalized_job_id, {"id": normalized_job_id}))
         current.update(updates)
         current["id"] = normalized_job_id
-        current["updated_at"] = _now_iso()
+        current["updated_at"] = now_iso()
         ai_assistant_jobs[normalized_job_id] = current
 
         completed_jobs = [
@@ -411,32 +434,32 @@ async def _set_ai_assistant_job(job_id: str, updates: dict[str, Any]) -> dict[st
         return deepcopy(current)
 
 
-async def _get_ai_assistant_job(job_id: str) -> dict[str, Any] | None:
+async def get_ai_assistant_job(job_id: str) -> dict[str, Any] | None:
     normalized_job_id = str(job_id or "").strip()
     async with ai_assistant_job_lock:
         job = ai_assistant_jobs.get(normalized_job_id)
         return deepcopy(job) if job is not None else None
 
 
-async def _set_ai_assistant_job_task(job_id: str, task: asyncio.Task[Any]) -> None:
+async def set_ai_assistant_job_task(job_id: str, task: asyncio.Task[Any]) -> None:
     normalized_job_id = str(job_id or "").strip()
     async with ai_assistant_job_lock:
         ai_assistant_job_tasks[normalized_job_id] = task
 
 
-async def _get_ai_assistant_job_task(job_id: str) -> asyncio.Task[Any] | None:
+async def get_ai_assistant_job_task(job_id: str) -> asyncio.Task[Any] | None:
     normalized_job_id = str(job_id or "").strip()
     async with ai_assistant_job_lock:
         return ai_assistant_job_tasks.get(normalized_job_id)
 
 
-async def _pop_ai_assistant_job_task(job_id: str) -> asyncio.Task[Any] | None:
+async def pop_ai_assistant_job_task(job_id: str) -> asyncio.Task[Any] | None:
     normalized_job_id = str(job_id or "").strip()
     async with ai_assistant_job_lock:
         return ai_assistant_job_tasks.pop(normalized_job_id, None)
 
 
-async def _mark_ai_assistant_job_stopped(
+async def mark_ai_assistant_job_stopped(
     job_id: str,
     conversation_id: str,
     assistant_message_id: str,
@@ -447,13 +470,13 @@ async def _mark_ai_assistant_job_stopped(
     selected_model: str,
     progress_message: str = "本次对话已手动停止。",
 ) -> dict[str, Any]:
-    current_job = await _get_ai_assistant_job(job_id)
+    current_job = await get_ai_assistant_job(job_id)
     if current_job is not None and str(current_job.get("status") or "") == "stopped":
         return current_job
 
-    current_message = await _get_ai_assistant_message_payload(conversation_id, assistant_message_id) or {}
+    current_message = await get_ai_assistant_message_payload(conversation_id, assistant_message_id) or {}
     preserved_content = str(current_message.get("content") or "").strip()
-    await _update_ai_assistant_message_payload(
+    await update_ai_assistant_message_payload(
         conversation_id,
         assistant_message_id,
         {
@@ -471,7 +494,7 @@ async def _mark_ai_assistant_job_stopped(
             "model": str(current_message.get("model") or selected_model),
         },
     )
-    return await _set_ai_assistant_job(
+    return await set_ai_assistant_job(
         job_id,
         {
             "conversation_id": conversation_id,
