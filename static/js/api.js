@@ -253,4 +253,7 @@ export const api = {
         }
         return requestJson(`/api/plugin-logs?${params.toString()}`);
     },
+    getMessageTypes() {
+        return requestJson("/api/message-types");
+    },
 };

@@ -1,22 +1,22 @@
-import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER, buildEventStreamUrl } from "/static/js/api.js?v=20260706-02";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-03";
+import {
+    AI_ASSISTANT_ACTIVE_JOB_STATUSES,
+    AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
+    AI_ASSISTANT_TERMINAL_JOB_STATUSES,
+    MANUAL_PLUGIN_EXECUTION_ACTIVE_STATUSES,
+    MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS,
+    MANUAL_PLUGIN_EXECUTION_TERMINAL_STATUSES,
+    OVERVIEW_POLL_INTERVAL_MS,
+    OVERVIEW_RENDER_TICK_MS,
+} from "/static/js/polling-config.js?v=20260706-03";
+import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-03";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260706-02";
-
-const OVERVIEW_POLL_INTERVAL_MS = 15000;
-const MESSAGE_POLL_INTERVAL_MS = 3000;
-const MESSAGE_POLL_INTERVAL_SSE_MS = 12000;
-const OVERVIEW_RENDER_TICK_MS = 1000;
-const AI_ASSISTANT_JOB_POLL_INTERVAL_MS = 1200;
-const AI_ASSISTANT_ACTIVE_JOB_STATUSES = new Set(["queued", "running", "stopping"]);
-const AI_ASSISTANT_TERMINAL_JOB_STATUSES = new Set(["completed", "failed", "stopped"]);
-const MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS = 1200;
-const MANUAL_PLUGIN_EXECUTION_ACTIVE_STATUSES = new Set(["queued", "running", "stopping"]);
-const MANUAL_PLUGIN_EXECUTION_TERMINAL_STATUSES = new Set(["completed", "failed", "stopped"]);
+} from "/static/js/plugin-config-form.js?v=20260706-03";
 
 const MESSAGE_TYPE_LABELS = {
     0x0: "朋友圈",
@@ -64,7 +64,7 @@ const MESSAGE_TYPE_LABELS = {
 
 async function syncMessageTypeLabels() {
     try {
-        const payload = await api.get("/api/message-types");
+        const payload = await api.getMessageTypes();
         const labels = payload?.labels;
         if (!labels || typeof labels !== "object") {
             return;
@@ -4440,46 +4440,15 @@ async function bootstrap() {
 
 bootstrap();
 
-let runtimeEventSource = null;
-let runtimeStreamConnected = false;
-let lastMessagePollAt = 0;
-
-function handleRuntimeStreamEvent(event) {
-    let payload;
-    try {
-        payload = JSON.parse(event.data);
-    } catch {
-        return;
-    }
-    const eventType = String(payload?.type || "");
-    if (eventType === "message_queued" || eventType === "message_processed" || eventType === "message_failed") {
-        refreshMessagesByPoll().catch(() => {});
-        loadOverview().catch(() => {});
-    }
-}
-
-function connectRuntimeEventStream() {
-    if (typeof EventSource === "undefined") {
-        return;
-    }
-    if (runtimeEventSource) {
-        runtimeEventSource.close();
-        runtimeEventSource = null;
-    }
-    runtimeEventSource = new EventSource(buildEventStreamUrl());
-    runtimeEventSource.onopen = () => {
-        runtimeStreamConnected = true;
-    };
-    runtimeEventSource.onmessage = handleRuntimeStreamEvent;
-    runtimeEventSource.onerror = () => {
-        runtimeStreamConnected = false;
-        runtimeEventSource?.close();
-        runtimeEventSource = null;
-        window.setTimeout(connectRuntimeEventStream, 5000);
-    };
-}
-
-connectRuntimeEventStream();
+connectRuntimeEventStream({
+    onRuntimeEvent(payload) {
+        const eventType = String(payload?.type || "");
+        if (eventType === "message_queued" || eventType === "message_processed" || eventType === "message_failed") {
+            refreshMessagesByPoll().catch(() => {});
+            loadOverview().catch(() => {});
+        }
+    },
+});
 
 window.setInterval(() => {
     if (document.visibilityState === "hidden" || !state.overview) {
@@ -4506,12 +4475,9 @@ window.setInterval(() => {
     if (document.visibilityState === "hidden") {
         return;
     }
-    const pollIntervalMs = runtimeStreamConnected ? MESSAGE_POLL_INTERVAL_SSE_MS : MESSAGE_POLL_INTERVAL_MS;
-    const now = Date.now();
-    if (now - lastMessagePollAt < pollIntervalMs) {
+    if (!shouldPollMessages()) {
         return;
     }
-    lastMessagePollAt = now;
     refreshMessagesByPoll();
 }, 1000);
 
