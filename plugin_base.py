@@ -9,6 +9,7 @@ from loguru import logger
 
 from client import WxRobotApiClient
 from config import SETTINGS_DB_PATH, PluginServiceSettings
+from db_connection import get_sqlite_connection
 
 
 PLUGIN_STATE_SCHEMA_SQL = """
@@ -60,15 +61,13 @@ class PluginStateStore:
             if resolved_path in cls._initialized_paths:
                 return
             _ensure_parent_directory(resolved_path)
-            with sqlite3.connect(resolved_path, timeout=5) as connection:
-                connection.executescript(PLUGIN_STATE_SCHEMA_SQL)
-                connection.commit()
+            connection = get_sqlite_connection(resolved_path)
+            connection.executescript(PLUGIN_STATE_SCHEMA_SQL)
+            connection.commit()
             cls._initialized_paths.add(resolved_path)
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.storage_path, timeout=5)
-        connection.row_factory = sqlite3.Row
-        return connection
+        return get_sqlite_connection(self.storage_path)
 
     @staticmethod
     def _serialize(value: Any) -> str:
