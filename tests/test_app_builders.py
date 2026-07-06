@@ -28,3 +28,16 @@ def test_sort_option_items_orders_by_label() -> None:
     ]
     sorted_items = AppBuilders.sort_option_items(items)
     assert [item["value"] for item in sorted_items] == ["a", "b"]
+
+
+def test_build_room_member_options_deduplicates_and_sorts() -> None:
+    members = AppBuilders.build_room_member_options(
+        [
+            {"username": "wxid_b", "nick_name": "Beta"},
+            {"wxid": "wxid_b", "nick_name": "Duplicate"},
+            {"username": "wxid_a", "room_nick_name": "Alpha"},
+        ]
+    )
+    assert [item["wxid"] for item in members] == ["wxid_a", "wxid_b"]
+    assert members[0]["label"] == "Alpha"
+    assert members[1]["label"] == "Beta"

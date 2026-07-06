@@ -41,6 +41,34 @@ class AppBuilders:
     def sort_option_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return sorted(items, key=lambda item: (str(item.get("label") or "").lower(), str(item.get("value") or "").lower()))
 
+    @staticmethod
+    def build_room_member_options(room_members_payload: Any) -> list[dict[str, Any]]:
+        member_options: list[dict[str, Any]] = []
+        seen_member_wxids: set[str] = set()
+        for item in room_members_payload if isinstance(room_members_payload, list) else []:
+            if not isinstance(item, dict):
+                continue
+            member_wxid = str(item.get("username") or item.get("wxid") or "").strip()
+            if not member_wxid or member_wxid in seen_member_wxids:
+                continue
+            seen_member_wxids.add(member_wxid)
+            nick_name = str(item.get("nick_name") or "").strip()
+            room_nick_name = str(item.get("room_nick_name") or "").strip()
+            display_name = room_nick_name or nick_name or member_wxid
+            member_options.append(
+                {
+                    "label": display_name,
+                    "value": member_wxid,
+                    "wxid": member_wxid,
+                    "display_name": display_name,
+                    "nick_name": nick_name,
+                    "room_nick_name": room_nick_name,
+                    "avatar_url": str(item.get("small_head_url") or item.get("big_head_url") or "").strip(),
+                    "search_text": " ".join(part for part in [display_name, room_nick_name, nick_name, member_wxid] if part),
+                }
+            )
+        return AppBuilders.sort_option_items(member_options)
+
     def build_plugin_payload(self) -> list[dict]:
         module_names = list(dict.fromkeys(PluginManager.discover_plugin_modules() + self.runtime.settings.plugins))
         plugin_descriptions = PluginManager.describe_modules(module_names)

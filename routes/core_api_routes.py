@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -96,34 +95,12 @@ def register_core_api_routes(app: FastAPI, ctx: AppContext, callback_path: str) 
             logger.exception("读取群成员列表失败")
             raise HTTPException(status_code=502, detail=f"读取群成员列表失败: {exc}") from exc
 
-        member_options: list[dict[str, Any]] = []
-        seen_member_wxids: set[str] = set()
-        for item in room_members_payload if isinstance(room_members_payload, list) else []:
-            member_wxid = str(item.get("username") or item.get("wxid") or "").strip()
-            if not member_wxid or member_wxid in seen_member_wxids:
-                continue
-            seen_member_wxids.add(member_wxid)
-            nick_name = str(item.get("nick_name") or "").strip()
-            room_nick_name = str(item.get("room_nick_name") or "").strip()
-            display_name = room_nick_name or nick_name or member_wxid
-            member_options.append(
-                {
-                    "label": display_name,
-                    "value": member_wxid,
-                    "wxid": member_wxid,
-                    "display_name": display_name,
-                    "nick_name": nick_name,
-                    "room_nick_name": room_nick_name,
-                    "avatar_url": str(item.get("small_head_url") or item.get("big_head_url") or "").strip(),
-                    "search_text": " ".join(part for part in [display_name, room_nick_name, nick_name, member_wxid] if part),
-                }
-            )
-
+        members = AppBuilders.build_room_member_options(room_members_payload)
         return {
             "roomid": normalized_roomid,
             "wxpid": wxpid,
-            "count": len(member_options),
-            "members": AppBuilders.sort_option_items(member_options),
+            "count": len(members),
+            "members": members,
         }
 
     @app.post("/api/plugin-assets/upload")
