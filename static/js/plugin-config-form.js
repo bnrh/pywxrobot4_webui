@@ -1,16 +1,8 @@
-import { api } from "/static/js/api.js?v=20260512-09";
+import { api } from "/static/js/api.js?v=20260706-04";
+import { escapeHtml } from "/static/js/dom-utils.js?v=20260706-04";
 
 const roomMemberPickerCache = new Map();
 const roomMemberPickerPendingRequests = new Map();
-
-function escapeHtml(value) {
-    return String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-}
 
 function deepClone(value) {
     if (value === undefined) {

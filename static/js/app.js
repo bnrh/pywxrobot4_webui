@@ -1,4 +1,4 @@
-import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-03";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-04";
 import {
     AI_ASSISTANT_ACTIVE_JOB_STATUSES,
     AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
@@ -8,125 +8,34 @@ import {
     MANUAL_PLUGIN_EXECUTION_TERMINAL_STATUSES,
     OVERVIEW_POLL_INTERVAL_MS,
     OVERVIEW_RENDER_TICK_MS,
-} from "/static/js/polling-config.js?v=20260706-03";
-import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-03";
+} from "/static/js/polling-config.js?v=20260706-04";
+import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-04";
+import {
+    escapeHtml,
+    formatJson,
+    highlightText,
+    normalizeInlineText,
+} from "/static/js/dom-utils.js?v=20260706-04";
+import {
+    formatDuration,
+    formatHeartbeatInterval,
+    formatStandardDateTime,
+    formatUnixTimestamp,
+    truncateText,
+} from "/static/js/format-utils.js?v=20260706-04";
+import {
+    getMessageTypeLabel,
+    getPayloadValue,
+    syncMessageTypeLabels,
+} from "/static/js/message-labels.js?v=20260706-04";
+import { tabMeta } from "/static/js/tab-meta.js?v=20260706-04";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260706-03";
-
-const MESSAGE_TYPE_LABELS = {
-    0x0: "朋友圈",
-    0x1: "文本",
-    0x3: "图片",
-    0x22: "语音",
-    0x25: "好友请求",
-    0x2A: "名片",
-    0x2B: "视频",
-    0x2F: "表情",
-    0x30: "位置",
-    0x31: "XML消息",
-    0x32: "音视频通话",
-    0x33: "微信初始化",
-    0x34: "通话状态通知",
-    0x35: "通话邀请",
-    0x3E: "小视频",
-    0x42: "微信红包",
-    0x2710: "通知消息",
-    0x2712: "系统消息",
-    0x100000031: "百度视频消息",
-    0x200000031: "微信运动消息",
-    0x210000031: "小程序消息",
-    0x240000031: "BOSS直聘消息",
-    0x280000031: "聊天记录消息",
-    0x2A0000031: "公众号名片消息",
-    0x300000031: "QQ音乐消息",
-    0x330000031: "视频号消息",
-    0x3900000031: "引用消息",
-    0x3F0000031: "视频号卡片消息",
-    0x400000031: "哔哩哔哩视频消息",
-    0x440000031: "微信游戏消息",
-    0x4A00000031: "文件下载完成消息",
-    0x500000031: "链接消息",
-    0x570000031: "群公告消息",
-    0x5E0000031: "商品橱窗消息",
-    0x600000031: "文件消息",
-    0x650000031: "王者荣耀消息",
-    0x7D000000031: "转账消息",
-    0x7D300000031: "红包封面消息",
-    0x1100000031: "位置共享消息",
-    0x1300000031: "合并消息",
-    0x1500000031: "微信运动步数消息",
-};
-
-async function syncMessageTypeLabels() {
-    try {
-        const payload = await api.getMessageTypes();
-        const labels = payload?.labels;
-        if (!labels || typeof labels !== "object") {
-            return;
-        }
-        for (const [typeCode, label] of Object.entries(labels)) {
-            const numericCode = Number(typeCode);
-            if (!Number.isNaN(numericCode) && label) {
-                MESSAGE_TYPE_LABELS[numericCode] = String(label);
-            }
-        }
-    } catch {
-        // 保留内置标签作为兜底
-    }
-}
-
-const tabMeta = {
-    dashboard: {
-        label: "仪表盘",
-        title: "运行概览",
-        description: "集中查看插件服务状态、消息积压和待处理变更。",
-    },
-    messages: {
-        label: "消息中心",
-        title: "最新消息",
-        description: "查看最近收到的消息以及插件处理结果。",
-    },
-    users: {
-        label: "用户管理",
-        title: "登录账号",
-        description: "查看心跳检测获取到的登录账号信息与最近一次检测状态。",
-    },
-    features: {
-        label: "功能插件",
-        title: "功能插件",
-        description: "按需执行功能插件。",
-    },
-    "ai-assistant": {
-        label: "智能插件",
-        title: "AI 工具代理",
-        description: "配置 AI 厂商并让模型调用 wxrobot_api 工具完成查询与操作。",
-    },
-    plugins: {
-        label: "消息插件",
-        title: "消息插件",
-        description: "统一管理依赖消息的插件。配置会写入 SQLite，并在支持的范围内立即热重载。",
-    },
-    "plugin-logs": {
-        label: "插件日志",
-        title: "插件输出",
-        description: "查看所有插件输出的结构化日志，并按插件快速筛选。",
-    },
-    settings: {
-        label: "系统设置",
-        title: "全局设置",
-        description: "维护服务参数、处理策略与运行时行为。",
-    },
-    logs: {
-        label: "日志中心",
-        title: "最新日志",
-        description: "查看最近生成的日志文件和最后输出内容。",
-    },
-};
+} from "/static/js/plugin-config-form.js?v=20260706-04";
 
 const state = {
     activeTab: "dashboard",
@@ -258,19 +167,6 @@ let pluginLogFilterTimerId = null;
 let messagePollInFlight = null;
 let manualPluginExecutionPollTimerId = null;
 
-function escapeHtml(value) {
-    return String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-}
-
-function formatJson(value) {
-    return JSON.stringify(value ?? {}, null, 2);
-}
-
 function parseJsonObjectInput(value, label) {
     const rawText = String(value ?? "").trim();
     if (!rawText) {
@@ -305,21 +201,6 @@ async function copyTextToClipboard(value) {
     textarea.select();
     document.execCommand("copy");
     textarea.remove();
-}
-
-function normalizeInlineText(value) {
-    return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
-function getPayloadValue(message, ...keys) {
-    const payload = message?.payload || {};
-    for (const key of keys) {
-        const value = payload[key];
-        if (value !== undefined && value !== null && value !== "") {
-            return value;
-        }
-    }
-    return "";
 }
 
 function getStatusTone(status) {
@@ -364,93 +245,6 @@ function getLogLevelClass(level) {
         return "level-debug";
     }
     return "level-raw";
-}
-
-function getMessageTypeCode(message) {
-    const candidates = [
-        message.local_type,
-        message.msg_type,
-        getPayloadValue(message, "msg_type", "local_type"),
-    ];
-    for (const value of candidates) {
-        if (value === "" || value === null || value === undefined) {
-            continue;
-        }
-        const parsed = Number(value);
-        if (!Number.isNaN(parsed)) {
-            return parsed;
-        }
-    }
-    return null;
-}
-
-function getMessageTypeLabel(message) {
-    const typeCode = getMessageTypeCode(message);
-    if (typeCode === null) {
-        return "未知类型";
-    }
-    return MESSAGE_TYPE_LABELS[typeCode] || `类型 ${typeCode}`;
-}
-
-function formatUnixTimestamp(value) {
-    const numericValue = Number(value);
-    if (!Number.isFinite(numericValue) || numericValue <= 0) {
-        return "";
-    }
-
-    const timestamp = numericValue > 1e12 ? numericValue : numericValue * 1000;
-    const date = new Date(timestamp);
-    if (Number.isNaN(date.getTime())) {
-        return "";
-    }
-
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
-}
-
-function formatDuration(totalSeconds) {
-    const normalized = Math.max(0, Math.floor(Number(totalSeconds) || 0));
-    const hours = Math.floor(normalized / 3600);
-    const minutes = Math.floor((normalized % 3600) / 60);
-    const seconds = Math.floor(normalized % 60);
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function formatStandardDateTime(value) {
-    const normalized = normalizeInlineText(value);
-    if (!normalized) {
-        return "";
-    }
-    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(normalized)) {
-        return normalized;
-    }
-    const parsed = new Date(normalized);
-    if (Number.isNaN(parsed.getTime())) {
-        return normalized;
-    }
-    return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")} ${String(parsed.getHours()).padStart(2, "0")}:${String(parsed.getMinutes()).padStart(2, "0")}:${String(parsed.getSeconds()).padStart(2, "0")}`;
-}
-
-function formatHeartbeatInterval(value) {
-    const seconds = Math.max(0, Number(value) || 0);
-    return seconds > 0 ? `${seconds} 秒一次` : "已关闭";
-}
-
-function escapeRegExp(value) {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function highlightText(value, queries = []) {
-    const source = String(value ?? "");
-    const tokens = [...new Set(queries.map((query) => normalizeInlineText(query)).filter(Boolean))];
-    if (!tokens.length) {
-        return escapeHtml(source);
-    }
-    const pattern = new RegExp(`(${tokens.map(escapeRegExp).join("|")})`, "gi");
-    return source.split(pattern).map((segment, index) => (
-        index % 2 === 1
-            ? `<mark class="log-mark">${escapeHtml(segment)}</mark>`
-            : escapeHtml(segment)
-    )).join("");
 }
 
 function getConversationLabel(message) {
@@ -527,11 +321,6 @@ function getMessageTitle(message) {
         return `${typeLabel} · ${message.msgid}`;
     }
     return `${typeLabel}消息`;
-}
-
-function truncateText(value, maxLength = 96) {
-    const normalized = normalizeInlineText(value);
-    return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
 }
 
 function getAvatarUrl(message) {
