@@ -1,5 +1,5 @@
-import { api } from "/static/js/api.js?v=20260706-04";
-import { escapeHtml } from "/static/js/dom-utils.js?v=20260706-04";
+import { api } from "/static/js/api.js?v=20260706-05";
+import { escapeHtml } from "/static/js/dom-utils.js?v=20260706-05";
 
 const roomMemberPickerCache = new Map();
 const roomMemberPickerPendingRequests = new Map();

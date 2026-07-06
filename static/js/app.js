@@ -1,4 +1,4 @@
-import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-04";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-05";
 import {
     AI_ASSISTANT_ACTIVE_JOB_STATUSES,
     AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
@@ -8,34 +8,43 @@ import {
     MANUAL_PLUGIN_EXECUTION_TERMINAL_STATUSES,
     OVERVIEW_POLL_INTERVAL_MS,
     OVERVIEW_RENDER_TICK_MS,
-} from "/static/js/polling-config.js?v=20260706-04";
-import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-04";
+} from "/static/js/polling-config.js?v=20260706-05";
+import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-05";
 import {
     escapeHtml,
     formatJson,
     highlightText,
     normalizeInlineText,
-} from "/static/js/dom-utils.js?v=20260706-04";
+} from "/static/js/dom-utils.js?v=20260706-05";
 import {
     formatDuration,
     formatHeartbeatInterval,
     formatStandardDateTime,
     formatUnixTimestamp,
     truncateText,
-} from "/static/js/format-utils.js?v=20260706-04";
+} from "/static/js/format-utils.js?v=20260706-05";
 import {
     getMessageTypeLabel,
     getPayloadValue,
     syncMessageTypeLabels,
-} from "/static/js/message-labels.js?v=20260706-04";
-import { tabMeta } from "/static/js/tab-meta.js?v=20260706-04";
+} from "/static/js/message-labels.js?v=20260706-05";
+import { tabMeta } from "/static/js/tab-meta.js?v=20260706-05";
+import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-05";
+import {
+    getConversationLabel,
+    getMessageSummary,
+    getMessageTimeLabel,
+    getMessageTitle,
+    getSenderLabel,
+    renderAvatar,
+} from "/static/js/message-presenters.js?v=20260706-05";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260706-04";
+} from "/static/js/plugin-config-form.js?v=20260706-05";
 
 const state = {
     activeTab: "dashboard",
@@ -201,144 +210,6 @@ async function copyTextToClipboard(value) {
     textarea.select();
     document.execCommand("copy");
     textarea.remove();
-}
-
-function getStatusTone(status) {
-    if (status === "processed") {
-        return "good";
-    }
-    if (status === "failed" || status === "rejected") {
-        return "bad";
-    }
-    return "";
-}
-
-function getLogTone(level) {
-    const normalized = String(level || "").toUpperCase();
-    if (normalized === "ERROR") {
-        return "bad";
-    }
-    if (normalized === "WARNING") {
-        return "warn";
-    }
-    if (normalized === "INFO") {
-        return "good";
-    }
-    return "";
-}
-
-function getLogLevelClass(level) {
-    const normalized = String(level || "").toUpperCase();
-    if (normalized === "CRITICAL") {
-        return "level-critical";
-    }
-    if (normalized === "ERROR") {
-        return "level-error";
-    }
-    if (normalized === "WARNING") {
-        return "level-warning";
-    }
-    if (normalized === "INFO") {
-        return "level-info";
-    }
-    if (normalized === "DEBUG") {
-        return "level-debug";
-    }
-    return "level-raw";
-}
-
-function getConversationLabel(message) {
-    return normalizeInlineText(
-        message.conversation_display_name
-        || message.conversation_wxid
-        || getPayloadValue(message, "talker", "sender", "wxid", "conversation_id")
-        || "未知会话"
-    );
-}
-
-function getSenderLabel(message) {
-    return normalizeInlineText(
-        message.room_sender_display_name
-        || message.sender_display_name
-        || message.sender_wxid
-        || getPayloadValue(message, "room_sender", "from_wxid", "from_user", "sender", "wxid")
-        || "未知发送者"
-    );
-}
-
-function getMessageTimeLabel(message) {
-    const rawValue = getPayloadValue(message, "create_time", "timestamp", "ts");
-    if (typeof rawValue === "string" && /[-:]/.test(rawValue)) {
-        return rawValue;
-    }
-    return formatUnixTimestamp(rawValue) || message.received_at || "未知时间";
-}
-
-function getMessageSummary(message) {
-    const candidates = [
-        message.text_content,
-        message.content,
-        getPayloadValue(message, "content", "message_content", "msg", "title", "desc", "brief", "description", "s1", "s3", "s4"),
-    ];
-
-    for (const candidate of candidates) {
-        const text = normalizeInlineText(candidate);
-        if (text) {
-            return text;
-        }
-    }
-
-    const typeLabel = getMessageTypeLabel(message);
-    if (typeLabel === "图片") {
-        return "收到一条图片消息";
-    }
-    if (typeLabel === "语音") {
-        return "收到一条语音消息";
-    }
-    if (typeLabel === "视频") {
-        return "收到一条视频消息";
-    }
-    if (typeLabel === "表情") {
-        return "收到一条表情消息";
-    }
-    return `收到一条${typeLabel}`;
-}
-
-function getMessageTitle(message) {
-    const explicitTitle = normalizeInlineText(message.title_display);
-    if (explicitTitle) {
-        return explicitTitle;
-    }
-    const sender = getSenderLabel(message);
-    const typeLabel = getMessageTypeLabel(message);
-    if (message.is_group_message) {
-        return getConversationLabel(message);
-    }
-    if (sender && sender !== "未知发送者") {
-        return sender;
-    }
-    if (message.msgid) {
-        return `${typeLabel} · ${message.msgid}`;
-    }
-    return `${typeLabel}消息`;
-}
-
-function getAvatarUrl(message) {
-    return normalizeInlineText(
-        message.avatar_url
-        || message.conversation_avatar_url
-        || message.sender_avatar_url
-    );
-}
-
-function renderAvatar(message) {
-    const title = getMessageTitle(message);
-    const avatarUrl = getAvatarUrl(message);
-    const fallback = escapeHtml((title || "?").slice(0, 1).toUpperCase());
-    if (avatarUrl) {
-        return `<div class="message-avatar"><img class="message-avatar-img" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(title)}"></div>`;
-    }
-    return `<div class="message-avatar message-avatar-fallback">${fallback}</div>`;
 }
 
 function setStatus(text, type = "") {
