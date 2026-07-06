@@ -20,6 +20,8 @@ from plugins._global_blacklist import (
     BLACKLIST_PLUGIN_NAME,
     resolve_blacklist_subject_wxid,
 )
+from utils.normalize import normalize_text as _shared_normalize_text
+from utils.normalize import normalize_wxpid as _shared_normalize_wxpid
 
 
 PLUGIN_DIR = Path(__file__).with_name("plugins")
@@ -124,24 +126,11 @@ def _is_biz_conversation_wxid(wxid: str) -> bool:
 
 
 def _normalize_text(value: Any) -> str:
-    return "" if value in (None, "") else str(value).strip()
+    return _shared_normalize_text(value)
 
 
 def _normalize_wxpid(value: Any) -> int | None:
-    if value in (None, ""):
-        return None
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        try:
-            return int(stripped, 16) if stripped.lower().startswith("0x") else int(stripped)
-        except ValueError:
-            return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+    return _shared_normalize_wxpid(value)
 
 
 def _resolve_login_account_wxid(accounts: list[dict[str, Any]] | None, wxpid: int | None) -> str:
@@ -695,13 +684,13 @@ class PluginManager:
         return importlib.import_module(spec.module_name)
 
     @classmethod
-    def describe_plugin(cls, spec: PluginSpec) -> dict[str, Any]:
-        module = cls._load_python_module(spec, force_reload=True)
+    def describe_plugin(cls, spec: PluginSpec, *, force_reload: bool = False) -> dict[str, Any]:
+        module = cls._load_python_module(spec, force_reload=force_reload)
         return _describe_python_module(module, spec)
 
     @classmethod
-    def _describe_python_plugin(cls, spec: PluginSpec) -> dict[str, Any]:
-        return cls.describe_plugin(spec)
+    def _describe_python_plugin(cls, spec: PluginSpec, *, force_reload: bool = False) -> dict[str, Any]:
+        return cls.describe_plugin(spec, force_reload=force_reload)
 
     def _resolve_plugin_config(self, module_name: str, plugin_name: str | None = None) -> dict[str, Any]:
         plugin_config = self.plugin_settings.get(module_name, {})
@@ -715,7 +704,7 @@ class PluginManager:
         for module_name in module_names:
             try:
                 spec = cls._resolve_plugin_spec(module_name)
-                metadata = cls._describe_python_plugin(spec)
+                metadata = cls._describe_python_plugin(spec, force_reload=False)
                 descriptions.append(
                     {
                         "module": module_name,
