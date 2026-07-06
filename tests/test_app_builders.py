@@ -19,3 +19,12 @@ def test_build_plugin_payload_includes_enabled_flag() -> None:
     if payload:
         assert "enabled" in payload[0]
         assert "loaded" in payload[0]
+
+
+def test_sort_option_items_orders_by_label() -> None:
+    items = [
+        {"label": "Beta", "value": "b"},
+        {"label": "alpha", "value": "a"},
+    ]
+    sorted_items = AppBuilders.sort_option_items(items)
+    assert [item["value"] for item in sorted_items] == ["a", "b"]

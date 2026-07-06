@@ -200,9 +200,9 @@ class AppBuilders:
 
         payload = {
             "default_wxpid": wxpids[0] if wxpids else None,
-            "wxpid_options": sort_option_items(wxpid_options),
-            "room_options": sort_option_items(room_options),
-            "label_options": sort_option_items(label_options),
+            "wxpid_options": AppBuilders.sort_option_items(wxpid_options),
+            "room_options": AppBuilders.sort_option_items(room_options),
+            "label_options": AppBuilders.sort_option_items(label_options),
         }
         self.runtime._plugin_targets_cache = payload
         self.runtime._plugin_targets_cache_at = monotonic()
