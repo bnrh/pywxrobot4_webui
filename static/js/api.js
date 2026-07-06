@@ -5,6 +5,15 @@ export function getStoredApiToken() {
     return String(window.sessionStorage.getItem(API_TOKEN_STORAGE_KEY) || "").trim();
 }
 
+export function buildEventStreamUrl() {
+    const url = new URL("/api/events/stream", window.location.origin);
+    const token = getStoredApiToken();
+    if (token) {
+        url.searchParams.set("access_token", token);
+    }
+    return `${url.pathname}${url.search}`;
+}
+
 export function setStoredApiToken(token) {
     const normalized = String(token || "").trim();
     if (!normalized) {

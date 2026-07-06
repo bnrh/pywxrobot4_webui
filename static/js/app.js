@@ -1,11 +1,11 @@
-import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-01";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER, buildEventStreamUrl } from "/static/js/api.js?v=20260706-02";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260706-01";
+} from "/static/js/plugin-config-form.js?v=20260706-02";
 
 const OVERVIEW_POLL_INTERVAL_MS = 15000;
 const MESSAGE_POLL_INTERVAL_MS = 3000;
@@ -4418,6 +4418,41 @@ async function bootstrap() {
 }
 
 bootstrap();
+
+let runtimeEventSource = null;
+
+function handleRuntimeStreamEvent(event) {
+    let payload;
+    try {
+        payload = JSON.parse(event.data);
+    } catch {
+        return;
+    }
+    const eventType = String(payload?.type || "");
+    if (eventType === "message_queued" || eventType === "message_processed" || eventType === "message_failed") {
+        refreshMessagesByPoll().catch(() => {});
+        loadOverview().catch(() => {});
+    }
+}
+
+function connectRuntimeEventStream() {
+    if (typeof EventSource === "undefined") {
+        return;
+    }
+    if (runtimeEventSource) {
+        runtimeEventSource.close();
+        runtimeEventSource = null;
+    }
+    runtimeEventSource = new EventSource(buildEventStreamUrl());
+    runtimeEventSource.onmessage = handleRuntimeStreamEvent;
+    runtimeEventSource.onerror = () => {
+        runtimeEventSource?.close();
+        runtimeEventSource = null;
+        window.setTimeout(connectRuntimeEventStream, 5000);
+    };
+}
+
+connectRuntimeEventStream();
 
 window.setInterval(() => {
     if (document.visibilityState === "hidden" || !state.overview) {
