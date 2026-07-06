@@ -487,101 +487,45 @@ class WxRobotApiClient:
         payload = {"labels": self._normalize_labels(labels)}
         return await self.post_json("/label/delete", self._with_optional_wxpid(payload, wxpid))
 
-    async def getLoggedInUsers(self) -> list[dict[str, Any]]:
-        return await self.get_logged_in_users()
+    def __getattr__(self, name: str) -> Any:
+        alias = _CAMEL_CASE_METHOD_ALIASES.get(name)
+        if alias is None:
+            raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+        return getattr(self, alias)
 
-    async def getWxPids(self) -> list[int]:
-        return await self.get_wx_pids()
 
-    async def getUserList(self, *, wxpid: int | None = None) -> list[dict[str, Any]]:
-        return await self.get_user_list(wxpid)
-
-    async def getRoomList(self, *, wxpid: int | None = None) -> list[dict[str, Any]]:
-        return await self.get_room_list(wxpid)
-
-    async def getBizList(self, *, wxpid: int | None = None) -> list[dict[str, Any]]:
-        return await self.get_biz_list(wxpid)
-
-    async def getRoomMembers(self, *, roomid: str, wxpid: int | None = None) -> list[dict[str, Any]]:
-        return await self.get_room_members(roomid, wxpid)
-
-    async def getUserInfo(self, *, wxid: str, roomid: str = "", wxpid: int | None = None) -> dict[str, Any]:
-        return await self.get_user_info(wxid, roomid, wxpid)
-
-    async def downloadCdnImage(self, *, msgid: str, wxid: str, wxpid: int | None = None, flag: int = 3, wait: bool = True, timeout: int = 15) -> dict[str, Any]:
-        return await self.download_cdn_image(msgid, wxid, wxpid, flag, wait, timeout)
-
-    async def downloadCdnVideo(self, *, msgid: str, wxid: str, wxpid: int | None = None, wait: bool = True, timeout: int = 15) -> dict[str, Any]:
-        return await self.download_cdn_video(msgid, wxid, wxpid, wait, timeout)
-
-    async def downloadCdnFile(self, *, msgid: str, wxid: str, wxpid: int | None = None, wait: bool = True, timeout: int = 15) -> dict[str, Any]:
-        return await self.download_cdn_file(msgid, wxid, wxpid, wait, timeout)
-
-    async def sendText(self, *, wxid: str, content: str, atlist: str = "", wxpid: int | None = None, wait: bool = False, timeout: int = 3) -> dict[str, Any]:
-        return await self.send_text(wxid, content, atlist, wxpid, wait, timeout)
-
-    async def sendImage(self, *, wxid: str, path: str, wxpid: int | None = None, wait: bool = False, timeout: int = 3) -> dict[str, Any]:
-        return await self.send_image(wxid, path, wxpid, wait, timeout)
-
-    async def sendFile(self, *, wxid: str, path: str, wxpid: int | None = None, wait: bool = False, timeout: int = 3) -> dict[str, Any]:
-        return await self.send_file(wxid, path, wxpid, wait, timeout)
-
-    async def sendVideo(self, *, wxid: str, path: str, wxpid: int | None = None, wait: bool = False, timeout: int = 3) -> dict[str, Any]:
-        return await self.send_video(wxid, path, wxpid, wait, timeout)
-
-    async def sendGif(self, *, wxid: str, path: str, wxpid: int | None = None, wait: bool = False, timeout: int = 3) -> dict[str, Any]:
-        return await self.send_gif(wxid, path, wxpid, wait, timeout)
-
-    async def sendArticle(self, *, wxid: str, title: str, url: str, cover: str, ghid: str, nickname: str, desc: str = "", wxpid: int | None = None, wait: bool = False, timeout: int = 3) -> dict[str, Any]:
-        return await self.send_article(wxid, title, url, cover, ghid, nickname, desc, wxpid, wait, timeout)
-
-    async def checkUserState(self, *, wxid: str, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.check_user_state(wxid, wxpid)
-
-    async def setRemarks(self, *, wxid: str, remarks: str, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.set_remarks(wxid, remarks, wxpid)
-
-    async def deleteUser(self, *, wxid: str, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.delete_user(wxid, wxpid)
-
-    async def agreeFriendRequest(self, *, wxid: str, v4: str, remarks: str = "", labels: list[str] | tuple[str, ...] | str = "", sns_permissions: int = 0, add_type: int = 1, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.agree_friend_request(wxid, v4, remarks, self._normalize_labels(labels), sns_permissions, add_type, wxpid)
-
-    async def receiveNotify(self, *, wxid: str, notify: bool = True, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.receive_notify(wxid, notify, wxpid)
-
-    async def addRoomMember(self, *, wxid: str, roomid: str, remarks: str = "", content: str = "", sns_permissions: int = 0, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.add_room_member(wxid, roomid, remarks, content, sns_permissions, wxpid)
-
-    async def inviteRoomMembers(self, *, roomid: str, wxids: list[str] | tuple[str, ...] | str, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.invite_room_members(roomid, wxids, wxpid)
-
-    async def addRoomMembers(self, *, roomid: str, wxids: list[str] | tuple[str, ...] | str, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.add_room_members(roomid, wxids, wxpid)
-
-    async def deleteRoomMembers(self, *, roomid: str, wxids: list[str] | tuple[str, ...] | str, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.delete_room_members(roomid, wxids, wxpid)
-
-    async def execSql(self, *, sql: str, db_name: str | None = None, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.exec_sql(sql, db_name, wxpid)
-
-    async def dontRevoke(self, *, revoke: bool = True, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.dont_revoke(revoke, wxpid)
-
-    async def getChatMessages(self, *, wxid: str, start_time: str | int, end_time: str | int, max_count: int = 500, wxpid: int | None = None) -> list[dict[str, Any]]:
-        return await self.get_chat_messages(wxid, start_time, end_time, max_count, wxpid)
-
-    async def getResourcePath(self, *, msgid: str, wxid: str, local_type: int, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.get_resource_path(msgid, wxid, local_type, wxpid)
-
-    async def getLabels(self, *, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.get_labels(wxpid)
-
-    async def addLabel(self, *, label_name: str, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.add_label(label_name, wxpid)
-
-    async def setLabels(self, *, wxid: str, labels: list[str] | tuple[str, ...] | str, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.set_labels(wxid, labels, wxpid)
-
-    async def deleteLabels(self, *, labels: list[str] | tuple[str, ...] | str, wxpid: int | None = None) -> dict[str, Any]:
-        return await self.delete_labels(labels, wxpid)
+_CAMEL_CASE_METHOD_ALIASES: dict[str, str] = {
+    "getLoggedInUsers": "get_logged_in_users",
+    "getWxPids": "get_wx_pids",
+    "getUserList": "get_user_list",
+    "getRoomList": "get_room_list",
+    "getBizList": "get_biz_list",
+    "getRoomMembers": "get_room_members",
+    "getUserInfo": "get_user_info",
+    "downloadCdnImage": "download_cdn_image",
+    "downloadCdnVideo": "download_cdn_video",
+    "downloadCdnFile": "download_cdn_file",
+    "sendText": "send_text",
+    "sendImage": "send_image",
+    "sendFile": "send_file",
+    "sendVideo": "send_video",
+    "sendGif": "send_gif",
+    "sendArticle": "send_article",
+    "checkUserState": "check_user_state",
+    "setRemarks": "set_remarks",
+    "deleteUser": "delete_user",
+    "agreeFriendRequest": "agree_friend_request",
+    "receiveNotify": "receive_notify",
+    "addRoomMember": "add_room_member",
+    "inviteRoomMembers": "invite_room_members",
+    "addRoomMembers": "add_room_members",
+    "deleteRoomMembers": "delete_room_members",
+    "execSql": "exec_sql",
+    "dontRevoke": "dont_revoke",
+    "getChatMessages": "get_chat_messages",
+    "getResourcePath": "get_resource_path",
+    "getLabels": "get_labels",
+    "addLabel": "add_label",
+    "setLabels": "set_labels",
+    "deleteLabels": "delete_labels",
+}

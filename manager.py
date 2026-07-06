@@ -951,10 +951,17 @@ class PluginManager:
                 logger.exception("预取好友标签缓存失败")
                 friend_labels_by_user = {}
 
-        for plugin in self._plugins:
-            if not plugin.should_handle_message(event):
+        candidates = [plugin for plugin in self._plugins if plugin.should_handle_message(event)]
+        scope_matches = await asyncio.gather(
+            *[self._matches_plugin_scope(plugin, event, friend_labels_by_user) for plugin in candidates],
+            return_exceptions=True,
+        )
+
+        for plugin, scope_match in zip(candidates, scope_matches):
+            if isinstance(scope_match, Exception):
+                logger.exception("插件 {} 作用域检查失败", plugin.name)
                 continue
-            if not await self._matches_plugin_scope(plugin, event, friend_labels_by_user):
+            if not scope_match:
                 plugin.log_scope_skip(event, "scope_mismatch")
                 continue
             try:
