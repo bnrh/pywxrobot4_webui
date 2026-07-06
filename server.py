@@ -3,7 +3,6 @@ import json
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from time import monotonic
 from typing import Any
 from uuid import uuid4
 
@@ -16,13 +15,13 @@ from loguru import logger
 from ai_assistant import (
     AI_ASSISTANT_SETTINGS_KEY,
     PROVIDER_CATALOG,
-    build_ai_assistant_payload,
     get_default_ai_assistant_settings,
     load_openai_compatible_model_options,
     normalize_ai_assistant_settings,
     resolve_ai_assistant_prompt_plugin,
     run_ai_assistant,
 )
+from ai_assistant_jobs import build_ai_assistant_page_payload, run_ai_assistant_chat_job
 from ai_assistant_store import (
     AI_ASSISTANT_JOB_ACTIVE_STATUSES,
     AI_ASSISTANT_JOB_TERMINAL_STATUSES,
@@ -31,15 +30,25 @@ from ai_assistant_store import (
     _clear_ai_assistant_conversation_payload,
     _create_ai_assistant_conversation_payload,
     _ensure_ai_assistant_conversation_payload,
-    _get_ai_assistant_conversation_history,
     _get_ai_assistant_job,
     _get_ai_assistant_job_task,
     _mark_ai_assistant_job_stopped,
     _now_iso,
-    _pop_ai_assistant_job_task,
     _set_ai_assistant_job,
     _set_ai_assistant_job_task,
     _update_ai_assistant_message_payload,
+)
+from app_builders import AppBuilders
+from app_config import (
+    FRONTEND_DIR,
+    FRONTEND_INDEX_PAGE,
+    LOG_DIR,
+    PLUGIN_ASSET_IMAGE_EXTENSIONS,
+    PLUGIN_ASSET_MAX_BYTES,
+    PLUGIN_ASSET_UPLOAD_ROOT,
+    SECRET_SETTINGS_PLACEHOLDER,
+    STATIC_DIR,
+    sanitize_stored_settings,
 )
 from api_schemas import (
     AiAssistantChatJobCreateRequest,
@@ -51,95 +60,25 @@ from api_schemas import (
     SystemSettingsUpdateRequest,
 )
 from config import (
-    CONFIG_PATH,
-    PROJECT_ROOT,
-    SETTINGS_DB_PATH,
     PluginServiceSettings,
     WebuiSettingsStore,
     normalize_plugin_module_name,
 )
-from contact_directory_cache import PLUGIN_TARGETS_CACHE_TTL_SECONDS
-from log_reader import build_log_payload as build_service_log_payload, format_local_datetime
+from log_reader import build_log_payload as build_service_log_payload
 from manager import PluginManager
 from message import MessageEvent
-from plugin_config_payload import normalize_plugin_config_for_payload
+from runtime_sync import sync_runtime_with_config
 from upload_paths import resolve_project_relative_dir, sanitize_upload_path_segment
-from runtime import PLUGIN_LOG_LIMIT, RECENT_MESSAGE_LIMIT, PluginRuntime
+from runtime import RECENT_MESSAGE_LIMIT, PluginRuntime
 from security import (
-    is_api_auth_enabled,
-    is_callback_auth_enabled,
     is_public_request_path,
     verify_api_token,
     verify_callback_secret,
 )
 
 
-FRONTEND_DIR = Path(__file__).with_name("frontend")
-FRONTEND_INDEX_PAGE = FRONTEND_DIR / "index.html"
-STATIC_DIR = Path(__file__).with_name("static")
-LOG_DIR = SETTINGS_DB_PATH.parent / "logs"
-PLUGIN_ASSET_UPLOAD_ROOT = PROJECT_ROOT / "uploads"
-PLUGIN_ASSET_MAX_BYTES = 10 * 1024 * 1024
-PLUGIN_ASSET_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-RESTART_REQUIRED_FIELDS = {"host", "port", "callback_path", "worker_count", "queue_size"}
-RUNTIME_LIGHT_REFRESH_FIELDS = {
-    "api_token",
-    "callback_secret",
-    "request_timeout",
-    "wxrobot_api_base_url",
-    "heartbeat_interval_seconds",
-    "queue_enqueue_wait_seconds",
-    "image_download_flag",
-    "image_download_wait",
-    "image_download_timeout",
-}
-PLUGIN_MANAGER_RELOAD_FIELDS = {"plugins", "plugin_settings"}
-SYSTEM_SETTINGS_FIELDS = (
-    "host",
-    "port",
-    "callback_path",
-    "wxrobot_api_base_url",
-    "request_timeout",
-    "worker_count",
-    "queue_size",
-    "queue_enqueue_wait_seconds",
-    "heartbeat_interval_seconds",
-    "image_download_flag",
-    "image_download_wait",
-    "image_download_timeout",
-    "api_token",
-    "callback_secret",
-)
-SECRET_SETTINGS_PLACEHOLDER = "******"
-REMOVED_PLUGIN_MODULES = {normalize_plugin_module_name("webui.plugins.monitor_biz")}
-DOWNLOAD_RECENT_USER_IMAGES_PLUGIN_MODULE = normalize_plugin_module_name("plugins.download_recent_user_images")
-DONT_REVOKE_PLUGIN_MODULE = normalize_plugin_module_name("plugins.dont_revoke")
-DIRECT_EXECUTE_PLUGIN_MODULES = {
-    normalize_plugin_module_name("plugins.room_msg_summary"),
-    normalize_plugin_module_name("plugins.user_msg_summary"),
-    normalize_plugin_module_name("plugins.export_contacts"),
-    DOWNLOAD_RECENT_USER_IMAGES_PLUGIN_MODULE,
-    DONT_REVOKE_PLUGIN_MODULE,
-}
-
-
 def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
-    settings = settings or PluginServiceSettings.from_storage()
-    removed_plugin_modules = REMOVED_PLUGIN_MODULES
-    sanitized_plugins = [module_name for module_name in settings.plugins if module_name not in removed_plugin_modules]
-    sanitized_plugin_settings = {
-        key: value
-        for key, value in settings.plugin_settings.items()
-        if key not in removed_plugin_modules
-    }
-    if sanitized_plugins != settings.plugins or sanitized_plugin_settings != settings.plugin_settings:
-        settings = settings.model_copy(
-            update={
-                "plugins": sanitized_plugins,
-                "plugin_settings": sanitized_plugin_settings,
-            }
-        )
-        settings.save_to_storage()
+    settings = sanitize_stored_settings(settings or PluginServiceSettings.from_storage())
     runtime = PluginRuntime(settings)
 
     @asynccontextmanager
@@ -176,502 +115,14 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-    def normalize_wxpid(value: Any) -> int | None:
-        if value in (None, ""):
-            return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
+    builders = AppBuilders(runtime)
 
-    def sort_option_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return sorted(items, key=lambda item: (str(item.get("label") or "").lower(), str(item.get("value") or "").lower()))
-
-    def build_plugin_payload() -> list[dict]:
-        module_names = list(dict.fromkeys(PluginManager.discover_plugin_modules() + runtime.settings.plugins))
-        plugin_descriptions = PluginManager.describe_modules(module_names)
-        loaded_plugins = {
-            getattr(plugin, "module_name", plugin.__class__.__module__): plugin
-            for plugin in runtime.manager.plugins
-        }
-        payload: list[dict] = []
-        for item in plugin_descriptions:
-            loaded_plugin = loaded_plugins.get(item["module"])
-            config = runtime.settings.plugin_settings.get(item["module"], {})
-            if not config and loaded_plugin is not None:
-                config = loaded_plugin.config
-            config = normalize_plugin_config_for_payload(item["module"], config)
-            payload.append(
-                {
-                    **item,
-                    "enabled": item["module"] in runtime.settings.plugins,
-                    "loaded": loaded_plugin is not None,
-                    "config": config,
-                    "config_schema": item.get("config_schema") or [],
-                    "scope_targets": item.get("scope_targets") or [],
-                    "direct_execute": normalize_plugin_module_name(item["module"]) in DIRECT_EXECUTE_PLUGIN_MODULES,
-                    "manual_execution": runtime.get_manual_plugin_execution_snapshot(item["module"]),
-                }
-            )
-        return payload
-
-    def resolve_plugin_model_options_field(module_name: str, field_key: str = "", parent_field_key: str = "") -> dict[str, Any]:
-        normalized_module_name = normalize_plugin_module_name(module_name)
-        if not normalized_module_name:
-            raise HTTPException(status_code=400, detail="插件模块不能为空")
-
-        available_modules = set(PluginManager.discover_plugin_modules()) | set(runtime.settings.plugins)
-        if normalized_module_name not in available_modules:
-            raise HTTPException(status_code=404, detail="未找到指定插件模块")
-
-        metadata_list = PluginManager.describe_modules([normalized_module_name])
-        metadata = metadata_list[0] if metadata_list else None
-        if not isinstance(metadata, dict):
-            raise HTTPException(status_code=404, detail="未找到指定插件模块")
-        if not metadata.get("loadable", True):
-            raise HTTPException(status_code=400, detail=f"插件无法加载: {metadata.get('error') or '未知错误'}")
-
-        normalized_field_key = str(field_key or "").strip().lower()
-        normalized_parent_field_key = str(parent_field_key or "").strip().lower()
-        config_schema = metadata.get("config_schema") if isinstance(metadata.get("config_schema"), list) else []
-
-        def match_candidate(candidate_key: Any, candidate_parent_key: Any = "") -> bool:
-            normalized_candidate_key = str(candidate_key or "").strip().lower()
-            normalized_candidate_parent_key = str(candidate_parent_key or "").strip().lower()
-            if normalized_field_key and normalized_candidate_key != normalized_field_key:
-                return False
-            if normalized_parent_field_key and normalized_candidate_parent_key != normalized_parent_field_key:
-                return False
-            return True
-
-        model_field = None
-        for field in config_schema:
-            if not isinstance(field, dict):
-                continue
-            if str(field.get("options_source") or "").strip().lower() == "model_options" and match_candidate(field.get("key")):
-                model_field = field
-                break
-            for column in field.get("columns") if isinstance(field.get("columns"), list) else []:
-                if not isinstance(column, dict):
-                    continue
-                if str(column.get("options_source") or "").strip().lower() != "model_options":
-                    continue
-                if not match_candidate(column.get("key"), field.get("key")):
-                    continue
-                model_field = {
-                    **column,
-                    "__parent_field_key": field.get("key"),
-                }
-                break
-            if isinstance(model_field, dict):
-                break
-
-        if not isinstance(model_field, dict):
-            raise HTTPException(status_code=400, detail="当前插件未声明模型列表选项")
-        return model_field
-
-    async def build_plugin_target_payload() -> dict:
-        now = monotonic()
-        if (
-            runtime._plugin_targets_cache is not None
-            and now - runtime._plugin_targets_cache_at <= PLUGIN_TARGETS_CACHE_TTL_SECONDS
-        ):
-            return dict(runtime._plugin_targets_cache)
-
-        users_payload = await runtime.api_client.get_logged_in_users()
-        users = users_payload if isinstance(users_payload, list) else []
-        wxpids: list[int] = []
-        wxpid_options: list[dict[str, Any]] = []
-        seen_wxpids: set[int] = set()
-        for item in users:
-            wxpid = normalize_wxpid(item.get("wxpid"))
-            if wxpid is None or wxpid in seen_wxpids:
-                continue
-            seen_wxpids.add(wxpid)
-            wxpids.append(wxpid)
-            wxid = str(item.get("wxid") or "").strip()
-            wxh = str(item.get("wxh") or item.get("alias") or "").strip()
-            nickname = str(item.get("nickname") or item.get("remarks") or wxh or wxid or f"微信进程 {wxpid}").strip()
-            search_parts = [nickname, wxh, wxid, str(wxpid)]
-            wxpid_options.append(
-                {
-                    "label": f"{nickname}({wxpid})",
-                    "search_text": " ".join(part for part in search_parts if part),
-                    "value": wxpid,
-                }
-            )
-
-        room_options: list[dict[str, Any]] = []
-        label_options: list[dict[str, Any]] = []
-        seen_rooms: set[str] = set()
-        seen_labels: set[str] = set()
-        for wxpid in wxpids:
-            room_payload, label_payload = await asyncio.gather(
-                runtime.api_client.get_room_list(wxpid=wxpid),
-                runtime.api_client.get_labels(wxpid=wxpid),
-                return_exceptions=True,
-            )
-
-            if not isinstance(room_payload, Exception) and isinstance(room_payload, list):
-                for room in room_payload:
-                    roomid = str(room.get("wxid") or room.get("roomid") or "").strip()
-                    if not roomid or roomid in seen_rooms:
-                        continue
-                    room_name = str(room.get("nickname") or room.get("remarks") or "").strip()
-                    if room_name == "":
-                        continue
-                    seen_rooms.add(roomid)
-                    room_options.append(
-                        {
-                            "label": f"{room_name}({roomid})",
-                            "search_text": room_name,
-                            "value": roomid,
-                            "wxpid": wxpid,
-                        }
-                    )
-
-            if not isinstance(label_payload, Exception) and isinstance(label_payload, dict):
-                for label_name in label_payload:
-                    normalized_name = str(label_name or "").strip()
-                    if not normalized_name or normalized_name in seen_labels:
-                        continue
-                    seen_labels.add(normalized_name)
-                    label_options.append(
-                        {
-                            "label": normalized_name,
-                            "search_text": normalized_name,
-                            "value": normalized_name,
-                        }
-                    )
-
-        payload = {
-            "default_wxpid": wxpids[0] if wxpids else None,
-            "wxpid_options": sort_option_items(wxpid_options),
-            "room_options": sort_option_items(room_options),
-            "label_options": sort_option_items(label_options),
-        }
-        runtime._plugin_targets_cache = payload
-        runtime._plugin_targets_cache_at = monotonic()
-        return dict(payload)
-
-    def build_user_payload() -> dict:
-        heartbeat_interval_seconds = max(0, int(getattr(runtime.settings, "heartbeat_interval_seconds", 0) or 0))
+    def with_mutation_payload(reload_state: dict[str, Any]) -> dict[str, Any]:
         return {
-            "enabled": heartbeat_interval_seconds > 0,
-            "interval_seconds": heartbeat_interval_seconds,
-            "healthy": runtime.heartbeat_healthy,
-            "last_checked_at": format_local_datetime(runtime.heartbeat_last_checked_at),
-            "total": len(runtime.heartbeat_accounts),
-            "users": list(runtime.heartbeat_accounts),
-            "error": runtime.heartbeat_error,
-        }
-
-    def build_overview() -> dict:
-        settings_payload = build_settings_payload()
-        uptime_seconds = int((datetime.now().astimezone() - runtime.started_at).total_seconds()) if runtime.started_at else 0
-        user_payload = build_user_payload()
-        return {
-            "name": "wxrobot_api webui plugin server",
-            "settings_storage_path": str(SETTINGS_DB_PATH),
-            "callback_url": runtime.settings.callback_url,
-            "wxrobot_api_base_url": runtime.settings.wxrobot_api_base_url,
-            "listen_host": runtime.settings.host,
-            "listen_port": runtime.settings.port,
-            "plugins": [plugin.name for plugin in runtime.manager.plugins],
-            "queue_size": runtime.settings.queue_size,
-            "queued_messages": runtime.queue.qsize(),
-            "worker_count": runtime.settings.worker_count,
-            "enabled_plugin_count": len(runtime.settings.plugins),
-            "loaded_plugin_count": len(runtime.manager.plugins),
-            "pending_restart_fields": settings_payload["restart_required_fields"],
-            "runtime_started_at": format_local_datetime(runtime.started_at),
-            "uptime_seconds": uptime_seconds,
-            "heartbeat": {
-                "enabled": user_payload["enabled"],
-                "interval_seconds": user_payload["interval_seconds"],
-                "healthy": user_payload["healthy"],
-                "last_checked_at": user_payload["last_checked_at"],
-                "account_count": user_payload["total"],
-                "error": user_payload["error"],
-                "wxrobot_api_reachable": runtime.wxrobot_api_reachable,
-            },
-        }
-
-    def serialize_system_settings(settings_obj: PluginServiceSettings, *, mask_secrets: bool = True) -> dict[str, Any]:
-        payload = {field: getattr(settings_obj, field) for field in SYSTEM_SETTINGS_FIELDS if field != "wxrobot_api_base_url"}
-        payload["api_base_url"] = settings_obj.wxrobot_api_base_url
-        if mask_secrets:
-            payload["api_token"] = SECRET_SETTINGS_PLACEHOLDER if str(payload.get("api_token") or "").strip() else ""
-            payload["callback_secret"] = SECRET_SETTINGS_PLACEHOLDER if str(payload.get("callback_secret") or "").strip() else ""
-            payload["api_token_configured"] = bool(str(getattr(settings_obj, "api_token", "") or "").strip())
-            payload["callback_secret_configured"] = bool(str(getattr(settings_obj, "callback_secret", "") or "").strip())
-        return payload
-
-    def merge_secret_settings_updates(
-        configured_settings: PluginServiceSettings,
-        updates: dict[str, Any],
-    ) -> dict[str, Any]:
-        merged_updates = dict(updates)
-        for field_name in ("api_token", "callback_secret"):
-            incoming_value = str(merged_updates.get(field_name) or "").strip()
-            if not incoming_value or incoming_value == SECRET_SETTINGS_PLACEHOLDER:
-                merged_updates[field_name] = getattr(configured_settings, field_name, "")
-        return merged_updates
-
-    def build_settings_payload() -> dict:
-        configured_settings = PluginServiceSettings.from_storage()
-        runtime_payload = serialize_system_settings(runtime.settings)
-        configured_payload = serialize_system_settings(configured_settings)
-        restart_required_fields = [
-            field
-            for field in RESTART_REQUIRED_FIELDS
-            if getattr(runtime.settings, field) != getattr(configured_settings, field)
-        ]
-        return {
-            "runtime": runtime_payload,
-            "config": configured_payload,
-            "restart_required": bool(restart_required_fields),
-            "restart_required_fields": restart_required_fields,
-            "api_auth_enabled": is_api_auth_enabled(configured_settings),
-            "callback_auth_enabled": is_callback_auth_enabled(configured_settings),
-        }
-
-    async def build_ai_assistant_settings_payload(settings: dict[str, Any] | None = None) -> dict:
-        normalized_settings = normalize_ai_assistant_settings(
-            settings
-            if settings is not None
-            else WebuiSettingsStore().get_json_setting(
-                AI_ASSISTANT_SETTINGS_KEY,
-                get_default_ai_assistant_settings(),
-            )
-        )
-        return await build_ai_assistant_payload(normalized_settings)
-
-    async def build_ai_assistant_page_payload(settings: dict[str, Any] | None = None) -> dict:
-        settings_payload = await build_ai_assistant_settings_payload(settings)
-        conversation_payload = await _ensure_ai_assistant_conversation_payload()
-        return {
-            **settings_payload,
-            **conversation_payload,
-        }
-
-    async def run_ai_assistant_chat_job(
-        job_id: str,
-        conversation_id: str,
-        assistant_message_id: str,
-        provider_key: str,
-        provider_config_id: str | None,
-        prompt_plugin_id: str | None,
-        prompt_plugin_name: str | None,
-        selected_model: str,
-    ) -> None:
-        settings_payload = WebuiSettingsStore().get_json_setting(
-            AI_ASSISTANT_SETTINGS_KEY,
-            get_default_ai_assistant_settings(),
-        )
-        normalized_settings = normalize_ai_assistant_settings(settings_payload)
-
-        async def handle_progress(progress: dict[str, Any]) -> None:
-            progress_status = str(progress.get("status") or "running").strip().lower()
-            message_status = "running" if progress_status == "running" else "completed"
-            await _update_ai_assistant_message_payload(
-                conversation_id,
-                assistant_message_id,
-                {
-                    "content": str(progress.get("content") or ""),
-                    "reasoning_content": str(progress.get("reasoning_content") or ""),
-                    "tool_traces": progress.get("tool_traces") if isinstance(progress.get("tool_traces"), list) else [],
-                    "progress_message": str(progress.get("progress_message") or ""),
-                    "status": message_status,
-                    "error": False,
-                    "provider": provider_key,
-                    "provider_label": PROVIDER_CATALOG.get(provider_key, {}).get("label", ""),
-                    "provider_config_id": str(provider_config_id or ""),
-                    "prompt_plugin_id": str(prompt_plugin_id or ""),
-                    "prompt_plugin_name": str(prompt_plugin_name or ""),
-                    "model": selected_model,
-                },
-            )
-            await _set_ai_assistant_job(
-                job_id,
-                {
-                    "conversation_id": conversation_id,
-                    "assistant_message_id": assistant_message_id,
-                    "status": progress_status if progress_status in {"running", "completed"} else "running",
-                    "stage": str(progress.get("stage") or "thinking"),
-                    "progress_message": str(progress.get("progress_message") or ""),
-                    "error": "",
-                    "provider": provider_key,
-                    "provider_config_id": str(provider_config_id or ""),
-                    "prompt_plugin_id": str(prompt_plugin_id or ""),
-                    "prompt_plugin_name": str(prompt_plugin_name or ""),
-                    "model": selected_model,
-                },
-            )
-
-        try:
-            await _set_ai_assistant_job(
-                job_id,
-                {
-                    "conversation_id": conversation_id,
-                    "assistant_message_id": assistant_message_id,
-                    "status": "running",
-                    "stage": "thinking",
-                    "progress_message": "模型思考中...",
-                    "error": "",
-                    "provider": provider_key,
-                    "provider_config_id": str(provider_config_id or ""),
-                    "prompt_plugin_id": str(prompt_plugin_id or ""),
-                    "prompt_plugin_name": str(prompt_plugin_name or ""),
-                    "model": selected_model,
-                },
-            )
-            history = await _get_ai_assistant_conversation_history(conversation_id)
-            result = await run_ai_assistant(
-                normalized_settings,
-                runtime.api_client,
-                history,
-                provider_key,
-                selected_model,
-                provider_config_id,
-                prompt_plugin_id,
-                handle_progress,
-            )
-            final_model = str(result.get("model") or selected_model)
-            await _update_ai_assistant_message_payload(
-                conversation_id,
-                assistant_message_id,
-                {
-                    "content": str(result.get("reply") or "已执行完成，但没有返回文本说明。"),
-                    "reasoning_content": str(result.get("reasoning_content") or ""),
-                    "tool_traces": result.get("tool_traces") if isinstance(result.get("tool_traces"), list) else [],
-                    "progress_message": "",
-                    "status": "completed",
-                    "error": False,
-                    "provider": str(result.get("provider") or provider_key),
-                    "provider_label": str(result.get("provider_label") or PROVIDER_CATALOG.get(provider_key, {}).get("label", "")),
-                    "provider_config_id": str(result.get("provider_config_id") or provider_config_id or ""),
-                    "prompt_plugin_id": str(result.get("prompt_plugin_id") or prompt_plugin_id or ""),
-                    "prompt_plugin_name": str(result.get("prompt_plugin_name") or prompt_plugin_name or ""),
-                    "model": final_model,
-                },
-            )
-            await _set_ai_assistant_job(
-                job_id,
-                {
-                    "conversation_id": conversation_id,
-                    "assistant_message_id": assistant_message_id,
-                    "status": "completed",
-                    "stage": "completed",
-                    "progress_message": "回复已完成",
-                    "error": "",
-                    "provider": str(result.get("provider") or provider_key),
-                    "provider_config_id": str(result.get("provider_config_id") or provider_config_id or ""),
-                    "prompt_plugin_id": str(result.get("prompt_plugin_id") or prompt_plugin_id or ""),
-                    "prompt_plugin_name": str(result.get("prompt_plugin_name") or prompt_plugin_name or ""),
-                    "model": final_model,
-                },
-            )
-        except asyncio.CancelledError:
-            await _mark_ai_assistant_job_stopped(
-                job_id,
-                conversation_id,
-                assistant_message_id,
-                provider_key,
-                provider_config_id,
-                prompt_plugin_id,
-                prompt_plugin_name,
-                selected_model,
-            )
-            return
-        except Exception as exc:
-            error_message = str(exc)
-            logger.exception("智能插件异步任务执行失败")
-            await _update_ai_assistant_message_payload(
-                conversation_id,
-                assistant_message_id,
-                {
-                    "content": f"执行失败：{error_message}",
-                    "progress_message": "",
-                    "status": "failed",
-                    "error": True,
-                    "provider": provider_key,
-                    "provider_label": PROVIDER_CATALOG.get(provider_key, {}).get("label", ""),
-                    "provider_config_id": str(provider_config_id or ""),
-                    "prompt_plugin_id": str(prompt_plugin_id or ""),
-                    "prompt_plugin_name": str(prompt_plugin_name or ""),
-                    "model": selected_model,
-                },
-            )
-            await _set_ai_assistant_job(
-                job_id,
-                {
-                    "conversation_id": conversation_id,
-                    "assistant_message_id": assistant_message_id,
-                    "status": "failed",
-                    "stage": "failed",
-                    "progress_message": "执行失败",
-                    "error": error_message,
-                    "provider": provider_key,
-                    "provider_config_id": str(provider_config_id or ""),
-                    "prompt_plugin_id": str(prompt_plugin_id or ""),
-                    "prompt_plugin_name": str(prompt_plugin_name or ""),
-                    "model": selected_model,
-                },
-            )
-        finally:
-            await _pop_ai_assistant_job_task(job_id)
-
-    def build_plugin_log_payload(module_name: str | None = None, level: str = "", keyword: str = "", limit: int = 200) -> dict:
-        limit = max(1, min(limit, PLUGIN_LOG_LIMIT))
-        normalized_level = str(level or "").strip().upper()
-        normalized_keyword = str(keyword or "").strip()
-        logs, filtered_total = runtime.get_plugin_logs(limit, module_name, normalized_level, normalized_keyword)
-        plugin_options = [
-            {"module": item["module"], "name": item["name"]}
-            for item in build_plugin_payload()
-        ]
-        available_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-        return {
-            "logs": logs,
-            "total": len(runtime.recent_plugin_logs),
-            "filtered_total": filtered_total,
-            "module_name": module_name or "",
-            "level": normalized_level,
-            "keyword": normalized_keyword,
-            "available_plugins": plugin_options,
-            "available_levels": available_levels,
-            "updated_at": logs[0]["recorded_at"] if logs else None,
-        }
-
-    def plan_runtime_reload(configured_settings: PluginServiceSettings) -> tuple[PluginServiceSettings, list[str], list[str], list[str]]:
-        changed_fields = [
-            field
-            for field in configured_settings.model_fields
-            if getattr(runtime.settings, field) != getattr(configured_settings, field)
-        ]
-        hot_reload_fields = [field for field in changed_fields if field not in RESTART_REQUIRED_FIELDS]
-        restart_required_fields = [field for field in changed_fields if field in RESTART_REQUIRED_FIELDS]
-        effective_settings = runtime.settings
-        if hot_reload_fields:
-            effective_settings = runtime.settings.model_copy(
-                update={field: getattr(configured_settings, field) for field in hot_reload_fields}
-            )
-        return effective_settings, changed_fields, hot_reload_fields, restart_required_fields
-
-    async def sync_runtime_with_config(configured_settings: PluginServiceSettings) -> dict:
-        effective_settings, changed_fields, hot_reload_fields, restart_required_fields = plan_runtime_reload(configured_settings)
-        manager_reload_needed = any(field in PLUGIN_MANAGER_RELOAD_FIELDS for field in hot_reload_fields)
-        light_fields = [field for field in hot_reload_fields if field in RUNTIME_LIGHT_REFRESH_FIELDS]
-        if manager_reload_needed:
-            await runtime.reload(configured_settings)
-        elif light_fields:
-            await runtime.apply_light_settings(configured_settings, light_fields)
-        return {
-            "changed_fields": changed_fields,
-            "applied_fields": hot_reload_fields,
-            "restart_required_fields": restart_required_fields,
-            "restart_required": bool(restart_required_fields),
+            **reload_state,
+            "overview": builders.build_overview(),
+            "plugins": builders.build_plugin_payload(),
+            "settings": builders.build_settings_payload(),
         }
 
     @app.get("/")
@@ -680,7 +131,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
     @app.get("/api/overview")
     async def overview() -> dict:
-        return build_overview()
+        return builders.build_overview()
 
     @app.get("/api/messages")
     async def list_messages(limit: int = 40) -> dict:
@@ -693,12 +144,12 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
     @app.get("/api/users")
     async def get_users() -> dict:
-        return build_user_payload()
+        return builders.build_user_payload()
 
     @app.get("/api/plugin-targets")
     async def get_plugin_targets() -> dict:
         try:
-            return await build_plugin_target_payload()
+            return await builders.build_plugin_target_payload()
         except Exception as exc:
             logger.exception("读取插件作用范围选项失败")
             raise HTTPException(status_code=502, detail=f"读取插件作用范围选项失败: {exc}") from exc
@@ -708,7 +159,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         config = dict(item.config) if isinstance(item.config, dict) else {}
         requested_field_key = str(config.pop("__model_field_key", "") or "").strip()
         requested_parent_field_key = str(config.pop("__model_parent_field_key", "") or "").strip()
-        model_field = resolve_plugin_model_options_field(module_name, requested_field_key, requested_parent_field_key)
+        model_field = builders.resolve_plugin_model_options_field(module_name, requested_field_key, requested_parent_field_key)
         options_loader = str(model_field.get("options_loader") or "openai_compatible").strip().lower()
         if options_loader != "openai_compatible":
             raise HTTPException(status_code=400, detail="当前插件不支持该模型选项加载方式")
@@ -818,12 +269,12 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
     @app.get("/api/settings")
     async def get_settings() -> dict:
-        return build_settings_payload()
+        return builders.build_settings_payload()
 
     @app.post("/api/settings")
     async def update_settings(item: SystemSettingsUpdateRequest) -> dict:
         configured_settings = PluginServiceSettings.from_storage()
-        secret_updates = merge_secret_settings_updates(
+        secret_updates = AppBuilders.merge_secret_settings_updates(
             configured_settings,
             {
                 "api_token": item.api_token,
@@ -846,11 +297,11 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
             }
         )
         next_settings.save_to_storage()
-        reload_state = await sync_runtime_with_config(next_settings)
+        reload_state = await sync_runtime_with_config(runtime, next_settings)
         return {
             **reload_state,
-            "settings": build_settings_payload(),
-            "overview": build_overview(),
+            "settings": builders.build_settings_payload(),
+            "overview": builders.build_overview(),
         }
 
     @app.get("/api/ai-assistant")
@@ -932,6 +383,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         )
         task = asyncio.create_task(
             run_ai_assistant_chat_job(
+                runtime,
                 job_id,
                 str(item.conversation_id or "").strip(),
                 placeholder_context["assistant_message_id"],
@@ -1068,7 +520,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
     @app.get("/api/plugin-logs")
     async def get_plugin_logs(module_name: str | None = None, level: str = "", keyword: str = "", limit: int = 200) -> dict:
-        return build_plugin_log_payload(module_name, level, keyword, limit)
+        return builders.build_plugin_log_payload(module_name, level, keyword, limit)
 
     @app.get("/api/events/stream")
     async def stream_runtime_events() -> StreamingResponse:
@@ -1144,23 +596,23 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
     @app.get("/plugins")
     async def list_plugins() -> dict:
-        return build_overview()
+        return builders.build_overview()
 
     @app.get("/api/plugins")
     async def list_plugins_api() -> dict:
         return {
-            "plugins": build_plugin_payload(),
+            "plugins": builders.build_plugin_payload(),
         }
 
     @app.post("/api/plugins/reload")
     async def reload_plugins() -> dict:
         configured_settings = PluginServiceSettings.from_storage()
-        reload_state = await sync_runtime_with_config(configured_settings)
+        reload_state = await sync_runtime_with_config(runtime,configured_settings)
         return {
             **reload_state,
-            "overview": build_overview(),
-            "plugins": build_plugin_payload(),
-            "settings": build_settings_payload(),
+            "overview": builders.build_overview(),
+            "plugins": builders.build_plugin_payload(),
+            "settings": builders.build_settings_payload(),
         }
 
     @app.post("/api/plugins/{module_name}/toggle")
@@ -1178,12 +630,12 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
         next_settings = configured_settings.model_copy(update={"plugins": next_plugins})
         next_settings.save_to_storage()
-        reload_state = await sync_runtime_with_config(next_settings)
+        reload_state = await sync_runtime_with_config(runtime, next_settings)
         return {
             **reload_state,
-            "overview": build_overview(),
-            "plugins": build_plugin_payload(),
-            "settings": build_settings_payload(),
+            "overview": builders.build_overview(),
+            "plugins": builders.build_plugin_payload(),
+            "settings": builders.build_settings_payload(),
         }
 
     @app.post("/api/plugins/{module_name}/config")
@@ -1201,12 +653,12 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
         next_settings = configured_settings.model_copy(update={"plugin_settings": next_plugin_settings})
         next_settings.save_to_storage()
-        reload_state = await sync_runtime_with_config(next_settings)
+        reload_state = await sync_runtime_with_config(runtime, next_settings)
         return {
             **reload_state,
-            "overview": build_overview(),
-            "plugins": build_plugin_payload(),
-            "settings": build_settings_payload(),
+            "overview": builders.build_overview(),
+            "plugins": builders.build_plugin_payload(),
+            "settings": builders.build_settings_payload(),
         }
 
     @app.post("/api/plugins/{module_name}/execute")
@@ -1233,9 +685,9 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         return {
             "execution": execution,
             "result": execution.get("result"),
-            "overview": build_overview(),
-            "plugins": build_plugin_payload(),
-            "settings": build_settings_payload(),
+            "overview": builders.build_overview(),
+            "plugins": builders.build_plugin_payload(),
+            "settings": builders.build_settings_payload(),
         }
 
     @app.post("/api/plugins/{module_name}/stop")
@@ -1254,9 +706,9 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
 
         return {
             "execution": execution,
-            "overview": build_overview(),
-            "plugins": build_plugin_payload(),
-            "settings": build_settings_payload(),
+            "overview": builders.build_overview(),
+            "plugins": builders.build_plugin_payload(),
+            "settings": builders.build_settings_payload(),
         }
 
     async def receive_message(payload: dict) -> dict:
