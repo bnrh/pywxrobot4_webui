@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS recent_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_recent_messages_received_at
 ON recent_messages(received_at DESC);
+CREATE TABLE IF NOT EXISTS queue_rejections (
+    internal_id INTEGER PRIMARY KEY,
+    rejected_at TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -136,6 +141,22 @@ class RecentMessageStore:
             (self.limit,),
         )
         connection.commit()
+
+    def record_queue_rejection(self, internal_id: int, reason: str) -> None:
+        connection = self._connect()
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO queue_rejections(internal_id, rejected_at, reason)
+            VALUES (?, datetime('now', 'localtime'), ?)
+            """,
+            (int(internal_id), str(reason or "")),
+        )
+        connection.commit()
+
+    def count_queue_rejections(self) -> int:
+        connection = self._connect()
+        row = connection.execute("SELECT COUNT(*) AS total FROM queue_rejections").fetchone()
+        return int(row["total"] or 0) if row else 0
 
     def patch_message(self, internal_id: int, **updates: Any) -> None:
         if not updates:
