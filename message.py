@@ -123,7 +123,7 @@ class MessageEvent(BaseModel):
 
     @property
     def normalized_msg_type(self) -> int | None:
-        return self._normalized_int_value("local_type", "msg_type")
+        return self._normalized_int_value("msg_type", "local_type")
 
     @property
     def normalized_content(self) -> str:
