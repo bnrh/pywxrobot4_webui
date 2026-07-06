@@ -1,9 +1,9 @@
-import asyncio
 import json
 from datetime import datetime
 from time import monotonic
 from typing import Any
-from urllib import error, request
+
+import httpx
 
 
 class WxRobotApiError(RuntimeError):
@@ -18,6 +18,21 @@ class WxRobotApiClient:
         self.timeout = timeout
         self._cached_live_wxpids: list[int] = []
         self._cached_live_wxpids_at = 0.0
+        self._http_client: httpx.AsyncClient | None = None
+
+    async def aclose(self) -> None:
+        if self._http_client is not None and not self._http_client.is_closed:
+            await self._http_client.aclose()
+        self._http_client = None
+
+    async def _get_http_client(self, request_timeout: float | None = None) -> httpx.AsyncClient:
+        effective_timeout = self._resolve_request_timeout(request_timeout)
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=httpx.Timeout(effective_timeout),
+            )
+        return self._http_client
 
     @staticmethod
     def _coerce_timeout(value: Any) -> float | None:
@@ -95,26 +110,26 @@ class WxRobotApiClient:
         self._cached_live_wxpids_at = monotonic()
         return list(self._cached_live_wxpids)
 
-    def _get_live_wxpids_sync(self, request_timeout: float | None = None, *, force: bool = False) -> list[int]:
+    async def _get_live_wxpids(self, request_timeout: float | None = None, *, force: bool = False) -> list[int]:
         now = monotonic()
         if not force and self._cached_live_wxpids_at > 0 and now - self._cached_live_wxpids_at <= self._LIVE_WXPID_CACHE_TTL_SECONDS:
             return list(self._cached_live_wxpids)
         try:
-            payload = self._request_json_sync("/getwxpids", None, "GET", request_timeout)
+            payload = await self._request_json("/getwxpids", None, "GET", request_timeout)
         except WxRobotApiError:
             return list(self._cached_live_wxpids)
         return self._cache_live_wxpids(self._extract_wxpids(payload))
 
-    def _resolve_optional_wxpid_sync(self, wxpid: Any, request_timeout: float | None = None) -> int | None:
+    async def _resolve_optional_wxpid(self, wxpid: Any, request_timeout: float | None = None) -> int | None:
         normalized_wxpid = self._normalize_wxpid_value(wxpid)
-        live_wxpids = self._get_live_wxpids_sync(request_timeout)
+        live_wxpids = await self._get_live_wxpids(request_timeout)
         if not live_wxpids:
             return normalized_wxpid
         if normalized_wxpid in live_wxpids:
             return normalized_wxpid
         return live_wxpids[0]
 
-    def _normalize_payload_wxpid_sync(
+    async def _normalize_payload_wxpid(
         self,
         payload: dict[str, Any] | None,
         request_timeout: float | None = None,
@@ -122,7 +137,7 @@ class WxRobotApiClient:
         if payload is None:
             return None
         next_payload = dict(payload)
-        resolved_wxpid = self._resolve_optional_wxpid_sync(next_payload.get("wxpid"), request_timeout)
+        resolved_wxpid = await self._resolve_optional_wxpid(next_payload.get("wxpid"), request_timeout)
         if resolved_wxpid is None:
             next_payload.pop("wxpid", None)
         else:
@@ -130,14 +145,13 @@ class WxRobotApiClient:
         return next_payload
 
     async def get_json(self, path: str, request_timeout: float | None = None) -> Any:
-        return await asyncio.to_thread(self._request_json_sync, path, None, "GET", request_timeout)
+        return await self._request_json(path, None, "GET", request_timeout)
 
     async def post_json(self, path: str, payload: dict[str, Any], request_timeout: float | None = None) -> Any:
-        return await asyncio.to_thread(self._request_json_sync, path, payload, "POST", request_timeout)
+        return await self._request_json(path, payload, "POST", request_timeout)
 
     async def post_json_with_status(self, path: str, payload: dict[str, Any], request_timeout: float | None = None) -> Any:
-        return await asyncio.to_thread(
-            self._request_json_sync,
+        return await self._request_json(
             path,
             payload,
             "POST",
@@ -145,7 +159,7 @@ class WxRobotApiClient:
             include_status_code=True,
         )
 
-    def _request_json_sync(
+    async def _request_json(
         self,
         path: str,
         payload: dict[str, Any] | None,
@@ -154,41 +168,37 @@ class WxRobotApiClient:
         *,
         include_status_code: bool = False,
     ) -> Any:
-        url = f"{self.base_url}/{path.lstrip('/')}"
         effective_timeout = self._resolve_request_timeout(request_timeout)
-        normalized_payload = self._normalize_payload_wxpid_sync(payload, effective_timeout)
-        body = None if normalized_payload is None else json.dumps(normalized_payload, ensure_ascii=False).encode("utf-8")
+        normalized_payload = await self._normalize_payload_wxpid(payload, effective_timeout)
+        client = await self._get_http_client(effective_timeout)
+        relative_path = f"/{path.lstrip('/')}"
         headers = {"Content-Type": "application/json"} if normalized_payload is not None else {}
-        req = request.Request(
-            url,
-            data=body,
-            headers=headers,
-            method=method,
-        )
-        status_code: int | None = None
         try:
-            with request.urlopen(req, timeout=effective_timeout) as resp:
-                try:
-                    status_code = int(getattr(resp, "status", None) or resp.getcode())
-                except (TypeError, ValueError):
-                    status_code = None
-                response_text = resp.read().decode("utf-8")
-        except TimeoutError as exc:
-            raise WxRobotApiError(f"调用 {url} 超时({effective_timeout:.1f}s)") from exc
-        except error.HTTPError as exc:
-            response_text = exc.read().decode("utf-8", errors="ignore")
-            raise WxRobotApiError(f"调用 {url} 失败，HTTP {exc.code}: {response_text}") from exc
-        except error.URLError as exc:
-            raise WxRobotApiError(f"调用 {url} 失败: {exc.reason}") from exc
+            response = await client.request(
+                method.upper(),
+                relative_path,
+                json=normalized_payload,
+                headers=headers,
+                timeout=effective_timeout,
+            )
+        except httpx.TimeoutException as exc:
+            raise WxRobotApiError(f"调用 {self.base_url}{relative_path} 超时({effective_timeout:.1f}s)") from exc
+        except httpx.HTTPError as exc:
+            raise WxRobotApiError(f"调用 {self.base_url}{relative_path} 失败: {exc}") from exc
+
+        status_code = int(response.status_code)
+        response_text = response.text
+        if status_code >= 400:
+            raise WxRobotApiError(f"调用 {self.base_url}{relative_path} 失败，HTTP {status_code}: {response_text}")
 
         if not response_text:
-            return {"status_code": status_code} if include_status_code and status_code is not None else {}
+            return {"status_code": status_code} if include_status_code else {}
         try:
             parsed_response = json.loads(response_text)
         except json.JSONDecodeError as exc:
-            raise WxRobotApiError(f"调用 {url} 返回了非 JSON 响应: {response_text}") from exc
+            raise WxRobotApiError(f"调用 {self.base_url}{relative_path} 返回了非 JSON 响应: {response_text}") from exc
 
-        if include_status_code and status_code is not None:
+        if include_status_code:
             if isinstance(parsed_response, dict):
                 parsed_response = dict(parsed_response)
                 parsed_response.setdefault("status_code", status_code)
