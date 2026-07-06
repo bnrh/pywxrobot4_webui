@@ -108,6 +108,7 @@ DEFAULT_AI_ASSISTANT_SETTINGS = {
     "system_prompt": DEFAULT_SYSTEM_PROMPT,
     "temperature": 0.2,
     "max_tool_rounds": 20,
+    "allow_write_tools": False,
     "prompt_plugins": [],
     "providers": {
         key: {
@@ -1103,6 +1104,7 @@ def normalize_ai_assistant_settings(value: Any) -> dict[str, Any]:
         "system_prompt": str(selected_prompt_plugin.get("prompt") or defaults["system_prompt"]).strip() or defaults["system_prompt"],
         "temperature": _clamp_float(selected_prompt_plugin.get("temperature"), defaults["temperature"], 0.0, 1.5),
         "max_tool_rounds": _clamp_int(selected_prompt_plugin.get("max_tool_rounds"), defaults["max_tool_rounds"], 1, 500),
+        "allow_write_tools": _coerce_bool(raw_settings.get("allow_write_tools"), bool(defaults.get("allow_write_tools", False))),
         "prompt_plugins": prompt_plugins,
         "providers": providers,
     }
@@ -1156,16 +1158,17 @@ async def build_ai_assistant_payload(settings: dict[str, Any]) -> dict[str, Any]
     return {
         "settings": normalized_settings,
         "providers": providers,
-        "tools": list_available_tools(),
+        "tools": list_available_tools(allow_write_tools=bool(normalized_settings.get("allow_write_tools"))),
         "notes": [
             "配置会保存在本地 SQLite 的 system_settings 表中。",
             "固定厂商的网关地址、请求路径和附加参数均写死在代码中；通用 OpenAI 仅需额外填写 Base URL。",
             "提示词插件配置和模型 API Key 配置相互独立；多个提示词插件会共享同一批模型配置。",
+            "默认仅开放只读工具；如需发消息、改标签等写操作，请在设置中显式启用。",
         ],
     }
 
 
-def list_available_tools() -> list[dict[str, Any]]:
+def list_available_tools(*, allow_write_tools: bool = True) -> list[dict[str, Any]]:
     return [
         {
             "name": definition["name"],
@@ -1173,11 +1176,23 @@ def list_available_tools() -> list[dict[str, Any]]:
             "read_only": definition["read_only"],
         }
         for definition in get_tool_registry().values()
+        if allow_write_tools or definition.get("read_only", True)
     ]
 
 
-def get_tool_schemas() -> list[dict[str, Any]]:
-    return [definition["schema"] for definition in get_tool_registry().values()]
+def get_tool_schemas(*, allow_write_tools: bool = True) -> list[dict[str, Any]]:
+    return [
+        definition["schema"]
+        for definition in get_tool_registry().values()
+        if allow_write_tools or definition.get("read_only", True)
+    ]
+
+
+def is_write_tool(tool_name: str) -> bool:
+    definition = get_tool_registry().get(str(tool_name or "").strip())
+    if not isinstance(definition, dict):
+        return True
+    return not bool(definition.get("read_only", True))
 
 
 def _coerce_optional_int(value: Any) -> int | None:
@@ -2320,7 +2335,17 @@ class _McpHttpToolExecutor:
             return
 
 
-async def _execute_tool_call(tool_executor: _McpHttpToolExecutor, tool_name: str, arguments: dict[str, Any]) -> Any:
+async def _execute_tool_call(
+    tool_executor: _McpHttpToolExecutor,
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    allow_write_tools: bool = False,
+) -> Any:
+    if not allow_write_tools and is_write_tool(tool_name):
+        raise RuntimeError(
+            f"写操作工具 {tool_name} 已被禁用。请在智能插件设置中启用“允许写操作工具”后再试。"
+        )
     if tool_name in LOCAL_TOOL_REGISTRY:
         return await _execute_local_tool_call(tool_executor, tool_name, arguments)
     return await tool_executor.call_tool(tool_name, arguments)
@@ -2373,7 +2398,7 @@ async def run_ai_assistant(
         ),
         *history,
     ]
-    tool_schemas = get_tool_schemas()
+    tool_schemas = get_tool_schemas(allow_write_tools=bool(normalized_settings.get("allow_write_tools")))
     trace_entries: list[dict[str, Any]] = []
     max_tool_rounds = _clamp_int(selected_prompt_plugin.get("max_tool_rounds"), normalized_settings["max_tool_rounds"], 1, 500)
     selected_model = str(model_override or provider_meta["default_model"] or "").strip() or provider_meta["default_model"]
@@ -2499,7 +2524,12 @@ async def run_ai_assistant(
                     },
                 )
                 try:
-                    raw_result = await _execute_tool_call(tool_executor, tool_name, arguments)
+                    raw_result = await _execute_tool_call(
+                        tool_executor,
+                        tool_name,
+                        arguments,
+                        allow_write_tools=bool(normalized_settings.get("allow_write_tools")),
+                    )
                     compact_result = _compact_tool_result(raw_result)
                     tool_content = json.dumps({"ok": True, "result": compact_result}, ensure_ascii=False)
                 except Exception as exc:
