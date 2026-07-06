@@ -26,26 +26,13 @@ from utils.normalize import normalize_wxpid as _shared_normalize_wxpid
 
 PLUGIN_DIR = Path(__file__).with_name("plugins")
 PYTHON_SDK_VERSION = "2.0.0"
-MESSAGE_FILTER_ALIASES = {
-    "text": 1,
-    "image": 3,
-    "voice": 34,
-    "friend_request": 37,
-    "card": 42,
-    "video": 43,
-    "emoji": 47,
-    "location": 48,
-    "xml": 49,
-    "notice": 10000,
-    "sysmsg": 10002,
-    "file": 25769803825,
-}
+from message_types import MESSAGE_FILTER_ALIASES
 PLUGIN_SCOPE_ROOM_MODE = "_scope_room_mode"
 PLUGIN_SCOPE_ROOM_IDS = "_scope_room_ids"
 PLUGIN_SCOPE_FRIEND_MODE = "_scope_friend_mode"
 PLUGIN_SCOPE_FRIEND_LABELS = "_scope_friend_labels"
 PLUGIN_SCOPE_BIZ_MODE = "_scope_biz_mode"
-FRIEND_LABEL_CACHE_TTL_SECONDS = 60.0
+FRIEND_LABEL_CACHE_TTL_SECONDS = 300.0
 SCOPE_TARGET_ALIASES = {
     "room": "rooms",
     "rooms": "rooms",
@@ -544,14 +531,17 @@ class PythonPlugin:
         message_logger = self._logger.scope("message")
         event_payload = self._build_event_log_data(event)
         event_payload["hot_reload_changed"] = bool(hot_reload.get("changed"))
-        message_logger.info("插件开始处理消息", event_payload)
+        message_logger.debug("插件开始处理消息", event_payload)
         try:
             result = await self._call_hook(("handle_message", "handleMessage"), context, event, hot_reload=hot_reload)
         except Exception as exc:
             message_logger.error("插件处理消息失败", {**event_payload, **self._build_error_log_data(exc)})
             raise
         normalized_result = self._normalize_result(result)
-        message_logger.info("插件消息处理完成", {**event_payload, **self._build_result_log_data(normalized_result)})
+        if normalized_result.handled or normalized_result.stop_processing or normalized_result.detail:
+            message_logger.info("插件消息处理完成", {**event_payload, **self._build_result_log_data(normalized_result)})
+        else:
+            message_logger.debug("插件消息处理完成", {**event_payload, **self._build_result_log_data(normalized_result)})
         return normalized_result
 
     @property
@@ -798,7 +788,15 @@ class PluginManager:
             self._friend_label_cache[key] = (monotonic(), next_cache)
             return next_cache
 
-    async def _matches_plugin_scope(self, plugin: PythonPlugin, event: MessageEvent) -> bool:
+    def _needs_friend_label_scope(self) -> bool:
+        return any("friend_labels" in (plugin.scope_targets or ()) for plugin in self._plugins)
+
+    async def _matches_plugin_scope(
+        self,
+        plugin: PythonPlugin,
+        event: MessageEvent,
+        friend_labels_by_user: dict[str, set[str]] | None = None,
+    ) -> bool:
         if not plugin.scope_targets:
             return True
 
@@ -839,7 +837,10 @@ class PluginManager:
             return False
 
         try:
-            user_labels = (await self._get_friend_labels_by_user(event.normalized_wxpid)).get(target_wxid, set())
+            labels_source = friend_labels_by_user
+            if labels_source is None:
+                labels_source = await self._get_friend_labels_by_user(event.normalized_wxpid)
+            user_labels = labels_source.get(target_wxid, set())
         except Exception:
             logger.exception("读取插件 {} 的好友标签白名单失败", plugin.name)
             return False
@@ -942,10 +943,18 @@ class PluginManager:
             return self._build_blacklist_block_result(blacklist_subject_wxid)
 
         results: list[dict[str, Any]] = []
+        friend_labels_by_user: dict[str, set[str]] | None = None
+        if not event.is_group_message and self._needs_friend_label_scope():
+            try:
+                friend_labels_by_user = await self._get_friend_labels_by_user(event.normalized_wxpid)
+            except Exception:
+                logger.exception("预取好友标签缓存失败")
+                friend_labels_by_user = {}
+
         for plugin in self._plugins:
             if not plugin.should_handle_message(event):
                 continue
-            if not await self._matches_plugin_scope(plugin, event):
+            if not await self._matches_plugin_scope(plugin, event, friend_labels_by_user):
                 plugin.log_scope_skip(event, "scope_mismatch")
                 continue
             try:
