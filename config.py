@@ -29,6 +29,8 @@ SYSTEM_SETTING_FIELDS = (
     "image_download_flag",
     "image_download_wait",
     "image_download_timeout",
+    "api_token",
+    "callback_secret",
 )
 
 
@@ -128,6 +130,8 @@ def _read_legacy_webui_config(config_path: str | Path | None = None) -> dict[str
         "image_download_flag": int(webui_config.get("image_download_flag", 3)),
         "image_download_wait": _parse_bool(webui_config.get("image_download_wait", True), True),
         "image_download_timeout": int(webui_config.get("image_download_timeout", 15)),
+        "api_token": str(webui_config.get("api_token", "") or "").strip(),
+        "callback_secret": str(webui_config.get("callback_secret", "") or "").strip(),
     }
 
 
@@ -450,6 +454,8 @@ class PluginServiceSettings(BaseModel):
     image_download_flag: int = Field(3, ge=1, le=3, description="图片下载类型，1 缩略图，2 压缩图，3 原图")
     image_download_wait: bool = Field(True, description="是否等待图片下载完成")
     image_download_timeout: int = Field(15, ge=1, le=120, description="图片下载等待超时")
+    api_token: str = Field("", description="Web API 访问令牌，留空表示不启用鉴权")
+    callback_secret: str = Field("", description="微信消息回调共享密钥，留空表示不校验")
 
     @field_validator("callback_path")
     @classmethod
@@ -464,6 +470,11 @@ class PluginServiceSettings(BaseModel):
     @classmethod
     def normalize_base_url(cls, value: str) -> str:
         return value.rstrip("/")
+
+    @field_validator("api_token", "callback_secret", mode="before")
+    @classmethod
+    def normalize_optional_secret(cls, value: Any) -> str:
+        return str(value or "").strip()
 
     @field_validator("plugins", mode="before")
     @classmethod
