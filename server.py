@@ -1,11 +1,8 @@
 import asyncio
 import json
-from copy import deepcopy
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
-from os import PathLike
+from datetime import datetime
 from pathlib import Path
-import re
 from time import monotonic
 from typing import Any
 from uuid import uuid4
@@ -26,6 +23,24 @@ from ai_assistant import (
     resolve_ai_assistant_prompt_plugin,
     run_ai_assistant,
 )
+from ai_assistant_store import (
+    AI_ASSISTANT_JOB_ACTIVE_STATUSES,
+    AI_ASSISTANT_JOB_TERMINAL_STATUSES,
+    _activate_ai_assistant_conversation_payload,
+    _append_ai_assistant_chat_placeholders,
+    _clear_ai_assistant_conversation_payload,
+    _create_ai_assistant_conversation_payload,
+    _ensure_ai_assistant_conversation_payload,
+    _get_ai_assistant_conversation_history,
+    _get_ai_assistant_job,
+    _get_ai_assistant_job_task,
+    _mark_ai_assistant_job_stopped,
+    _now_iso,
+    _pop_ai_assistant_job_task,
+    _set_ai_assistant_job,
+    _set_ai_assistant_job_task,
+    _update_ai_assistant_message_payload,
+)
 from api_schemas import (
     AiAssistantChatJobCreateRequest,
     AiAssistantChatRequest,
@@ -44,9 +59,11 @@ from config import (
     normalize_plugin_module_name,
 )
 from contact_directory_cache import PLUGIN_TARGETS_CACHE_TTL_SECONDS
+from log_reader import build_log_payload as build_service_log_payload, format_local_datetime
 from manager import PluginManager
 from message import MessageEvent
 from plugin_config_payload import normalize_plugin_config_for_payload
+from upload_paths import resolve_project_relative_dir, sanitize_upload_path_segment
 from runtime import PLUGIN_LOG_LIMIT, RECENT_MESSAGE_LIMIT, PluginRuntime
 from security import (
     is_api_auth_enabled,
@@ -104,601 +121,6 @@ DIRECT_EXECUTE_PLUGIN_MODULES = {
     DOWNLOAD_RECENT_USER_IMAGES_PLUGIN_MODULE,
     DONT_REVOKE_PLUGIN_MODULE,
 }
-LOG_LINE_PATTERN = re.compile(
-    r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \| (?P<level>[A-Z]+)\s+\| (?P<module>[^:]+):(?P<function>[^:]+):(?P<line>\d+) - (?P<message>.*)$"
-)
-LOG_TIME_RANGE_TO_DELTA = {
-    "1h": timedelta(hours=1),
-    "6h": timedelta(hours=6),
-    "1d": timedelta(days=1),
-}
-AI_ASSISTANT_CONVERSATIONS_KEY = "ai_assistant_conversations"
-AI_ASSISTANT_CONVERSATION_LIMIT = 40
-AI_ASSISTANT_MESSAGE_LIMIT = 240
-AI_ASSISTANT_JOB_LIMIT = 80
-AI_ASSISTANT_JOB_TERMINAL_STATUSES = {"completed", "failed", "stopped"}
-AI_ASSISTANT_JOB_ACTIVE_STATUSES = {"queued", "running", "stopping"}
-ai_assistant_storage_lock = asyncio.Lock()
-ai_assistant_job_lock = asyncio.Lock()
-ai_assistant_jobs: dict[str, dict[str, Any]] = {}
-ai_assistant_job_tasks: dict[str, asyncio.Task[Any]] = {}
-
-
-def _now_iso() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
-
-
-def _safe_conversation_label(value: Any, limit: int = 32) -> str:
-    text = re.sub(r"\s+", " ", str(value or "").strip())
-    if not text:
-        return ""
-    return text if len(text) <= limit else f"{text[:limit]}..."
-
-
-def _default_ai_assistant_conversation_title(created_at: str | None = None) -> str:
-    if created_at:
-        try:
-            parsed = datetime.fromisoformat(created_at)
-            return f"新对话 {parsed.strftime('%m-%d %H:%M')}"
-        except ValueError:
-            pass
-    return "新对话"
-
-
-def _derive_ai_assistant_conversation_title(messages: list[dict[str, Any]] | None, fallback: str = "新对话") -> str:
-    for message in messages or []:
-        if str(message.get("role") or "").strip().lower() != "user":
-            continue
-        content = _safe_conversation_label(message.get("content"), limit=28)
-        if content:
-            return content
-    return fallback
-
-
-def _normalize_ai_assistant_tool_trace_payload(item: Any) -> dict[str, Any]:
-    payload = item if isinstance(item, dict) else {}
-    status = str(payload.get("status") or "ok").strip().lower()
-    if status not in {"running", "ok", "error"}:
-        status = "ok"
-    return {
-        "id": str(payload.get("id") or payload.get("name") or uuid4().hex),
-        "name": str(payload.get("name") or "unknown_tool"),
-        "arguments": payload.get("arguments") if isinstance(payload.get("arguments"), dict) else {},
-        "status": status,
-        "error": str(payload.get("error") or ""),
-    }
-
-
-def _normalize_ai_assistant_message_payload(message: Any) -> dict[str, Any]:
-    payload = message if isinstance(message, dict) else {}
-    role = str(payload.get("role") or "assistant").strip().lower()
-    if role not in {"user", "assistant"}:
-        role = "assistant"
-    created_at = str(payload.get("created_at") or "").strip() or _now_iso()
-    updated_at = str(payload.get("updated_at") or "").strip() or created_at
-    status = str(payload.get("status") or ("running" if role == "assistant" and payload.get("progress_message") else "completed")).strip().lower()
-    if status not in {"running", "completed", "failed", "stopped"}:
-        status = "completed"
-    error_flag = bool(payload.get("error"))
-    if error_flag and status == "completed":
-        status = "failed"
-    tool_traces = payload.get("tool_traces") if isinstance(payload.get("tool_traces"), list) else []
-    return {
-        "id": str(payload.get("id") or uuid4().hex),
-        "role": role,
-        "content": str(payload.get("content") or ""),
-        "reasoning_content": str(payload.get("reasoning_content") or ""),
-        "provider": str(payload.get("provider") or ""),
-        "provider_label": str(payload.get("provider_label") or ""),
-        "provider_config_id": str(payload.get("provider_config_id") or ""),
-        "prompt_plugin_id": str(payload.get("prompt_plugin_id") or ""),
-        "prompt_plugin_name": str(payload.get("prompt_plugin_name") or ""),
-        "model": str(payload.get("model") or ""),
-        "tool_traces": [_normalize_ai_assistant_tool_trace_payload(item) for item in tool_traces],
-        "progress_message": str(payload.get("progress_message") or ""),
-        "status": status,
-        "error": error_flag,
-        "created_at": created_at,
-        "updated_at": updated_at,
-    }
-
-
-def _build_new_ai_assistant_conversation(title: str = "") -> dict[str, Any]:
-    created_at = _now_iso()
-    normalized_title = _safe_conversation_label(title, limit=40) or _default_ai_assistant_conversation_title(created_at)
-    return {
-        "id": uuid4().hex,
-        "title": normalized_title,
-        "created_at": created_at,
-        "updated_at": created_at,
-        "messages": [],
-    }
-
-
-def _normalize_ai_assistant_conversation_payload(conversation: Any) -> dict[str, Any]:
-    payload = conversation if isinstance(conversation, dict) else {}
-    created_at = str(payload.get("created_at") or "").strip() or _now_iso()
-    messages = [_normalize_ai_assistant_message_payload(item) for item in (payload.get("messages") if isinstance(payload.get("messages"), list) else [])]
-    title = _safe_conversation_label(payload.get("title"), limit=40) or _derive_ai_assistant_conversation_title(messages, _default_ai_assistant_conversation_title(created_at))
-    return {
-        "id": str(payload.get("id") or uuid4().hex),
-        "title": title,
-        "created_at": created_at,
-        "updated_at": str(payload.get("updated_at") or "").strip() or created_at,
-        "messages": messages[-AI_ASSISTANT_MESSAGE_LIMIT:],
-    }
-
-
-def _normalize_ai_assistant_conversation_store(payload: Any) -> dict[str, Any]:
-    raw_payload = payload if isinstance(payload, dict) else {}
-    conversations = [_normalize_ai_assistant_conversation_payload(item) for item in (raw_payload.get("conversations") if isinstance(raw_payload.get("conversations"), list) else [])]
-    deduped: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    for conversation in conversations:
-        if conversation["id"] in seen_ids:
-            continue
-        seen_ids.add(conversation["id"])
-        deduped.append(conversation)
-    if not deduped:
-        deduped.append(_build_new_ai_assistant_conversation())
-    active_conversation_id = str(raw_payload.get("active_conversation_id") or "").strip()
-    if active_conversation_id not in {item["id"] for item in deduped}:
-        active_conversation_id = deduped[0]["id"]
-    return {
-        "active_conversation_id": active_conversation_id,
-        "conversations": deduped[:AI_ASSISTANT_CONVERSATION_LIMIT],
-    }
-
-
-def _load_ai_assistant_conversation_store() -> dict[str, Any]:
-    payload = WebuiSettingsStore().get_json_setting(AI_ASSISTANT_CONVERSATIONS_KEY, {})
-    return _normalize_ai_assistant_conversation_store(payload)
-
-
-def _save_ai_assistant_conversation_store(store: dict[str, Any]) -> dict[str, Any]:
-    normalized = _normalize_ai_assistant_conversation_store(store)
-    WebuiSettingsStore().set_json_setting(AI_ASSISTANT_CONVERSATIONS_KEY, normalized)
-    return normalized
-
-
-def _get_ai_assistant_conversation(store: dict[str, Any], conversation_id: str) -> dict[str, Any] | None:
-    normalized_id = str(conversation_id or "").strip()
-    for conversation in store.get("conversations", []):
-        if conversation["id"] == normalized_id:
-            return conversation
-    return None
-
-
-def _move_ai_assistant_conversation_to_front(store: dict[str, Any], conversation_id: str) -> None:
-    conversations = store.get("conversations", [])
-    for index, conversation in enumerate(conversations):
-        if conversation["id"] != conversation_id:
-            continue
-        conversations.insert(0, conversations.pop(index))
-        return
-
-
-def _build_ai_assistant_conversation_summary(conversation: dict[str, Any], active_conversation_id: str) -> dict[str, Any]:
-    messages = conversation.get("messages", []) if isinstance(conversation.get("messages"), list) else []
-    last_message = messages[-1] if messages else {}
-    last_preview = _safe_conversation_label(last_message.get("content") or last_message.get("progress_message") or "暂无消息", limit=54)
-    return {
-        "id": conversation["id"],
-        "title": conversation["title"],
-        "created_at": conversation["created_at"],
-        "updated_at": conversation["updated_at"],
-        "message_count": len(messages),
-        "last_message_preview": last_preview,
-        "last_message_role": str(last_message.get("role") or ""),
-        "has_running_message": any(str(message.get("status") or "") == "running" for message in messages),
-        "is_active": conversation["id"] == active_conversation_id,
-    }
-
-
-def _build_ai_assistant_conversation_payload(store: dict[str, Any] | None = None) -> dict[str, Any]:
-    normalized_store = _normalize_ai_assistant_conversation_store(store or _load_ai_assistant_conversation_store())
-    active_conversation_id = normalized_store["active_conversation_id"]
-    current_conversation = _get_ai_assistant_conversation(normalized_store, active_conversation_id) or normalized_store["conversations"][0]
-    return {
-        "active_conversation_id": active_conversation_id,
-        "conversations": [
-            _build_ai_assistant_conversation_summary(conversation, active_conversation_id)
-            for conversation in normalized_store["conversations"]
-        ],
-        "current_conversation": deepcopy(current_conversation),
-    }
-
-
-async def _mutate_ai_assistant_conversation_store(mutator) -> tuple[Any, dict[str, Any]]:
-    async with ai_assistant_storage_lock:
-        store = _load_ai_assistant_conversation_store()
-        result = mutator(store)
-        normalized_store = _save_ai_assistant_conversation_store(store)
-    return result, normalized_store
-
-
-async def _ensure_ai_assistant_conversation_payload() -> dict[str, Any]:
-    async with ai_assistant_storage_lock:
-        store = _save_ai_assistant_conversation_store(_load_ai_assistant_conversation_store())
-    return _build_ai_assistant_conversation_payload(store)
-
-
-async def _create_ai_assistant_conversation_payload() -> dict[str, Any]:
-    def mutator(store: dict[str, Any]) -> None:
-        conversation = _build_new_ai_assistant_conversation()
-        store["conversations"].insert(0, conversation)
-        store["active_conversation_id"] = conversation["id"]
-
-    _, store = await _mutate_ai_assistant_conversation_store(mutator)
-    return _build_ai_assistant_conversation_payload(store)
-
-
-async def _activate_ai_assistant_conversation_payload(conversation_id: str) -> dict[str, Any]:
-    normalized_id = str(conversation_id or "").strip()
-
-    def mutator(store: dict[str, Any]) -> None:
-        conversation = _get_ai_assistant_conversation(store, normalized_id)
-        if conversation is None:
-            raise ValueError("未找到指定对话")
-        store["active_conversation_id"] = normalized_id
-        _move_ai_assistant_conversation_to_front(store, normalized_id)
-
-    _, store = await _mutate_ai_assistant_conversation_store(mutator)
-    return _build_ai_assistant_conversation_payload(store)
-
-
-async def _clear_ai_assistant_conversation_payload(conversation_id: str) -> dict[str, Any]:
-    normalized_id = str(conversation_id or "").strip()
-
-    def mutator(store: dict[str, Any]) -> None:
-        conversation = _get_ai_assistant_conversation(store, normalized_id)
-        if conversation is None:
-            raise ValueError("未找到指定对话")
-        conversation["messages"] = []
-        conversation["updated_at"] = _now_iso()
-        conversation["title"] = _default_ai_assistant_conversation_title(conversation["updated_at"])
-        store["active_conversation_id"] = normalized_id
-        _move_ai_assistant_conversation_to_front(store, normalized_id)
-
-    _, store = await _mutate_ai_assistant_conversation_store(mutator)
-    return _build_ai_assistant_conversation_payload(store)
-
-
-async def _append_ai_assistant_chat_placeholders(
-    conversation_id: str,
-    prompt: str,
-    provider: str,
-    model: str,
-    prompt_plugin_id: str = "",
-    prompt_plugin_name: str = "",
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    normalized_id = str(conversation_id or "").strip()
-    normalized_prompt = str(prompt or "").strip()
-    if not normalized_prompt:
-        raise ValueError("问题不能为空")
-
-    context: dict[str, Any] = {}
-
-    def mutator(store: dict[str, Any]) -> None:
-        conversation = _get_ai_assistant_conversation(store, normalized_id)
-        if conversation is None:
-            raise ValueError("未找到指定对话")
-        now = _now_iso()
-        user_message = _normalize_ai_assistant_message_payload(
-            {
-                "id": uuid4().hex,
-                "role": "user",
-                "content": normalized_prompt,
-                "status": "completed",
-                "created_at": now,
-                "updated_at": now,
-            }
-        )
-        assistant_message = _normalize_ai_assistant_message_payload(
-            {
-                "id": uuid4().hex,
-                "role": "assistant",
-                "content": "",
-                "provider": provider,
-                "provider_label": PROVIDER_CATALOG.get(provider, {}).get("label", ""),
-                "prompt_plugin_id": str(prompt_plugin_id or ""),
-                "prompt_plugin_name": str(prompt_plugin_name or ""),
-                "model": model,
-                "status": "running",
-                "progress_message": "等待模型响应...",
-                "created_at": now,
-                "updated_at": now,
-            }
-        )
-        conversation["messages"] = [*conversation.get("messages", []), user_message, assistant_message][-AI_ASSISTANT_MESSAGE_LIMIT:]
-        conversation["updated_at"] = now
-        if not conversation.get("title") or str(conversation.get("title") or "").startswith("新对话"):
-            conversation["title"] = _derive_ai_assistant_conversation_title(conversation["messages"], _default_ai_assistant_conversation_title(now))
-        store["active_conversation_id"] = normalized_id
-        _move_ai_assistant_conversation_to_front(store, normalized_id)
-        context["user_message_id"] = user_message["id"]
-        context["assistant_message_id"] = assistant_message["id"]
-
-    _, store = await _mutate_ai_assistant_conversation_store(mutator)
-    return context, _build_ai_assistant_conversation_payload(store)
-
-
-async def _update_ai_assistant_message_payload(conversation_id: str, message_id: str, updates: dict[str, Any]) -> dict[str, Any]:
-    normalized_conversation_id = str(conversation_id or "").strip()
-    normalized_message_id = str(message_id or "").strip()
-    normalized_updates = dict(updates or {})
-
-    def mutator(store: dict[str, Any]) -> None:
-        conversation = _get_ai_assistant_conversation(store, normalized_conversation_id)
-        if conversation is None:
-            raise ValueError("未找到指定对话")
-        target_message = next((item for item in conversation.get("messages", []) if item.get("id") == normalized_message_id), None)
-        if target_message is None:
-            raise ValueError("未找到指定消息")
-        for key, value in normalized_updates.items():
-            target_message[key] = value
-        target_message["updated_at"] = _now_iso()
-        conversation["updated_at"] = target_message["updated_at"]
-        if conversation.get("messages") and (not conversation.get("title") or str(conversation.get("title") or "").startswith("新对话")):
-            conversation["title"] = _derive_ai_assistant_conversation_title(conversation["messages"], _default_ai_assistant_conversation_title(conversation["updated_at"]))
-        _move_ai_assistant_conversation_to_front(store, normalized_conversation_id)
-
-    _, store = await _mutate_ai_assistant_conversation_store(mutator)
-    return _build_ai_assistant_conversation_payload(store)
-
-
-async def _get_ai_assistant_message_payload(conversation_id: str, message_id: str) -> dict[str, Any] | None:
-    normalized_conversation_id = str(conversation_id or "").strip()
-    normalized_message_id = str(message_id or "").strip()
-    async with ai_assistant_storage_lock:
-        store = _load_ai_assistant_conversation_store()
-    conversation = _get_ai_assistant_conversation(store, normalized_conversation_id)
-    if conversation is None:
-        return None
-    message = next((item for item in conversation.get("messages", []) if item.get("id") == normalized_message_id), None)
-    return deepcopy(message) if message is not None else None
-
-
-async def _get_ai_assistant_conversation_history(conversation_id: str) -> list[dict[str, Any]]:
-    async with ai_assistant_storage_lock:
-        store = _load_ai_assistant_conversation_store()
-    conversation = _get_ai_assistant_conversation(store, conversation_id)
-    if conversation is None:
-        raise ValueError("未找到指定对话")
-    return [
-        {
-            "role": message.get("role", "assistant"),
-            "content": message.get("content", ""),
-            "reasoning_content": message.get("reasoning_content", ""),
-        }
-        for message in conversation.get("messages", [])
-        if str(message.get("role") or "") in {"user", "assistant"}
-    ]
-
-
-def _normalize_ai_assistant_job_payload(job: dict[str, Any]) -> dict[str, Any]:
-    payload = deepcopy(job)
-    payload.setdefault("progress_message", "")
-    payload.setdefault("stage", "queued")
-    payload.setdefault("status", "queued")
-    payload.setdefault("error", "")
-    payload.setdefault("provider_config_id", "")
-    payload.setdefault("prompt_plugin_id", "")
-    payload.setdefault("prompt_plugin_name", "")
-    payload.setdefault("created_at", _now_iso())
-    payload.setdefault("updated_at", payload["created_at"])
-    return payload
-
-
-async def _set_ai_assistant_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any]:
-    normalized_job_id = str(job_id or "").strip() or uuid4().hex
-    async with ai_assistant_job_lock:
-        current = _normalize_ai_assistant_job_payload(ai_assistant_jobs.get(normalized_job_id, {"id": normalized_job_id}))
-        current.update(updates)
-        current["id"] = normalized_job_id
-        current["updated_at"] = _now_iso()
-        ai_assistant_jobs[normalized_job_id] = current
-
-        completed_jobs = [
-            item for item in ai_assistant_jobs.values()
-            if str(item.get("status") or "") in AI_ASSISTANT_JOB_TERMINAL_STATUSES
-        ]
-        if len(completed_jobs) > AI_ASSISTANT_JOB_LIMIT:
-            completed_jobs.sort(key=lambda item: str(item.get("updated_at") or ""))
-            for stale in completed_jobs[:-AI_ASSISTANT_JOB_LIMIT]:
-                ai_assistant_jobs.pop(str(stale.get("id") or ""), None)
-
-        return deepcopy(current)
-
-
-async def _get_ai_assistant_job(job_id: str) -> dict[str, Any] | None:
-    normalized_job_id = str(job_id or "").strip()
-    async with ai_assistant_job_lock:
-        job = ai_assistant_jobs.get(normalized_job_id)
-        return deepcopy(job) if job is not None else None
-
-
-async def _set_ai_assistant_job_task(job_id: str, task: asyncio.Task[Any]) -> None:
-    normalized_job_id = str(job_id or "").strip()
-    async with ai_assistant_job_lock:
-        ai_assistant_job_tasks[normalized_job_id] = task
-
-
-async def _get_ai_assistant_job_task(job_id: str) -> asyncio.Task[Any] | None:
-    normalized_job_id = str(job_id or "").strip()
-    async with ai_assistant_job_lock:
-        return ai_assistant_job_tasks.get(normalized_job_id)
-
-
-async def _pop_ai_assistant_job_task(job_id: str) -> asyncio.Task[Any] | None:
-    normalized_job_id = str(job_id or "").strip()
-    async with ai_assistant_job_lock:
-        return ai_assistant_job_tasks.pop(normalized_job_id, None)
-
-
-async def _mark_ai_assistant_job_stopped(
-    job_id: str,
-    conversation_id: str,
-    assistant_message_id: str,
-    provider_key: str,
-    provider_config_id: str | None,
-    prompt_plugin_id: str | None,
-    prompt_plugin_name: str | None,
-    selected_model: str,
-    progress_message: str = "本次对话已手动停止。",
-) -> dict[str, Any]:
-    current_job = await _get_ai_assistant_job(job_id)
-    if current_job is not None and str(current_job.get("status") or "") == "stopped":
-        return current_job
-
-    current_message = await _get_ai_assistant_message_payload(conversation_id, assistant_message_id) or {}
-    preserved_content = str(current_message.get("content") or "").strip()
-    await _update_ai_assistant_message_payload(
-        conversation_id,
-        assistant_message_id,
-        {
-            "content": preserved_content or progress_message,
-            "reasoning_content": str(current_message.get("reasoning_content") or ""),
-            "tool_traces": current_message.get("tool_traces") if isinstance(current_message.get("tool_traces"), list) else [],
-            "progress_message": progress_message,
-            "status": "stopped",
-            "error": False,
-            "provider": str(current_message.get("provider") or provider_key),
-            "provider_label": str(current_message.get("provider_label") or PROVIDER_CATALOG.get(provider_key, {}).get("label", "")),
-            "provider_config_id": str(current_message.get("provider_config_id") or provider_config_id or ""),
-            "prompt_plugin_id": str(current_message.get("prompt_plugin_id") or prompt_plugin_id or ""),
-            "prompt_plugin_name": str(current_message.get("prompt_plugin_name") or prompt_plugin_name or ""),
-            "model": str(current_message.get("model") or selected_model),
-        },
-    )
-    return await _set_ai_assistant_job(
-        job_id,
-        {
-            "conversation_id": conversation_id,
-            "assistant_message_id": assistant_message_id,
-            "status": "stopped",
-            "stage": "stopped",
-            "progress_message": progress_message,
-            "error": "",
-            "provider": provider_key,
-            "provider_config_id": str(provider_config_id or ""),
-            "prompt_plugin_id": str(prompt_plugin_id or ""),
-            "prompt_plugin_name": str(prompt_plugin_name or ""),
-            "model": selected_model,
-        },
-    )
-
-
-def _format_local_datetime(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _parse_log_line(line: str) -> dict[str, Any] | None:
-    match = LOG_LINE_PATTERN.match(line)
-    if not match:
-        return None
-    groups = match.groupdict()
-    try:
-        groups["parsed_timestamp"] = datetime.strptime(groups["timestamp"], "%Y-%m-%d %H:%M:%S.%f")
-    except ValueError:
-        return None
-    return groups
-
-
-def _build_log_entries(lines: list[str]) -> list[dict[str, Any]]:
-    entries: list[dict[str, Any]] = []
-    for line_number, line in enumerate(lines, start=1):
-        parsed_line = _parse_log_line(line)
-        entries.append(
-            {
-                "line_number": line_number,
-                "raw": line,
-                "parsed": parsed_line is not None,
-                "timestamp": parsed_line["timestamp"] if parsed_line is not None else "",
-                "level": parsed_line["level"] if parsed_line is not None else "",
-                "module": parsed_line["module"] if parsed_line is not None else "",
-                "function": parsed_line["function"] if parsed_line is not None else "",
-                "source_line": int(parsed_line["line"]) if parsed_line is not None else None,
-                "message": parsed_line["message"] if parsed_line is not None else line,
-                "_parsed_timestamp": parsed_line["parsed_timestamp"] if parsed_line is not None else None,
-            }
-        )
-    return entries
-
-
-def _filter_log_entries(
-    entries: list[dict[str, Any]],
-    time_range: str,
-    level: str,
-    module_query: str,
-    keyword: str,
-) -> list[dict[str, Any]]:
-    normalized_time_range = (time_range or "all").strip().lower()
-    normalized_level = (level or "").strip().upper()
-    normalized_module_query = (module_query or "").strip().lower()
-    normalized_keyword = (keyword or "").strip().lower()
-    cutoff_time = None
-    if normalized_time_range in LOG_TIME_RANGE_TO_DELTA:
-        cutoff_time = datetime.now() - LOG_TIME_RANGE_TO_DELTA[normalized_time_range]
-
-    filtered_entries: list[dict[str, Any]] = []
-    for entry in entries:
-        parsed_timestamp = entry.get("_parsed_timestamp")
-        if cutoff_time is not None:
-            if parsed_timestamp is None or parsed_timestamp < cutoff_time:
-                continue
-        if normalized_level:
-            if str(entry.get("level") or "").upper() != normalized_level:
-                continue
-        if normalized_module_query:
-            searchable_target = " ".join(
-                filter(
-                    None,
-                    [
-                        str(entry.get("module") or ""),
-                        str(entry.get("function") or ""),
-                        str(entry.get("raw") or "") if not entry.get("parsed") else "",
-                    ],
-                )
-            )
-            if normalized_module_query not in searchable_target.lower():
-                continue
-        if normalized_keyword:
-            searchable_message = " ".join(
-                filter(
-                    None,
-                    [
-                        str(entry.get("message") or ""),
-                        str(entry.get("raw") or ""),
-                        str(entry.get("module") or ""),
-                        str(entry.get("function") or ""),
-                    ],
-                )
-            )
-            if normalized_keyword not in searchable_message.lower():
-                continue
-        filtered_entries.append(entry)
-    return filtered_entries
-
-
-def _sanitize_upload_path_segment(value: str | PathLike[str] | None, fallback: str = "file") -> str:
-    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip()).strip("._")
-    return sanitized or fallback
-
-
-def _resolve_project_relative_dir(value: str | None, default: str = "uploads") -> Path:
-    raw_value = str(value or default).strip().replace("\\", "/").strip("/")
-    relative_dir = Path(raw_value or default)
-    if relative_dir.is_absolute() or any(part == ".." for part in relative_dir.parts):
-        raise ValueError("上传目录必须是项目根目录下的相对路径")
-    resolved_dir = (PROJECT_ROOT / relative_dir).resolve()
-    project_root = PROJECT_ROOT.resolve()
-    if resolved_dir != project_root and project_root not in resolved_dir.parents:
-        raise ValueError("上传目录超出项目根目录范围")
-    return resolved_dir
-
 
 
 def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
@@ -938,7 +360,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
             "enabled": heartbeat_interval_seconds > 0,
             "interval_seconds": heartbeat_interval_seconds,
             "healthy": runtime.heartbeat_healthy,
-            "last_checked_at": _format_local_datetime(runtime.heartbeat_last_checked_at),
+            "last_checked_at": format_local_datetime(runtime.heartbeat_last_checked_at),
             "total": len(runtime.heartbeat_accounts),
             "users": list(runtime.heartbeat_accounts),
             "error": runtime.heartbeat_error,
@@ -962,7 +384,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
             "enabled_plugin_count": len(runtime.settings.plugins),
             "loaded_plugin_count": len(runtime.manager.plugins),
             "pending_restart_fields": settings_payload["restart_required_fields"],
-            "runtime_started_at": _format_local_datetime(runtime.started_at),
+            "runtime_started_at": format_local_datetime(runtime.started_at),
             "uptime_seconds": uptime_seconds,
             "heartbeat": {
                 "enabled": user_payload["enabled"],
@@ -1200,62 +622,6 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         finally:
             await _pop_ai_assistant_job_task(job_id)
 
-    def build_log_payload(
-        file_name: str | None = None,
-        limit: int = 200,
-        time_range: str = "all",
-        level: str = "",
-        module_query: str = "",
-        keyword: str = "",
-    ) -> dict:
-        if not LOG_DIR.exists():
-            return {
-                "files": [],
-                "active_file": None,
-                "lines": [],
-            }
-
-        limit = max(1, min(limit, 5000))
-        log_files = sorted(LOG_DIR.glob("*.log"), key=lambda path: path.stat().st_mtime, reverse=True)
-        if not log_files:
-            return {
-                "files": [],
-                "active_file": None,
-                "lines": [],
-            }
-
-        if file_name:
-            target_file = next((path for path in log_files if path.name == file_name), None)
-            if target_file is None:
-                raise HTTPException(status_code=404, detail="未找到指定日志文件")
-        else:
-            target_file = log_files[0]
-
-        all_lines = target_file.read_text(encoding="utf-8", errors="ignore").splitlines()
-        all_entries = _build_log_entries(all_lines)
-        matched_entries = _filter_log_entries(all_entries, time_range, level, module_query, keyword)
-        visible_entries = list(reversed(matched_entries[-limit:]))
-        return {
-            "files": [path.name for path in log_files],
-            "active_file": target_file.name,
-            "lines": [entry["raw"] for entry in visible_entries],
-            "entries": [
-                {key: value for key, value in entry.items() if key != "_parsed_timestamp"}
-                for entry in visible_entries
-            ],
-            "line_count": len(visible_entries),
-            "matched_line_count": len(matched_entries),
-            "total_line_count": len(all_lines),
-            "parsed_line_count": sum(1 for entry in all_entries if entry["parsed"]),
-            "filters": {
-                "time_range": time_range,
-                "level": level,
-                "module_query": module_query,
-                "keyword": keyword,
-            },
-            "updated_at": datetime.fromtimestamp(target_file.stat().st_mtime).astimezone().isoformat(timespec="seconds"),
-        }
-
     def build_plugin_log_payload(module_name: str | None = None, level: str = "", keyword: str = "", limit: int = 200) -> dict:
         limit = max(1, min(limit, PLUGIN_LOG_LIMIT))
         normalized_level = str(level or "").strip().upper()
@@ -1425,7 +791,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="仅支持上传常见图片格式")
 
         try:
-            target_dir = _resolve_project_relative_dir(upload_dir, default="uploads")
+            target_dir = resolve_project_relative_dir(upload_dir, default="uploads")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1436,7 +802,7 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="图片不能超过 10MB")
 
         target_dir.mkdir(parents=True, exist_ok=True)
-        file_stem = _sanitize_upload_path_segment(Path(original_file_name).stem, fallback="image")
+        file_stem = sanitize_upload_path_segment(Path(original_file_name).stem, fallback="image")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         target_path = target_dir / f"{file_stem}_{timestamp}{suffix}"
         target_path.write_bytes(content)
@@ -1690,7 +1056,15 @@ def create_app(settings: PluginServiceSettings | None = None) -> FastAPI:
         module_query: str = "",
         keyword: str = "",
     ) -> dict:
-        return build_log_payload(file_name, limit, time_range, level, module_query, keyword)
+        return build_service_log_payload(
+            LOG_DIR,
+            file_name=file_name,
+            limit=limit,
+            time_range=time_range,
+            level=level,
+            module_query=module_query,
+            keyword=keyword,
+        )
 
     @app.get("/api/plugin-logs")
     async def get_plugin_logs(module_name: str | None = None, level: str = "", keyword: str = "", limit: int = 200) -> dict:
