@@ -1,4 +1,4 @@
-import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-07";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-08";
 import {
     AI_ASSISTANT_ACTIVE_JOB_STATUSES,
     AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
@@ -6,26 +6,26 @@ import {
     MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS,
     OVERVIEW_POLL_INTERVAL_MS,
     OVERVIEW_RENDER_TICK_MS,
-} from "/static/js/polling-config.js?v=20260706-07";
-import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-07";
+} from "/static/js/polling-config.js?v=20260706-08";
+import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-08";
 import {
     escapeHtml,
     formatJson,
     highlightText,
     normalizeInlineText,
-} from "/static/js/dom-utils.js?v=20260706-07";
+} from "/static/js/dom-utils.js?v=20260706-08";
 import {
     formatStandardDateTime,
     formatUnixTimestamp,
     truncateText,
-} from "/static/js/format-utils.js?v=20260706-07";
+} from "/static/js/format-utils.js?v=20260706-08";
 import {
     getMessageTypeLabel,
     getPayloadValue,
     syncMessageTypeLabels,
-} from "/static/js/message-labels.js?v=20260706-07";
-import { tabMeta } from "/static/js/tab-meta.js?v=20260706-07";
-import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-07";
+} from "/static/js/message-labels.js?v=20260706-08";
+import { tabMeta } from "/static/js/tab-meta.js?v=20260706-08";
+import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-08";
 import {
     getConversationLabel,
     getMessageSummary,
@@ -33,16 +33,16 @@ import {
     getMessageTitle,
     getSenderLabel,
     renderAvatar,
-} from "/static/js/message-presenters.js?v=20260706-07";
+} from "/static/js/message-presenters.js?v=20260706-08";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260706-07";
-import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-07";
-import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-07";
+} from "/static/js/plugin-config-form.js?v=20260706-08";
+import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-08";
+import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-08";
 import {
     applySearchableChoiceFilter,
     applySearchableSelectFilter,
@@ -52,7 +52,7 @@ import {
     initializeSearchableChoiceFilters,
     selectSearchableSelectOption,
     syncScopeFieldVisibility,
-} from "/static/js/config-search.js?v=20260706-07";
+} from "/static/js/config-search.js?v=20260706-08";
 import {
     findPluginDynamicModelField,
     getPluginDynamicOptionPayloads,
@@ -73,9 +73,37 @@ import {
     WXPID_OPTION_ALL,
     WXPID_OPTION_DEFAULT,
     buildRoomMsgSummaryTimeWindow,
-} from "/static/js/plugin-helpers.js?v=20260706-07";
-import { buildOverviewCards } from "/static/js/overview-cards.js?v=20260706-07";
-import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-07";
+} from "/static/js/plugin-helpers.js?v=20260706-08";
+import { buildOverviewCards } from "/static/js/overview-cards.js?v=20260706-08";
+import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-08";
+import { waitForDuration } from "/static/js/async-utils.js?v=20260706-08";
+import { renderServiceLogs, syncLogFiltersFromControls as readLogFiltersFromControls } from "/static/js/log-viewer.js?v=20260706-08";
+import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-08";
+import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-08";
+import {
+    createAiAssistantConfigId,
+    createAiAssistantPromptPluginId,
+    decodeAiAssistantModelSelection,
+    encodeAiAssistantModelSelection,
+    findAiAssistantProvider,
+    findAiAssistantProviderConfigMeta,
+    getAiAssistantCurrentConversation as readAiAssistantCurrentConversation,
+    getAiAssistantCurrentConversationId as readAiAssistantCurrentConversationId,
+    getAiAssistantProviderSettings as readAiAssistantProviderSettings,
+    getAiAssistantSettings as readAiAssistantSettings,
+    isAiAssistantJobActive,
+    isAiAssistantJobTerminal,
+    listAiAssistantConversations,
+    listAiAssistantPromptPlugins,
+    listAiAssistantProviderConfigs,
+    listAiAssistantProviders,
+    normalizeAiAssistantJobStatus,
+    normalizeAiAssistantModelOptions,
+    resolveAiAssistantCurrentSelection,
+    resolveAiAssistantPromptPlugin,
+    resolveAiAssistantProviderConfig,
+    resolveAiAssistantProviderSelection,
+} from "/static/js/ai-assistant-data.js?v=20260706-08";
 
 const state = {
     activeTab: "dashboard",
@@ -1146,49 +1174,6 @@ function renderMessages() {
     `;
 }
 
-function renderPluginCards(targetElement, plugins, emptyText, pluginKind) {
-    if (!targetElement) {
-        return;
-    }
-
-    if (!plugins.length) {
-        targetElement.innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
-        return;
-    }
-
-    targetElement.innerHTML = plugins.map((plugin) => {
-        const configKeys = Object.keys(plugin.config || {});
-        const configSummary = configKeys.length ? `当前已配置 ${configKeys.length} 项自定义参数。` : "当前未配置自定义参数。";
-        const isFeaturePlugin = pluginKind === "feature";
-        const isManualExecutePlugin = isFeaturePlugin && !plugin?.capabilities?.tick_hook;
-        const manualExecution = normalizeManualPluginExecution(plugin);
-        const primaryButton = isManualExecutePlugin
-            ? `<button class="button ${manualExecution.active ? "secondary" : "primary"}" type="button" data-action="${manualExecution.active ? "stop-plugin-execution" : "execute-plugin"}" data-plugin="${escapeHtml(plugin.module)}">${manualExecution.active ? "停止插件" : "执行插件"}</button>`
-            : `<button class="button ${plugin.enabled ? "secondary" : "primary"}" type="button" data-action="toggle-plugin" data-plugin="${escapeHtml(plugin.module)}" data-enabled="${plugin.enabled ? "0" : "1"}">${plugin.enabled ? "停止插件" : "启动插件"}</button>`;
-        return `
-            <article class="plugin-card">
-                <div class="plugin-head">
-                    <div>
-                        <h4 class="plugin-name">${escapeHtml(plugin.name)}</h4>
-                        <div class="plugin-module">${escapeHtml(plugin.module)}</div>
-                    </div>
-                    <div class="badge-row">
-                        <span class="badge ${plugin.enabled ? "good" : ""}">${plugin.enabled ? "已启用" : "未启用"}</span>
-                        <span class="badge ${plugin.loaded ? "good" : plugin.loadable ? "" : "bad"}">${plugin.loaded ? "已加载" : plugin.loadable ? "可加载" : "加载失败"}</span>
-                    </div>
-                </div>
-                <p class="plugin-copy">${escapeHtml(plugin.description || "该插件未提供额外说明。")}</p>
-                ${plugin.error ? `<div class="settings-alert is-visible bad">${escapeHtml(plugin.error)}</div>` : ""}
-                <div class="detail-meta">${escapeHtml(configSummary)}</div>
-                <div class="field-actions">
-                    ${primaryButton}
-                    <button class="button ghost" type="button" data-action="open-plugin-config" data-plugin="${escapeHtml(plugin.module)}">修改配置</button>
-                </div>
-            </article>
-        `;
-    }).join("");
-}
-
 function renderPlugins() {
     const messagePlugins = sortPluginsForDisplay(state.plugins.filter((plugin) => plugin.message_dependent !== false));
     const featurePlugins = sortPluginsForDisplay(state.plugins.filter((plugin) => plugin.message_dependent === false));
@@ -1197,98 +1182,19 @@ function renderPlugins() {
 }
 
 function renderPluginLogs() {
-    if (!state.pluginLogs) {
-        elements.pluginLogMeta.textContent = "尚未加载插件日志。";
-        elements.pluginLogList.innerHTML = '<div class="empty-state">还没有插件日志。</div>';
-        elements.pluginLogDetail.innerHTML = '<div class="empty-state">请选择左侧日志查看详情。</div>';
-        return;
-    }
-
-    const options = [{ module: "", name: "全部插件" }, ...(state.pluginLogs.available_plugins || [])];
-    const levelOptions = ["", ...(state.pluginLogs.available_levels || [])];
-    elements.pluginLogFilter.innerHTML = options.map((item) => `
-        <option value="${escapeHtml(item.module || "")}" ${(item.module || "") === (state.selectedPluginLogModule || "") ? "selected" : ""}>${escapeHtml(item.name)}</option>
-    `).join("");
-    elements.pluginLogLevelFilter.innerHTML = levelOptions.map((item) => `
-        <option value="${escapeHtml(item || "")}" ${(item || "") === (state.selectedPluginLogLevel || "") ? "selected" : ""}>${escapeHtml(item || "全部级别")}</option>
-    `).join("");
-    elements.pluginLogKeywordFilter.value = state.selectedPluginLogKeyword || "";
-
-    const activePluginName = state.selectedPluginLogModule
-        ? getPluginDisplayName(state.selectedPluginLogModule, state.selectedPluginLogModule)
-        : "全部插件";
-    const activeLevel = state.selectedPluginLogLevel || "全部级别";
-    const activeKeyword = state.selectedPluginLogKeyword || "";
-    elements.pluginLogMeta.textContent = `当前筛选：${activePluginName} / ${activeLevel}${activeKeyword ? ` / 关键词 ${activeKeyword}` : ""}，匹配 ${state.pluginLogs.filtered_total || 0} 条日志，共缓存 ${state.pluginLogs.total || 0} 条，最新时间 ${state.pluginLogs.updated_at || "未知"}`;
-
-    if (!state.pluginLogs.logs?.length) {
-        elements.pluginLogList.innerHTML = '<div class="empty-state">当前筛选条件下没有插件日志。</div>';
-        elements.pluginLogDetail.innerHTML = '<div class="empty-state">当前筛选条件下没有可展示的日志详情。</div>';
-        return;
-    }
-
-    if (
-        !state.selectedPluginLogId
-        || !state.pluginLogs.logs.some((item) => item.internal_id === state.selectedPluginLogId)
-    ) {
-        state.selectedPluginLogId = state.pluginLogs.logs[0].internal_id;
-    }
-
-    elements.pluginLogList.innerHTML = state.pluginLogs.logs.map((item) => {
-        const scope = normalizeInlineText(item.scope || "");
-        const preview = truncateText(normalizeInlineText(item.message || "无日志内容"), 92);
-        return `
-            <button class="plugin-log-item ${item.internal_id === state.selectedPluginLogId ? "is-active" : ""}" data-plugin-log-id="${item.internal_id}" type="button">
-                <div class="plugin-log-item-head">
-                    <div class="plugin-log-primary">
-                        <h4 class="plugin-log-title">${escapeHtml(getPluginDisplayName(item.module, item.plugin || item.module || "未知插件"))}</h4>
-                        <div class="detail-meta plugin-log-subline">${escapeHtml(item.recorded_at || "未知时间")}${scope ? ` · ${escapeHtml(scope)}` : ""}${item.module ? ` · ${escapeHtml(item.module)}` : ""}</div>
-                    </div>
-                    <div class="badge-row">
-                        <span class="badge ${getLogTone(item.level)}">${escapeHtml(item.level || "INFO")}</span>
-                    </div>
-                </div>
-                <p class="plugin-log-preview">${escapeHtml(preview)}</p>
-            </button>
-        `;
-    }).join("");
-
-    const selected = getPluginLogById(state.selectedPluginLogId);
-    if (!selected) {
-        elements.pluginLogDetail.innerHTML = '<div class="empty-state">请选择左侧日志查看详情。</div>';
-        return;
-    }
-
-    const selectedScope = normalizeInlineText(selected.scope || "");
-    const selectedData = selected.data;
-    const hasSelectedData = hasPluginLogData(selectedData);
-    elements.pluginLogDetail.innerHTML = `
-        <div class="detail-head">
-            <div>
-                <h4 class="detail-title">${escapeHtml(getPluginDisplayName(selected.module, selected.plugin || selected.module || "未知插件"))}</h4>
-            </div>
-            <div class="badge-row">
-                <span class="badge ${getLogTone(selected.level)}">${escapeHtml(selected.level || "INFO")}</span>
-                ${selectedScope ? `<span class="badge">${escapeHtml(selectedScope)}</span>` : ""}
-            </div>
-        </div>
-        <div class="detail-section">
-            <h5 class="detail-section-title">日志信息</h5>
-            <div class="detail-meta">记录时间：${escapeHtml(selected.recorded_at || "未知")}</div>
-            <div class="detail-meta">插件模块：${escapeHtml(selected.module || "未知")}</div>
-            <div class="detail-meta">插件名称：${escapeHtml(selected.plugin || getPluginDisplayName(selected.module))}</div>
-            <div class="detail-meta">日志级别：${escapeHtml(selected.level || "INFO")}</div>
-            <div class="detail-meta">日志作用域：${escapeHtml(selectedScope || "无")}</div>
-        </div>
-        <div class="detail-section">
-            <h5 class="detail-section-title">日志消息</h5>
-            <div class="detail-text">${escapeHtml(selected.message || "无日志内容")}</div>
-        </div>
-        <div class="detail-section">
-            <h5 class="detail-section-title">结构化数据</h5>
-            ${hasSelectedData ? `<pre class="code-block plugin-log-data">${escapeHtml(formatJson(selectedData))}</pre>` : '<div class="empty-state">这条日志没有附加结构化数据。</div>'}
-        </div>
-    `;
+    const result = renderPluginLogsView({
+        elements,
+        pluginLogs: state.pluginLogs,
+        selection: {
+            selectedPluginLogId: state.selectedPluginLogId,
+            selectedPluginLogModule: state.selectedPluginLogModule,
+            selectedPluginLogLevel: state.selectedPluginLogLevel,
+            selectedPluginLogKeyword: state.selectedPluginLogKeyword,
+        },
+        resolvePluginDisplayName: (moduleName, fallback) => getPluginDisplayName(moduleName, fallback),
+        hasPluginLogData,
+    });
+    state.selectedPluginLogId = result.selectedPluginLogId;
 }
 
 function renderSettings() {
@@ -1330,36 +1236,6 @@ function renderSettings() {
         const suffix = authHints.length ? ` ${authHints.join("，")}。` : "";
         elements.settingsAlert.textContent = `当前 SQLite 配置与运行时配置一致。保存后可热重载的字段会立即生效。${suffix}`;
     }
-}
-
-function waitForDuration(ms) {
-    return new Promise((resolve) => {
-        window.setTimeout(resolve, ms);
-    });
-}
-
-function getAiAssistantConversations() {
-    return Array.isArray(state.aiAssistant?.conversations) ? state.aiAssistant.conversations : [];
-}
-
-function getAiAssistantCurrentConversation() {
-    return state.aiAssistant?.current_conversation || null;
-}
-
-function getAiAssistantCurrentConversationId() {
-    return String(state.aiAssistant?.active_conversation_id || getAiAssistantCurrentConversation()?.id || "");
-}
-
-function normalizeAiAssistantJobStatus(status) {
-    return String(status || "").trim().toLowerCase();
-}
-
-function isAiAssistantJobActive(job) {
-    return AI_ASSISTANT_ACTIVE_JOB_STATUSES.has(normalizeAiAssistantJobStatus(job?.status));
-}
-
-function isAiAssistantJobTerminal(job) {
-    return AI_ASSISTANT_TERMINAL_JOB_STATUSES.has(normalizeAiAssistantJobStatus(job?.status));
 }
 
 function applyAiAssistantPayload(payload, preserveSelection = true) {
@@ -1492,211 +1368,77 @@ function renderAiConversation() {
     elements.aiAssistantConversation.scrollTop = elements.aiAssistantConversation.scrollHeight;
 }
 
+function getAiAssistantConversations() {
+    return listAiAssistantConversations(state.aiAssistant);
+}
+
+function getAiAssistantCurrentConversation() {
+    return readAiAssistantCurrentConversation(state.aiAssistant);
+}
+
+function getAiAssistantCurrentConversationId() {
+    return readAiAssistantCurrentConversationId(state.aiAssistant);
+}
+
 function getAiAssistantProviders() {
-    return Array.isArray(state.aiAssistant?.providers) ? state.aiAssistant.providers : [];
+    return listAiAssistantProviders(state.aiAssistant);
 }
 
 function getAiAssistantSettings() {
-    return state.aiAssistant?.settings || {};
+    return readAiAssistantSettings(state.aiAssistant);
 }
 
 function getAiAssistantPromptPlugins() {
-    return Array.isArray(getAiAssistantSettings().prompt_plugins) ? getAiAssistantSettings().prompt_plugins : [];
+    return listAiAssistantPromptPlugins(getAiAssistantSettings());
 }
 
 function getAiAssistantPromptPlugin(promptPluginId = state.aiAssistantUi.selectedPromptPluginId) {
-    const promptPlugins = getAiAssistantPromptPlugins();
-    const normalizedPromptPluginId = String(promptPluginId || "").trim();
-    const activePromptPluginId = String(getAiAssistantSettings().active_prompt_plugin_id || "").trim();
-    return promptPlugins.find((plugin) => plugin.id === normalizedPromptPluginId)
-        || promptPlugins.find((plugin) => plugin.id === activePromptPluginId)
-        || promptPlugins[0]
-        || null;
+    return resolveAiAssistantPromptPlugin(
+        getAiAssistantSettings(),
+        getAiAssistantPromptPlugins(),
+        promptPluginId
+    );
 }
 
 function getAiAssistantProvider(providerKey = state.aiAssistantUi.selectedProvider) {
-    return getAiAssistantProviders().find((provider) => provider.key === providerKey) || null;
+    return findAiAssistantProvider(getAiAssistantProviders(), providerKey);
 }
 
 function getAiAssistantProviderSettings(providerKey = state.aiAssistantUi.selectedProvider) {
-    return getAiAssistantSettings().providers?.[providerKey] || {};
+    return readAiAssistantProviderSettings(getAiAssistantSettings(), providerKey);
 }
 
 function getAiAssistantProviderConfigs(providerKey = state.aiAssistantUi.selectedProvider) {
-    const providerSettings = getAiAssistantProviderSettings(providerKey);
-    return Array.isArray(providerSettings.configs) ? providerSettings.configs : [];
+    return listAiAssistantProviderConfigs(getAiAssistantSettings(), providerKey);
 }
 
 function getAiAssistantProviderConfigMeta(providerKey = state.aiAssistantUi.selectedProvider, configId = state.aiAssistantUi.selectedProviderConfigId) {
-    const provider = getAiAssistantProvider(providerKey);
-    return Array.isArray(provider?.configs)
-        ? (provider.configs.find((config) => config.id === String(configId || "").trim()) || null)
-        : null;
+    return findAiAssistantProviderConfigMeta(getAiAssistantProvider(providerKey), configId);
 }
 
 function getAiAssistantProviderConfig(providerKey = state.aiAssistantUi.selectedProvider, configId = state.aiAssistantUi.selectedProviderConfigId) {
-    const configs = getAiAssistantProviderConfigs(providerKey);
-    const normalizedConfigId = String(configId || "").trim();
-    return configs.find((config) => config.id === normalizedConfigId)
-        || configs.find((config) => config.enabled && config.api_key)
-        || configs.find((config) => config.api_key)
-        || configs[0]
-        || null;
-}
-
-function encodeAiAssistantModelSelection(configId = "", model = "") {
-    return `${encodeURIComponent(String(configId || "").trim())}::${encodeURIComponent(String(model || "").trim())}`;
-}
-
-function decodeAiAssistantModelSelection(value) {
-    const [rawConfigId = "", rawModel = ""] = String(value || "").split("::");
-    return {
-        configId: decodeURIComponent(rawConfigId || ""),
-        model: decodeURIComponent(rawModel || ""),
-    };
-}
-
-function normalizeAiAssistantModelOptions(provider) {
-    const normalizedOptions = [];
-    const seenSelections = new Set();
-    const pushOption = (value, label = value, configId = "", configName = "") => {
-        const normalizedValue = String(value || "").trim();
-        const normalizedLabel = String(label || normalizedValue).trim() || normalizedValue;
-        const normalizedConfigId = String(configId || "").trim();
-        const selectionValue = encodeAiAssistantModelSelection(normalizedConfigId, normalizedValue);
-        if (!normalizedValue || seenSelections.has(selectionValue)) {
-            return;
-        }
-        seenSelections.add(selectionValue);
-        normalizedOptions.push({
-            label: normalizedLabel,
-            value: normalizedValue,
-            configId: normalizedConfigId,
-            configName: String(configName || "").trim(),
-            selectionValue,
-        });
-    };
-
-    const rawOptions = Array.isArray(provider?.model_options) ? provider.model_options : [];
-    for (const option of rawOptions) {
-        if (option && typeof option === "object") {
-            pushOption(
-                option.value ?? option.label,
-                option.label ?? option.value,
-                option.config_id ?? "",
-                option.config_name ?? ""
-            );
-        } else {
-            pushOption(option);
-        }
-    }
-
-    const providerConfigs = Array.isArray(provider?.configs) ? provider.configs : [];
-    for (const providerConfig of providerConfigs) {
-        if (!providerConfig?.configured) {
-            continue;
-        }
-        const fallbackModel = String(provider?.default_model || "").trim();
-        if (fallbackModel) {
-            pushOption(
-                fallbackModel,
-                `${providerConfig.name || "未命名配置"} / ${fallbackModel}`,
-                providerConfig.id || "",
-                providerConfig.name || ""
-            );
-        }
-    }
-
-    return normalizedOptions;
+    return resolveAiAssistantProviderConfig(
+        getAiAssistantProviderSettings(providerKey),
+        getAiAssistantProvider(providerKey),
+        configId
+    );
 }
 
 function getAiAssistantCurrentSelection() {
-    const selectedPromptPlugin = getAiAssistantPromptPlugin();
-    const provider = getAiAssistantProvider() || getAiAssistantProviders()[0] || null;
-    if (!provider) {
-        return {
-            provider: null,
-            providerSettings: {},
-            modelOptions: [],
-            selectedConfig: null,
-            selectedConfigMeta: null,
-            selectedModel: "",
-            selectionValue: "",
-            selectedPromptPlugin,
-        };
-    }
-
-    const providerSettings = getAiAssistantProviderSettings(provider.key);
-    const modelOptions = normalizeAiAssistantModelOptions(provider);
-    const preferredConfigId = state.aiAssistantUi.selectedProviderConfigId;
-    const preferredModel = state.aiAssistantUi.selectedModel;
-    let matchedOption = modelOptions.find((option) => option.configId === preferredConfigId && option.value === preferredModel);
-    if (!matchedOption && preferredConfigId) {
-        matchedOption = modelOptions.find((option) => option.configId === preferredConfigId);
-    }
-    if (!matchedOption && preferredModel) {
-        matchedOption = modelOptions.find((option) => option.value === preferredModel);
-    }
-
-    const preferredConfig = getAiAssistantProviderConfig(provider.key, preferredConfigId);
-    if (!matchedOption && preferredConfig) {
-        matchedOption = modelOptions.find((option) => option.configId === preferredConfig.id) || null;
-    }
-    if (!matchedOption) {
-        matchedOption = modelOptions[0] || null;
-    }
-
-    const selectedConfigId = matchedOption?.configId || preferredConfig?.id || "";
-    const selectedConfig = getAiAssistantProviderConfig(provider.key, selectedConfigId);
-    const selectedConfigMeta = getAiAssistantProviderConfigMeta(provider.key, selectedConfigId);
-    const selectedModel = matchedOption?.value || preferredModel || provider.default_model || "";
-
-    return {
-        provider,
-        providerSettings,
-        modelOptions,
-        selectedConfig,
-        selectedConfigMeta,
-        selectedModel,
-        selectionValue: matchedOption?.selectionValue || encodeAiAssistantModelSelection(selectedConfig?.id || "", selectedModel),
-        selectedPromptPlugin,
-    };
+    return resolveAiAssistantCurrentSelection(state.aiAssistant, state.aiAssistantUi);
 }
 
 function setAiAssistantProviderSelection(providerKey, preferredModel = "", preferredConfigId = "") {
-    const providers = getAiAssistantProviders();
-    if (!providers.length) {
-        state.aiAssistantUi.selectedProvider = "";
-        state.aiAssistantUi.selectedProviderConfigId = "";
-        state.aiAssistantUi.selectedModel = "";
-        return;
-    }
-
-    const selectedProvider = providers.find((provider) => provider.key === providerKey) || providers[0];
-    const modelOptions = normalizeAiAssistantModelOptions(selectedProvider);
-    const normalizedPreferredModel = String(preferredModel || "").trim();
-    const normalizedPreferredConfigId = String(preferredConfigId || "").trim();
-    let matchedOption = modelOptions.find(
-        (option) => option.configId === normalizedPreferredConfigId && option.value === normalizedPreferredModel
+    const nextSelection = resolveAiAssistantProviderSelection(
+        getAiAssistantSettings(),
+        getAiAssistantProviders(),
+        providerKey,
+        preferredModel,
+        preferredConfigId
     );
-    if (!matchedOption && normalizedPreferredConfigId) {
-        matchedOption = modelOptions.find((option) => option.configId === normalizedPreferredConfigId);
-    }
-    if (!matchedOption && normalizedPreferredModel) {
-        matchedOption = modelOptions.find((option) => option.value === normalizedPreferredModel);
-    }
-
-    const fallbackConfig = getAiAssistantProviderConfig(selectedProvider.key, normalizedPreferredConfigId);
-    if (!matchedOption && fallbackConfig) {
-        matchedOption = modelOptions.find((option) => option.configId === fallbackConfig.id) || null;
-    }
-    if (!matchedOption) {
-        matchedOption = modelOptions[0] || null;
-    }
-
-    state.aiAssistantUi.selectedProvider = selectedProvider.key;
-    state.aiAssistantUi.selectedProviderConfigId = matchedOption?.configId || fallbackConfig?.id || "";
-    state.aiAssistantUi.selectedModel = matchedOption?.value || normalizedPreferredModel || selectedProvider.default_model || "";
+    state.aiAssistantUi.selectedProvider = nextSelection.selectedProvider;
+    state.aiAssistantUi.selectedProviderConfigId = nextSelection.selectedProviderConfigId;
+    state.aiAssistantUi.selectedModel = nextSelection.selectedModel;
 }
 
 function syncAiAssistantUiFromPayload(preserveSelection = true) {
@@ -1724,14 +1466,6 @@ function syncAiAssistantUiFromPayload(preserveSelection = true) {
     const preferredModel = preserveSelection ? state.aiAssistantUi.selectedModel : "";
     const preferredConfigId = preserveSelection ? state.aiAssistantUi.selectedProviderConfigId : "";
     setAiAssistantProviderSelection(preferredProvider, preferredModel, preferredConfigId);
-}
-
-function createAiAssistantConfigId(providerKey = "provider") {
-    return `${String(providerKey || "provider").trim()}-config-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createAiAssistantPromptPluginId() {
-    return `prompt-plugin-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function buildAiAssistantPromptPluginCardMarkup(promptPlugin = {}) {
@@ -2250,100 +1984,7 @@ function renderAiAssistant() {
 }
 
 function renderLogs() {
-    if (!state.logs) {
-        elements.logMeta.textContent = "尚未加载日志。";
-        elements.logViewer.innerHTML = "";
-        return;
-    }
-
-    elements.logTimeRange.value = state.logFilters.timeRange;
-    elements.logLevelFilter.value = state.logFilters.level;
-    elements.logModuleFilter.value = state.logFilters.moduleQuery;
-    elements.logKeywordFilter.value = state.logFilters.keyword;
-    elements.logFileSelect.innerHTML = (state.logs.files || []).map((fileName) => `
-        <option value="${escapeHtml(fileName)}" ${fileName === state.logs.active_file ? "selected" : ""}>${escapeHtml(fileName)}</option>
-    `).join("");
-    const filters = state.logs.filters || {};
-    const timeRangeLabels = {
-        "1h": "最近一小时",
-        "6h": "最近6小时",
-        "1d": "最近一天",
-        all: "全部",
-    };
-    const filterChips = [];
-    if (filters.time_range && filters.time_range !== "all") {
-        filterChips.push(`时间 ${timeRangeLabels[filters.time_range] || filters.time_range}`);
-    }
-    if (filters.level) {
-        filterChips.push(`级别 ${filters.level}`);
-    }
-    if (filters.module_query) {
-        filterChips.push(`模块/函数 ${filters.module_query}`);
-    }
-    if (filters.keyword) {
-        filterChips.push(`关键词 ${filters.keyword}`);
-    }
-
-    elements.logMeta.innerHTML = `
-        <div class="log-meta-row">
-            <span class="log-meta-chip">文件 ${escapeHtml(state.logs.active_file || "无")}</span>
-            <span class="log-meta-chip">总行数 ${escapeHtml(String(state.logs.total_line_count || 0))}</span>
-            <span class="log-meta-chip">命中 ${escapeHtml(String(state.logs.matched_line_count || 0))}</span>
-            <span class="log-meta-chip">展示 ${escapeHtml(String(state.logs.line_count || 0))}</span>
-            <span class="log-meta-chip">可解析 ${escapeHtml(String(state.logs.parsed_line_count || 0))}</span>
-        </div>
-        <div class="log-meta-row">
-            <span class="log-meta-chip is-muted">更新时间 ${escapeHtml(formatStandardDateTime(state.logs.updated_at) || state.logs.updated_at || "未知")}</span>
-            ${filterChips.length ? filterChips.map((item) => `<span class="log-meta-chip is-filter">${escapeHtml(item)}</span>`).join("") : '<span class="log-meta-chip is-muted">未启用筛选</span>'}
-        </div>
-    `;
-
-    const entries = Array.isArray(state.logs.entries)
-        ? state.logs.entries
-        : (state.logs.lines || []).map((raw, index) => ({
-            line_number: index + 1,
-            raw,
-            parsed: false,
-            timestamp: "",
-            level: "RAW",
-            module: "",
-            function: "",
-            source_line: null,
-            message: raw,
-        }));
-
-    if (!entries.length) {
-        elements.logViewer.innerHTML = '<div class="empty-state">当前筛选条件下没有日志输出。</div>';
-        return;
-    }
-
-    const rawHighlightQueries = [filters.keyword, filters.module_query].filter(Boolean);
-    elements.logViewer.innerHTML = entries.map((entry) => {
-        const levelText = entry.parsed ? (entry.level || "INFO") : "RAW";
-        const sourceText = entry.parsed
-            ? `${entry.module || "unknown"}:${entry.function || "unknown"}`
-            : "原始日志片段";
-        const timeText = entry.timestamp || `文件行 ${entry.line_number}`;
-        const lineText = entry.source_line ? `L${entry.source_line}` : `#${entry.line_number}`;
-        const messageText = entry.parsed ? (entry.message || entry.raw || "") : (entry.raw || "");
-        const showRawLine = Boolean(entry.parsed && rawHighlightQueries.length);
-        return `
-            <article class="log-entry ${entry.parsed ? "" : "is-raw"}">
-                <div class="log-entry-head">
-                    <div class="log-entry-main">
-                        <span class="log-level-pill ${getLogLevelClass(levelText)}">${escapeHtml(levelText)}</span>
-                        <span class="log-entry-source">${highlightText(sourceText, [filters.module_query])}</span>
-                    </div>
-                    <div class="log-entry-side">
-                        <span class="log-entry-time">${escapeHtml(timeText)}</span>
-                        <span class="log-entry-line">${escapeHtml(lineText)}</span>
-                    </div>
-                </div>
-                <div class="log-entry-message">${highlightText(messageText, [filters.keyword])}</div>
-                ${showRawLine ? `<div class="log-entry-raw">${highlightText(entry.raw || "", rawHighlightQueries)}</div>` : ""}
-            </article>
-        `;
-    }).join("");
+    renderServiceLogs(elements, state.logs, state.logFilters);
 }
 
 async function loadOverview() {
@@ -2681,12 +2322,7 @@ function readAiAssistantSettingsForm() {
 }
 
 function syncLogFiltersFromControls() {
-    state.logFilters = {
-        timeRange: elements.logTimeRange.value,
-        level: elements.logLevelFilter.value,
-        moduleQuery: elements.logModuleFilter.value.trim(),
-        keyword: elements.logKeywordFilter.value.trim(),
-    };
+    state.logFilters = readLogFiltersFromControls(elements);
 }
 
 async function applyLogFilters(statusText = "正在应用日志筛选...") {
