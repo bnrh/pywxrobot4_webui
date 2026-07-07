@@ -1,35 +1,31 @@
-import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-06";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-07";
 import {
     AI_ASSISTANT_ACTIVE_JOB_STATUSES,
     AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
     AI_ASSISTANT_TERMINAL_JOB_STATUSES,
-    MANUAL_PLUGIN_EXECUTION_ACTIVE_STATUSES,
     MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS,
-    MANUAL_PLUGIN_EXECUTION_TERMINAL_STATUSES,
     OVERVIEW_POLL_INTERVAL_MS,
     OVERVIEW_RENDER_TICK_MS,
-} from "/static/js/polling-config.js?v=20260706-06";
-import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-06";
+} from "/static/js/polling-config.js?v=20260706-07";
+import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-07";
 import {
     escapeHtml,
     formatJson,
     highlightText,
     normalizeInlineText,
-} from "/static/js/dom-utils.js?v=20260706-06";
+} from "/static/js/dom-utils.js?v=20260706-07";
 import {
-    formatDuration,
-    formatHeartbeatInterval,
     formatStandardDateTime,
     formatUnixTimestamp,
     truncateText,
-} from "/static/js/format-utils.js?v=20260706-06";
+} from "/static/js/format-utils.js?v=20260706-07";
 import {
     getMessageTypeLabel,
     getPayloadValue,
     syncMessageTypeLabels,
-} from "/static/js/message-labels.js?v=20260706-06";
-import { tabMeta } from "/static/js/tab-meta.js?v=20260706-06";
-import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-06";
+} from "/static/js/message-labels.js?v=20260706-07";
+import { tabMeta } from "/static/js/tab-meta.js?v=20260706-07";
+import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-07";
 import {
     getConversationLabel,
     getMessageSummary,
@@ -37,16 +33,16 @@ import {
     getMessageTitle,
     getSenderLabel,
     renderAvatar,
-} from "/static/js/message-presenters.js?v=20260706-06";
+} from "/static/js/message-presenters.js?v=20260706-07";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260706-06";
-import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-06";
-import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-06";
+} from "/static/js/plugin-config-form.js?v=20260706-07";
+import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-07";
+import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-07";
 import {
     applySearchableChoiceFilter,
     applySearchableSelectFilter,
@@ -56,7 +52,30 @@ import {
     initializeSearchableChoiceFilters,
     selectSearchableSelectOption,
     syncScopeFieldVisibility,
-} from "/static/js/config-search.js?v=20260706-06";
+} from "/static/js/config-search.js?v=20260706-07";
+import {
+    findPluginDynamicModelField,
+    getPluginDynamicOptionPayloads,
+    getPluginScopeTargets,
+    getPluginByModule as findPluginInList,
+    getPluginDisplayName as resolvePluginDisplayName,
+    handleManualPluginExecutionTransitions,
+    hasPluginLogData,
+    isDirectExecutePlugin,
+    isManualPluginExecutionActive,
+    isMessageSummaryPlugin,
+    mergeOptionsWithCurrentValues,
+    needsPluginTargets,
+    normalizeManualPluginExecution,
+    normalizeRoomMsgSummaryRenderConfig,
+    parseStructuredFieldValue,
+    sortPluginsForDisplay,
+    WXPID_OPTION_ALL,
+    WXPID_OPTION_DEFAULT,
+    buildRoomMsgSummaryTimeWindow,
+} from "/static/js/plugin-helpers.js?v=20260706-07";
+import { buildOverviewCards } from "/static/js/overview-cards.js?v=20260706-07";
+import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-07";
 
 const state = {
     activeTab: "dashboard",
@@ -198,58 +217,6 @@ function setOverviewData(payload) {
     state.overviewFetchedAt = Date.now();
 }
 
-function normalizeManualPluginExecution(plugin) {
-    const execution = plugin?.manual_execution && typeof plugin.manual_execution === "object"
-        ? plugin.manual_execution
-        : {};
-    const status = normalizeInlineText(execution.status || "idle").toLowerCase() || "idle";
-    return {
-        ...execution,
-        status,
-        active: MANUAL_PLUGIN_EXECUTION_ACTIVE_STATUSES.has(status),
-        terminal: MANUAL_PLUGIN_EXECUTION_TERMINAL_STATUSES.has(status),
-        detail: normalizeInlineText(execution.detail || ""),
-        error: normalizeInlineText(execution.error || ""),
-    };
-}
-
-function isManualPluginExecutionActive(plugin) {
-    return normalizeManualPluginExecution(plugin).active;
-}
-
-function handleManualPluginExecutionTransitions(previousPlugins, nextPlugins) {
-    const previousPluginsByModule = new Map(
-        (Array.isArray(previousPlugins) ? previousPlugins : []).map((plugin) => [plugin?.module || "", plugin])
-    );
-    for (const plugin of Array.isArray(nextPlugins) ? nextPlugins : []) {
-        const moduleName = plugin?.module || "";
-        if (!moduleName) {
-            continue;
-        }
-        const previousPlugin = previousPluginsByModule.get(moduleName);
-        const previousExecution = normalizeManualPluginExecution(previousPlugin);
-        const nextExecution = normalizeManualPluginExecution(plugin);
-        if (!previousExecution.active || nextExecution.active || !nextExecution.terminal) {
-            continue;
-        }
-        const pluginName = normalizeInlineText(plugin?.name || moduleName) || "插件";
-        if (nextExecution.status === "completed") {
-            setStatus(
-                nextExecution.detail ? `${pluginName} 执行完成：${nextExecution.detail}` : `${pluginName} 执行完成`,
-                "good"
-            );
-            continue;
-        }
-        if (nextExecution.status === "stopped") {
-            setStatus(nextExecution.detail || `${pluginName} 已停止`);
-            continue;
-        }
-        if (nextExecution.status === "failed") {
-            setStatus(nextExecution.detail || `${pluginName} 执行失败`, "bad");
-        }
-    }
-}
-
 function scheduleManualPluginExecutionPoll() {
     if (manualPluginExecutionPollTimerId !== null) {
         window.clearTimeout(manualPluginExecutionPollTimerId);
@@ -278,7 +245,7 @@ function setPluginsPayload(plugins) {
     const previousPlugins = Array.isArray(state.plugins) ? state.plugins : [];
     state.plugins = Array.isArray(plugins) ? plugins : [];
     renderPlugins();
-    handleManualPluginExecutionTransitions(previousPlugins, state.plugins);
+    handleManualPluginExecutionTransitions(previousPlugins, state.plugins, setStatus);
     scheduleManualPluginExecutionPoll();
 }
 
@@ -297,26 +264,11 @@ function applyPluginMutationResult(result) {
 }
 
 function getPluginByModule(moduleName) {
-    return state.plugins.find((plugin) => plugin.module === moduleName) || null;
+    return findPluginInList(state.plugins, moduleName);
 }
 
 function getPluginDisplayName(moduleName, fallback = "未知插件") {
-    const plugin = getPluginByModule(moduleName);
-    if (plugin) {
-        return plugin.name;
-    }
-    const pluginOption = state.pluginLogs?.available_plugins?.find((item) => item.module === moduleName);
-    return normalizeInlineText(pluginOption?.name || moduleName || fallback) || fallback;
-}
-
-function hasPluginLogData(dataValue) {
-    return !(
-        dataValue === undefined
-        || dataValue === null
-        || dataValue === ""
-        || (Array.isArray(dataValue) && !dataValue.length)
-        || (typeof dataValue === "object" && !Array.isArray(dataValue) && !Object.keys(dataValue).length)
-    );
+    return resolvePluginDisplayName(state.plugins, state.pluginLogs, moduleName, fallback);
 }
 
 function getPluginLogById(logId) {
@@ -336,97 +288,6 @@ function buildStructuredPluginConfigPayload(plugin) {
         ...mergedConfig,
         ...nextConfig,
     };
-}
-
-function getPluginScopeTargets(plugin) {
-    const rawTargets = Array.isArray(plugin?.scope_targets) ? plugin.scope_targets : [];
-    return [...new Set(rawTargets.map((item) => normalizeInlineText(item).toLowerCase()).filter(Boolean))];
-}
-
-function mergeOptionsWithCurrentValues(options, currentValues) {
-    const nextOptions = Array.isArray(options) ? [...options] : [];
-    const seen = new Set(nextOptions.map((option) => String(option?.value ?? "").trim()).filter(Boolean));
-    const values = Array.isArray(currentValues)
-        ? currentValues
-        : (currentValues === undefined || currentValues === null || currentValues === "" ? [] : [currentValues]);
-    for (const value of values) {
-        const normalized = String(value ?? "").trim();
-        if (!normalized || seen.has(normalized)) {
-            continue;
-        }
-        seen.add(normalized);
-        nextOptions.push({
-            label: `当前配置(${normalized})`,
-            value: normalized,
-        });
-    }
-    return nextOptions;
-}
-
-function needsPluginTargets(plugin) {
-    const scopeTargets = getPluginScopeTargets(plugin);
-    if (scopeTargets.includes("rooms") || scopeTargets.includes("friend_labels")) {
-        return true;
-    }
-    const dynamicOptionSources = new Set(["room_options", "label_options", "wxpid_options"]);
-    const schema = Array.isArray(plugin?.config_schema) ? plugin.config_schema : [];
-    return schema.some((field) => {
-        if (!field || typeof field !== "object") {
-            return false;
-        }
-        if (dynamicOptionSources.has(field.options_source)) {
-            return true;
-        }
-        return Array.isArray(field.columns)
-            && field.columns.some((column) => column && typeof column === "object" && dynamicOptionSources.has(column.options_source));
-    });
-}
-
-function getPluginDynamicOptionPayloads(plugin) {
-    return plugin?.dynamic_option_payloads && typeof plugin.dynamic_option_payloads === "object"
-        ? plugin.dynamic_option_payloads
-        : {};
-}
-
-function findPluginDynamicModelField(plugin, fieldKey = "", parentFieldKey = "") {
-    const normalizedFieldKey = normalizeInlineText(fieldKey).toLowerCase();
-    const normalizedParentFieldKey = normalizeInlineText(parentFieldKey).toLowerCase();
-    const schema = Array.isArray(plugin?.config_schema) ? plugin.config_schema : [];
-    for (const field of schema) {
-        if (!field || typeof field !== "object") {
-            continue;
-        }
-        const normalizedFieldOptionsSource = normalizeInlineText(field.options_source).toLowerCase();
-        const normalizedCurrentFieldKey = normalizeInlineText(field.key).toLowerCase();
-        if (
-            normalizedFieldOptionsSource === "model_options"
-            && (!normalizedFieldKey || normalizedCurrentFieldKey === normalizedFieldKey)
-            && (!normalizedParentFieldKey || normalizedCurrentFieldKey === normalizedParentFieldKey)
-        ) {
-            return field;
-        }
-        for (const column of Array.isArray(field.columns) ? field.columns : []) {
-            if (!column || typeof column !== "object") {
-                continue;
-            }
-            const normalizedColumnOptionsSource = normalizeInlineText(column.options_source).toLowerCase();
-            const normalizedColumnKey = normalizeInlineText(column.key).toLowerCase();
-            if (normalizedColumnOptionsSource !== "model_options") {
-                continue;
-            }
-            if (normalizedFieldKey && normalizedColumnKey !== normalizedFieldKey) {
-                continue;
-            }
-            if (normalizedParentFieldKey && normalizedCurrentFieldKey !== normalizedParentFieldKey) {
-                continue;
-            }
-            return {
-                ...column,
-                __parent_field_key: field.key,
-            };
-        }
-    }
-    return null;
 }
 
 async function loadPluginDynamicOptionPayloads(plugin, config) {
@@ -851,80 +712,6 @@ async function loadPluginTargets(force = false) {
     return state.pluginTargets;
 }
 
-const WXPID_OPTION_DEFAULT = "__default_first__";
-const WXPID_OPTION_ALL = "__all__";
-
-function isMessageSummaryPlugin(plugin) {
-    return Boolean(plugin?.message_summary);
-}
-
-function isDirectExecutePlugin(plugin) {
-    return Boolean(plugin?.direct_execute);
-}
-
-function getRoomMsgSummaryLookbackSeconds(rangeKey) {
-    const rangeMap = {
-        "2h": 2 * 60 * 60,
-        "6h": 6 * 60 * 60,
-        "12h": 12 * 60 * 60,
-        "1d": 24 * 60 * 60,
-        "3d": 3 * 24 * 60 * 60,
-        "1y": 365 * 24 * 60 * 60,
-    };
-    return rangeMap[normalizeInlineText(rangeKey).toLowerCase()] || rangeMap["2h"];
-}
-
-function parseStructuredFieldValue(rawValue) {
-    const normalized = normalizeInlineText(rawValue);
-    if (!normalized) {
-        return "";
-    }
-    try {
-        return JSON.parse(normalized);
-    } catch {
-        return normalized;
-    }
-}
-
-function formatLocalDateTime(date) {
-    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-        return "";
-    }
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
-}
-
-function buildRoomMsgSummaryTimeWindow(rangeKey) {
-    const endDate = new Date();
-    const startDate = new Date(endDate.getTime() - getRoomMsgSummaryLookbackSeconds(rangeKey) * 1000);
-    return {
-        startTime: formatLocalDateTime(startDate),
-        endTime: formatLocalDateTime(endDate),
-    };
-}
-
-function normalizeRoomMsgSummaryRenderConfig(plugin) {
-    const nextConfig = { ...(plugin?.config || {}) };
-    const exportDirField = Array.isArray(plugin?.config_schema)
-        ? plugin.config_schema.find((field) => field?.key === "export_dir")
-        : null;
-    const normalizedFileType = normalizeInlineText(nextConfig.file_type || nextConfig.output_format).toLowerCase();
-    if (!normalizedFileType || normalizedFileType === "txt") {
-        nextConfig.file_type = "jsonl";
-    }
-    if (!normalizeInlineText(nextConfig.export_dir) && !normalizeInlineText(nextConfig.save_path) && normalizeInlineText(exportDirField?.default)) {
-        nextConfig.export_dir = String(exportDirField.default);
-    }
-    const currentTimeRange = normalizeInlineText(nextConfig.time_range).toLowerCase() || "2h";
-    const { startTime, endTime } = buildRoomMsgSummaryTimeWindow(currentTimeRange);
-    if (!normalizeInlineText(nextConfig.start_time)) {
-        nextConfig.start_time = startTime;
-    }
-    if (!normalizeInlineText(nextConfig.end_time)) {
-        nextConfig.end_time = endTime;
-    }
-    return nextConfig;
-}
-
 function getPluginModuleNameForForm(formElement) {
     if (formElement === elements.pluginConfigForm) {
         return state.pluginConfigModule;
@@ -1103,22 +890,6 @@ function buildPluginExecuteRenderModel(plugin) {
     };
 }
 
-function sortPluginsForDisplay(plugins) {
-    return [...plugins].sort((left, right) => {
-        const enabledDiff = Number(Boolean(right?.enabled)) - Number(Boolean(left?.enabled));
-        if (enabledDiff !== 0) {
-            return enabledDiff;
-        }
-        const loadedDiff = Number(Boolean(right?.loaded)) - Number(Boolean(left?.loaded));
-        if (loadedDiff !== 0) {
-            return loadedDiff;
-        }
-        const leftLabel = normalizeInlineText(left?.name || left?.module || "");
-        const rightLabel = normalizeInlineText(right?.name || right?.module || "");
-        return leftLabel.localeCompare(rightLabel, "zh-CN");
-    });
-}
-
 async function openPluginConfigModal(moduleName) {
     const plugin = getPluginByModule(moduleName);
     if (!plugin) {
@@ -1209,18 +980,7 @@ function handleMessagePollFailure(error) {
 }
 
 function updateHeaderForTab(tabName) {
-    const meta = tabMeta[tabName];
-    elements.activeTabLabel.textContent = meta.label;
-    elements.pageTitle.textContent = meta.title;
-    elements.pageDescription.textContent = meta.description;
-
-    elements.navTabs.forEach((button) => {
-        button.classList.toggle("is-active", button.dataset.tab === tabName);
-    });
-
-    elements.panels.forEach((panel) => {
-        panel.classList.toggle("is-active", panel.dataset.panel === tabName);
-    });
+    syncHeaderForTab(elements, tabMeta, tabName);
 }
 
 function renderOverview() {
@@ -1228,73 +988,7 @@ function renderOverview() {
         return;
     }
 
-    const enabledCount = Number(state.overview.enabled_plugin_count || 0);
-    const loadedCount = Number(state.overview.loaded_plugin_count || 0);
-    const queuedMessages = Number(state.overview.queued_messages || 0);
-    const pendingRestartFields = state.overview.pending_restart_fields || [];
-    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - (state.overviewFetchedAt || Date.now())) / 1000));
-    const uptimeSeconds = Math.max(0, Number(state.overview.uptime_seconds || 0) + elapsedSeconds);
-    const requiresRestart = pendingRestartFields.length > 0;
-    const runtimeStartedAt = formatStandardDateTime(state.overview.runtime_started_at) || "未知";
-    const heartbeat = state.overview.heartbeat || {};
-    const heartbeatEnabled = Boolean(heartbeat.enabled);
-    const heartbeatHealthy = heartbeat.healthy;
-    const heartbeatStatus = !heartbeatEnabled
-        ? "已关闭"
-        : heartbeatHealthy === false
-            ? "异常"
-            : heartbeatHealthy === true
-                ? "正常"
-                : "检测中";
-    const heartbeatHint = heartbeatEnabled
-        ? `${formatHeartbeatInterval(heartbeat.interval_seconds)}${heartbeat.last_checked_at ? ` · 最近 ${formatStandardDateTime(heartbeat.last_checked_at)}` : ""}`
-        : "设置为 0 时保持关闭";
-
-    const cards = [
-        {
-            label: "运行时间",
-            value: formatDuration(uptimeSeconds),
-            hint: "从 WebUI 服务启动时开始累计，并每秒自动刷新",
-            tone: "sky",
-        },
-        {
-            label: "启动时间",
-            value: runtimeStartedAt,
-            hint: "WebUI 服务启动时间",
-            tone: "teal",
-            valueClass: "is-compact",
-        },
-        {
-            label: "心跳检测",
-            value: heartbeatStatus,
-            hint: heartbeatHint,
-            tone: heartbeatEnabled && heartbeatHealthy === false ? "amber" : "teal",
-        },
-        {
-            label: "已启用插件",
-            value: String(enabledCount),
-            hint: "来自当前配置的启用数量",
-            tone: "teal",
-        },
-        {
-            label: "成功加载",
-            value: String(loadedCount),
-            hint: loadedCount === enabledCount ? "运行时插件已全部在线" : "仍有插件未进入运行态",
-            tone: loadedCount === enabledCount ? "sky" : "amber",
-        },
-        {
-            label: "待处理消息",
-            value: String(queuedMessages),
-            hint: queuedMessages > 0 ? "队列中仍有消息等待消费" : "消息流当前没有堆积",
-            tone: queuedMessages > 0 ? "amber" : "teal",
-        },
-        {
-            label: "重启变更",
-            value: String(pendingRestartFields.length),
-            hint: requiresRestart ? "部分设置待重启后生效" : "当前运行态与配置保持同步",
-            tone: requiresRestart ? "amber" : "sky",
-        },
-    ];
+    const cards = buildOverviewCards(state.overview, state.overviewFetchedAt);
 
     elements.overviewGrid.innerHTML = cards.map((item) => `
         <article class="overview-card tone-${escapeHtml(item.tone)}">

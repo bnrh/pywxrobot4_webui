@@ -256,4 +256,7 @@ export const api = {
     getMessageTypes() {
         return requestJson("/api/message-types");
     },
+    getMetrics() {
+        return requestJson("/api/metrics");
+    },
 };
