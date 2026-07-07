@@ -17,6 +17,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run tests
         run: python -m pytest tests -q
+      - name: Run frontend module smoke tests
+        run: node tests/js/test_overview_cards.mjs
 
   docker:
     runs-on: ubuntu-latest

@@ -1,5 +1,5 @@
 from app_builders import AppBuilders
-from app_config import REMOVED_PLUGIN_MODULES, sanitize_stored_settings
+from app_config import REMOVED_PLUGIN_MODULES, SECRET_SETTINGS_PLACEHOLDER, sanitize_stored_settings
 from config import PluginServiceSettings
 from runtime import PluginRuntime
 
@@ -52,6 +52,19 @@ def test_build_overview_includes_runtime_metrics() -> None:
     assert "recent_messages" in metrics
     assert "recent_plugin_logs" in metrics
     assert metrics.get("queue_capacity") == runtime.settings.queue_size
+
+
+def test_merge_secret_settings_updates_preserves_existing_secrets() -> None:
+    configured = PluginServiceSettings(api_token="stored-token", callback_secret="stored-secret")
+    merged = AppBuilders.merge_secret_settings_updates(
+        configured,
+        {
+            "api_token": "",
+            "callback_secret": SECRET_SETTINGS_PLACEHOLDER,
+        },
+    )
+    assert merged["api_token"] == "stored-token"
+    assert merged["callback_secret"] == "stored-secret"
 
 
 def test_build_room_member_options_deduplicates_and_sorts() -> None:

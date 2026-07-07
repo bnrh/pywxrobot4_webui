@@ -1,27 +1,25 @@
-import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-11";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-12";
 import {
-    AI_ASSISTANT_ACTIVE_JOB_STATUSES,
     AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
-    AI_ASSISTANT_TERMINAL_JOB_STATUSES,
     MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS,
     OVERVIEW_POLL_INTERVAL_MS,
     OVERVIEW_RENDER_TICK_MS,
-} from "/static/js/polling-config.js?v=20260706-11";
-import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-11";
+} from "/static/js/polling-config.js?v=20260706-12";
+import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-12";
 import {
     formatJson,
     normalizeInlineText,
-} from "/static/js/dom-utils.js?v=20260706-11";
-import { syncMessageTypeLabels } from "/static/js/message-labels.js?v=20260706-11";
-import { tabMeta } from "/static/js/tab-meta.js?v=20260706-11";
+} from "/static/js/dom-utils.js?v=20260706-12";
+import { syncMessageTypeLabels } from "/static/js/message-labels.js?v=20260706-12";
+import { tabMeta } from "/static/js/tab-meta.js?v=20260706-12";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260706-11";
-import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-11";
-import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-11";
+} from "/static/js/plugin-config-form.js?v=20260706-12";
+import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-12";
+import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-12";
 import {
     applySearchableChoiceFilter,
     applySearchableSelectFilter,
@@ -30,7 +28,7 @@ import {
     handleSearchableSelectInput,
     selectSearchableSelectOption,
     syncScopeFieldVisibility,
-} from "/static/js/config-search.js?v=20260706-11";
+} from "/static/js/config-search.js?v=20260706-12";
 import {
     getPluginByModule as findPluginInList,
     getPluginDisplayName as resolvePluginDisplayName,
@@ -41,16 +39,20 @@ import {
     needsPluginTargets,
     normalizeManualPluginExecution,
     sortPluginsForDisplay,
-} from "/static/js/plugin-helpers.js?v=20260706-11";
-import { renderOverviewGrid } from "/static/js/overview-view.js?v=20260706-11";
-import { renderMessagesView } from "/static/js/message-view.js?v=20260706-11";
-import { renderUsersView } from "/static/js/users-view.js?v=20260706-11";
-import { renderSettingsView } from "/static/js/settings-view.js?v=20260706-11";
-import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-11";
-import { waitForDuration } from "/static/js/async-utils.js?v=20260706-11";
-import { renderServiceLogs, syncLogFiltersFromControls as readLogFiltersFromControls } from "/static/js/log-viewer.js?v=20260706-11";
-import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-11";
-import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-11";
+} from "/static/js/plugin-helpers.js?v=20260706-12";
+import { renderOverviewGrid } from "/static/js/overview-view.js?v=20260706-12";
+import { renderMessagesView } from "/static/js/message-view.js?v=20260706-12";
+import { renderUsersView } from "/static/js/users-view.js?v=20260706-12";
+import { renderSettingsView } from "/static/js/settings-view.js?v=20260706-12";
+import { createAiAssistantController } from "/static/js/ai-assistant-controller.js?v=20260706-12";
+import { createTabLoaders } from "/static/js/tab-loaders.js?v=20260706-12";
+import { createPluginModalActions } from "/static/js/plugin-modals.js?v=20260706-12";
+
+import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-12";
+import { waitForDuration } from "/static/js/async-utils.js?v=20260706-12";
+import { renderServiceLogs, syncLogFiltersFromControls as readLogFiltersFromControls } from "/static/js/log-viewer.js?v=20260706-12";
+import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-12";
+import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-12";
 import {
     applyFetchOptionsSelection,
     buildPluginConfigRenderModel,
@@ -58,29 +60,14 @@ import {
     buildStructuredPluginConfigPayload,
     getPluginModuleNameForForm,
     handlePluginFetchOptions,
-    preparePluginConfigRenderModel,
-    preparePluginExecuteRenderModel,
     refreshPluginModelOptionsForm,
-    renderStructuredPluginForm,
     shouldRefreshPluginModelOptions,
     syncRoomMsgSummaryTimeFields,
-} from "/static/js/plugin-config-render.js?v=20260706-11";
+} from "/static/js/plugin-config-render.js?v=20260706-12";
 import {
     decodeAiAssistantModelSelection,
-    findAiAssistantProvider,
-    getAiAssistantCurrentConversation as readAiAssistantCurrentConversation,
-    getAiAssistantCurrentConversationId as readAiAssistantCurrentConversationId,
-    getAiAssistantSettings as readAiAssistantSettings,
-    isAiAssistantJobActive,
-    isAiAssistantJobTerminal,
-    listAiAssistantConversations,
-    listAiAssistantPromptPlugins,
-    listAiAssistantProviders,
     normalizeAiAssistantJobStatus,
-    resolveAiAssistantCurrentSelection,
-    resolveAiAssistantPromptPlugin,
-    resolveAiAssistantProviderSelection,
-} from "/static/js/ai-assistant-data.js?v=20260706-11";
+} from "/static/js/ai-assistant-data.js?v=20260706-12";
 import {
     appendAiAssistantConfigRow as appendAiAssistantConfigRowView,
     appendAiAssistantPromptPluginRow as appendAiAssistantPromptPluginRowView,
@@ -97,7 +84,7 @@ import {
     syncAiAssistantConfigTableState as syncAiAssistantConfigTableStateView,
     syncAiAssistantPromptPluginCardState as syncAiAssistantPromptPluginCardStateView,
     syncAiAssistantPromptPluginTableState as syncAiAssistantPromptPluginTableStateView,
-} from "/static/js/ai-assistant-ui.js?v=20260706-11";
+} from "/static/js/ai-assistant-ui.js?v=20260706-12";
 
 const state = {
     activeTab: "dashboard",
@@ -229,6 +216,60 @@ let pluginLogFilterTimerId = null;
 let messagePollInFlight = null;
 let manualPluginExecutionPollTimerId = null;
 
+let aiAssistantCtrl;
+let tabLoaders;
+let pluginModals;
+
+function initAppControllers() {
+    aiAssistantCtrl = createAiAssistantController(() => state, {
+        api,
+        setStatus,
+        renderAiAssistant,
+        renderAiAssistantConversationList,
+        waitForDuration,
+        aiJobPollIntervalMs: AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
+    });
+    tabLoaders = createTabLoaders(() => state, {
+        api,
+        setOverviewData,
+        renderOverview,
+        renderMessages,
+        renderUsers,
+        renderPlugins,
+        renderPluginLogs,
+        renderSettings,
+        renderLogs,
+        setPluginsPayload,
+        setStatus,
+        needsPluginTargets,
+        loadAiAssistant: () => aiAssistantCtrl.load(),
+        handleMessagePollSuccess,
+        handleMessagePollFailure,
+        getMessagePollInFlight: () => messagePollInFlight,
+        setMessagePollInFlight: (value) => {
+            messagePollInFlight = value;
+        },
+        getPluginLogFilterTimerId: () => pluginLogFilterTimerId,
+        setPluginLogFilterTimerId: (value) => {
+            pluginLogFilterTimerId = value;
+        },
+    });
+    pluginModals = createPluginModalActions(() => state, {
+        api,
+        elements,
+        setStatus,
+        getPluginByModule,
+        needsPluginTargets,
+        loadPluginTargets: (force) => tabLoaders.loadPluginTargets(force),
+        pluginRenderCtx,
+        applyPluginMutationResult,
+        normalizeManualPluginExecution,
+        normalizeInlineText,
+        isDirectExecutePlugin,
+    });
+}
+
+
 function setStatus(text, type = "") {
     elements.statusPill.textContent = text;
     elements.statusPill.className = `status-pill ${type}`.trim();
@@ -324,79 +365,25 @@ function buildPluginExecuteRenderModelForPlugin(plugin) {
     return buildPluginExecuteRenderModel(plugin, state.pluginTargets, state.users);
 }
 
+
 async function openPluginConfigModal(moduleName) {
-    const plugin = getPluginByModule(moduleName);
-    if (!plugin) {
-        setStatus("未找到指定插件配置", "bad");
-        return;
-    }
-    if (needsPluginTargets(plugin)) {
-        await loadPluginTargets(true);
-    }
-    const renderPlugin = await preparePluginConfigRenderModel(plugin, state.pluginTargets, state.users, api);
-    state.pluginConfigModule = moduleName;
-    elements.pluginConfigModalTitle.textContent = `${plugin.name} 配置`;
-    if (hasStructuredPluginConfig(renderPlugin)) {
-        elements.pluginConfigMeta.textContent = "插件配置会以结构化表单保存到 SQLite，并在支持的范围内立即热重载。";
-        elements.pluginConfigForm.hidden = false;
-        elements.pluginConfigEditor.hidden = true;
-        renderStructuredPluginForm(elements.pluginConfigForm, renderPlugin, pluginRenderCtx());
-    } else {
-        elements.pluginConfigMeta.textContent = "当前插件尚未提供结构化配置描述，暂时仍使用 JSON 编辑。";
-        elements.pluginConfigForm.hidden = true;
-        elements.pluginConfigForm.innerHTML = "";
-        elements.pluginConfigEditor.hidden = false;
-        elements.pluginConfigEditor.value = formatJson(plugin.config || {});
-    }
-    elements.pluginConfigModal.classList.add("is-visible");
+    return pluginModals.openConfigModal(moduleName);
 }
 
 function closePluginConfigModal() {
-    state.pluginConfigModule = "";
-    elements.pluginConfigForm.innerHTML = "";
-    elements.pluginConfigModal.classList.remove("is-visible");
+    pluginModals.closeConfigModal();
 }
 
 function closePluginExecuteModal() {
-    state.pluginExecuteModule = "";
-    elements.pluginExecuteForm.innerHTML = "";
-    elements.pluginExecuteModal.classList.remove("is-visible");
+    pluginModals.closeExecuteModal();
 }
 
 async function executePluginWithConfig(moduleName, config = {}) {
-    const result = await api.executePlugin(moduleName, config);
-    applyPluginMutationResult(result);
-    const execution = normalizeManualPluginExecution({ manual_execution: result?.execution || {} });
-    const detail = execution.detail || normalizeInlineText(result?.result?.detail || "");
-    setStatus(detail ? `插件已开始执行：${detail}` : "插件已开始执行", "good");
-    return result;
+    return pluginModals.executeWithConfig(moduleName, config);
 }
 
 async function openPluginExecuteModal(moduleName) {
-    const plugin = getPluginByModule(moduleName);
-    if (!plugin) {
-        setStatus("未找到指定功能插件", "bad");
-        return;
-    }
-    if (isDirectExecutePlugin(plugin)) {
-        setStatus("正在执行功能插件...");
-        await executePluginWithConfig(moduleName, {});
-        return;
-    }
-    if (needsPluginTargets(plugin)) {
-        await loadPluginTargets(true);
-    }
-    const renderPlugin = await preparePluginExecuteRenderModel(plugin, state.pluginTargets, state.users, api);
-    if (!renderPlugin.config_schema.length) {
-        setStatus("正在执行功能插件...");
-        await executePluginWithConfig(moduleName, {});
-        return;
-    }
-    state.pluginExecuteModule = moduleName;
-    elements.pluginExecuteModalTitle.textContent = `${plugin.name} 执行范围`;
-    elements.pluginExecuteMeta.textContent = "执行前选择这次运行要作用的微信进程、群聊、好友标签或公众号。本次选择不会覆盖已保存配置。";
-    renderStructuredPluginForm(elements.pluginExecuteForm, renderPlugin, pluginRenderCtx());
-    elements.pluginExecuteModal.classList.add("is-visible");
+    return pluginModals.openExecuteModal(moduleName);
 }
 
 function handleMessagePollSuccess() {
@@ -461,131 +448,57 @@ function renderSettings() {
     renderSettingsView(elements, state.settings, getStoredApiToken);
 }
 
+
 function applyAiAssistantPayload(payload, preserveSelection = true) {
-    if (!payload || typeof payload !== "object") {
-        return;
-    }
-    state.aiAssistant = {
-        ...(state.aiAssistant || {}),
-        ...payload,
-    };
-    const currentConversation = getAiAssistantCurrentConversation();
-    state.aiConversation = Array.isArray(currentConversation?.messages) ? currentConversation.messages : [];
-    if (payload.job) {
-        state.aiActiveChatJob = payload.job;
-        state.aiActiveChatJobId = payload.job.id || state.aiActiveChatJobId;
-    }
-    if (payload.settings || payload.providers) {
-        syncAiAssistantUiFromPayload(preserveSelection);
-    }
+    aiAssistantCtrl.applyPayload(payload, preserveSelection);
 }
 
 function getAiAssistantConversations() {
-    return listAiAssistantConversations(state.aiAssistant);
+    return aiAssistantCtrl.getConversations();
 }
 
 function getAiAssistantCurrentConversation() {
-    return readAiAssistantCurrentConversation(state.aiAssistant);
+    return aiAssistantCtrl.getCurrentConversation();
 }
 
 function getAiAssistantCurrentConversationId() {
-    return readAiAssistantCurrentConversationId(state.aiAssistant);
+    return aiAssistantCtrl.getCurrentConversationId();
 }
 
 function getAiAssistantProviders() {
-    return listAiAssistantProviders(state.aiAssistant);
+    return aiAssistantCtrl.getProviders();
 }
 
 function getAiAssistantSettings() {
-    return readAiAssistantSettings(state.aiAssistant);
+    return aiAssistantCtrl.getSettings();
 }
 
 function getAiAssistantPromptPlugins() {
-    return listAiAssistantPromptPlugins(getAiAssistantSettings());
+    return aiAssistantCtrl.getPromptPlugins();
 }
 
 function getAiAssistantPromptPlugin(promptPluginId = state.aiAssistantUi.selectedPromptPluginId) {
-    return resolveAiAssistantPromptPlugin(
-        getAiAssistantSettings(),
-        getAiAssistantPromptPlugins(),
-        promptPluginId
-    );
+    return aiAssistantCtrl.getPromptPlugin(promptPluginId);
 }
 
 function getAiAssistantProvider(providerKey = state.aiAssistantUi.selectedProvider) {
-    return findAiAssistantProvider(getAiAssistantProviders(), providerKey);
+    return aiAssistantCtrl.getProvider(providerKey);
 }
 
 function getAiAssistantCurrentSelection() {
-    return resolveAiAssistantCurrentSelection(state.aiAssistant, state.aiAssistantUi);
+    return aiAssistantCtrl.getCurrentSelection();
 }
 
 function setAiAssistantProviderSelection(providerKey, preferredModel = "", preferredConfigId = "") {
-    const nextSelection = resolveAiAssistantProviderSelection(
-        getAiAssistantSettings(),
-        getAiAssistantProviders(),
-        providerKey,
-        preferredModel,
-        preferredConfigId
-    );
-    state.aiAssistantUi.selectedProvider = nextSelection.selectedProvider;
-    state.aiAssistantUi.selectedProviderConfigId = nextSelection.selectedProviderConfigId;
-    state.aiAssistantUi.selectedModel = nextSelection.selectedModel;
+    aiAssistantCtrl.setProviderSelection(providerKey, preferredModel, preferredConfigId);
 }
 
 function syncAiAssistantUiFromPayload(preserveSelection = true) {
-    const settings = getAiAssistantSettings();
-    const promptPlugins = getAiAssistantPromptPlugins();
-    const providers = getAiAssistantProviders();
-    if (!promptPlugins.length) {
-        state.aiAssistantUi.selectedPromptPluginId = "";
-    } else {
-        const preferredPromptPluginId = preserveSelection && promptPlugins.some((plugin) => plugin.id === state.aiAssistantUi.selectedPromptPluginId)
-            ? state.aiAssistantUi.selectedPromptPluginId
-            : (promptPlugins.find((plugin) => plugin.id === settings.active_prompt_plugin_id)?.id || promptPlugins[0].id);
-        state.aiAssistantUi.selectedPromptPluginId = preferredPromptPluginId;
-    }
-    if (!providers.length) {
-        state.aiAssistantUi.selectedProvider = "";
-        state.aiAssistantUi.selectedProviderConfigId = "";
-        state.aiAssistantUi.selectedModel = "";
-        return;
-    }
-
-    const preferredProvider = preserveSelection && providers.some((provider) => provider.key === state.aiAssistantUi.selectedProvider)
-        ? state.aiAssistantUi.selectedProvider
-        : (providers.find((provider) => provider.key === settings.active_provider)?.key || providers[0].key);
-    const preferredModel = preserveSelection ? state.aiAssistantUi.selectedModel : "";
-    const preferredConfigId = preserveSelection ? state.aiAssistantUi.selectedProviderConfigId : "";
-    setAiAssistantProviderSelection(preferredProvider, preferredModel, preferredConfigId);
+    aiAssistantCtrl.syncUiFromPayload(preserveSelection);
 }
 
 function aiAssistantUiCtx() {
-    return {
-        elements,
-        get aiAssistant() {
-            return state.aiAssistant;
-        },
-        get aiAssistantUi() {
-            return state.aiAssistantUi;
-        },
-        get aiRequestInFlight() {
-            return state.aiRequestInFlight;
-        },
-        get aiActiveChatJob() {
-            return state.aiActiveChatJob;
-        },
-        getConversations: getAiAssistantConversations,
-        getCurrentConversation: getAiAssistantCurrentConversation,
-        getCurrentConversationId: getAiAssistantCurrentConversationId,
-        getProviders: getAiAssistantProviders,
-        getSettings: getAiAssistantSettings,
-        getPromptPlugins: getAiAssistantPromptPlugins,
-        getPromptPlugin: getAiAssistantPromptPlugin,
-        getProvider: getAiAssistantProvider,
-        getCurrentSelection: getAiAssistantCurrentSelection,
-        setProviderSelection: setAiAssistantProviderSelection,
-    };
+    return aiAssistantCtrl.buildUiCtx(elements);
 }
 
 function renderAiAssistantConversationList() {
@@ -652,21 +565,17 @@ function renderLogs() {
     renderServiceLogs(elements, state.logs, state.logFilters);
 }
 
+
 async function loadOverview() {
-    setOverviewData(await api.getOverview());
-    renderOverview();
+    return tabLoaders.loadOverview();
 }
 
 async function loadMessages() {
-    const payload = await api.getMessages(50);
-    state.messages = payload.messages || [];
-    renderMessages();
+    return tabLoaders.loadMessages();
 }
 
 async function loadUsers() {
-    state.users = await api.getUsers();
-    state.pluginTargets = null;
-    renderUsers();
+    return tabLoaders.loadUsers();
 }
 
 async function loadPluginTargetsIfNeeded(plugin) {
@@ -676,187 +585,71 @@ async function loadPluginTargetsIfNeeded(plugin) {
     return loadPluginTargets();
 }
 
+
 async function refreshMessagesByPoll() {
-    if (messagePollInFlight) {
-        return messagePollInFlight;
-    }
-
-    messagePollInFlight = (async () => {
-        try {
-            await loadMessages();
-            handleMessagePollSuccess();
-        } catch (error) {
-            handleMessagePollFailure(error);
-        } finally {
-            messagePollInFlight = null;
-        }
-    })();
-
-    return messagePollInFlight;
+    return tabLoaders.refreshMessagesByPoll();
 }
+
 
 async function loadPlugins() {
-    const payload = await api.getPlugins();
-    setPluginsPayload(payload.plugins || []);
+    return tabLoaders.loadPlugins();
 }
 
-async function loadPluginLogs(moduleName = state.selectedPluginLogModule, level = state.selectedPluginLogLevel, keyword = state.selectedPluginLogKeyword) {
-    const payload = await api.getPluginLogs(moduleName, 240, level, keyword);
-    state.pluginLogs = payload;
-    state.selectedPluginLogModule = payload.module_name || "";
-    state.selectedPluginLogLevel = payload.level || "";
-    state.selectedPluginLogKeyword = payload.keyword || "";
-    renderPluginLogs();
-}
 
 function schedulePluginLogKeywordRefresh() {
-    if (pluginLogFilterTimerId !== null) {
-        window.clearTimeout(pluginLogFilterTimerId);
-    }
-    pluginLogFilterTimerId = window.setTimeout(() => {
-        setStatus("正在按关键词筛选插件日志...");
-        loadPluginLogs(state.selectedPluginLogModule, state.selectedPluginLogLevel, state.selectedPluginLogKeyword)
-            .then(() => {
-                setStatus("插件日志已更新", "good");
-            })
-            .catch((error) => {
-                setStatus(`插件日志关键词筛选失败：${error.message}`, "bad");
-            });
-    }, 250);
+    tabLoaders.schedulePluginLogKeywordRefresh();
 }
+
 
 async function loadSettings() {
-    state.settings = await api.getSettings();
-    renderSettings();
+    return tabLoaders.loadSettings();
 }
 
+
 async function loadAiAssistant() {
-    applyAiAssistantPayload(await api.getAiAssistant(), true);
-    renderAiAssistant();
-    renderAiAssistantConversationList();
+    return aiAssistantCtrl.load();
 }
 
 async function createAiAssistantConversation() {
-    applyAiAssistantPayload(await api.createAiAssistantConversation(), true);
-    renderAiAssistant();
-    renderAiAssistantConversationList();
+    return aiAssistantCtrl.createConversation();
 }
 
 async function activateAiAssistantConversation(conversationId) {
-    applyAiAssistantPayload(await api.activateAiAssistantConversation(conversationId), true);
-    renderAiAssistant();
-    renderAiAssistantConversationList();
+    return aiAssistantCtrl.activateConversation(conversationId);
 }
 
 async function clearAiAssistantConversation() {
-    const conversationId = getAiAssistantCurrentConversationId();
-    if (!conversationId) {
-        throw new Error("当前没有可清空的对话");
-    }
-    applyAiAssistantPayload(await api.clearAiAssistantConversation(conversationId), true);
-    renderAiAssistant();
-    renderAiAssistantConversationList();
+    return aiAssistantCtrl.clearConversation();
 }
 
 async function stopAiAssistantChatJob() {
-    const currentConversation = getAiAssistantCurrentConversation();
-    const currentJob = state.aiActiveChatJob || {};
-    const jobId = String(currentJob.id || state.aiActiveChatJobId || "").trim();
-    if (!jobId || !isAiAssistantJobActive(currentJob)) {
-        throw new Error("当前没有可停止的智能插件对话");
-    }
-    if (currentConversation?.id && currentJob.conversation_id && currentJob.conversation_id !== currentConversation.id) {
-        throw new Error("当前对话没有正在运行的智能插件任务");
-    }
-
-    const payload = await api.stopAiAssistantChatJob(jobId);
-    applyAiAssistantPayload(payload, true);
-    if (isAiAssistantJobTerminal(payload.job) && normalizeAiAssistantJobStatus(payload.job?.status) === "stopped") {
-        state.aiRequestInFlight = false;
-        state.aiActiveChatJobId = "";
-        state.aiActiveChatJob = payload.job || null;
-    }
-    renderAiAssistant();
-    renderAiAssistantConversationList();
+    return aiAssistantCtrl.stopChatJob();
 }
 
 async function pollAiAssistantChatJob(jobId) {
-    state.aiActiveChatJobId = jobId;
-    while (state.aiActiveChatJobId === jobId) {
-        const payload = await api.getAiAssistantChatJob(jobId);
-        applyAiAssistantPayload(payload, true);
-        renderAiAssistant();
-        renderAiAssistantConversationList();
-        const job = payload.job || {};
-        const jobStatus = normalizeAiAssistantJobStatus(job.status);
-        if (jobStatus === "completed") {
-            state.aiRequestInFlight = false;
-            state.aiActiveChatJobId = "";
-            state.aiActiveChatJob = job;
-            const messages = Array.isArray(getAiAssistantCurrentConversation()?.messages) ? getAiAssistantCurrentConversation().messages : [];
-            const latestAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
-            setStatus(`智能插件已完成，本次调用了 ${Number(latestAssistantMessage?.tool_traces?.length || 0)} 个工具`, "good");
-            renderAiAssistant();
-            return;
-        }
-        if (jobStatus === "stopped") {
-            state.aiRequestInFlight = false;
-            state.aiActiveChatJobId = "";
-            state.aiActiveChatJob = job;
-            setStatus("智能插件已停止");
-            renderAiAssistant();
-            return;
-        }
-        if (jobStatus === "failed") {
-            state.aiRequestInFlight = false;
-            state.aiActiveChatJobId = "";
-            state.aiActiveChatJob = job;
-            setStatus(`智能插件执行失败：${job.error || "未知错误"}`, "bad");
-            renderAiAssistant();
-            return;
-        }
-        await waitForDuration(AI_ASSISTANT_JOB_POLL_INTERVAL_MS);
-    }
+    return aiAssistantCtrl.pollChatJob(jobId);
 }
+
 
 async function loadLogs(fileName = state.selectedLogFile) {
-    state.logs = await api.getLogs(fileName, 1000, state.logFilters);
-    state.selectedLogFile = state.logs.active_file || "";
-    renderLogs();
+    return tabLoaders.loadLogs(fileName);
 }
 
+
 async function refreshCurrentTab() {
-    switch (state.activeTab) {
-        case "dashboard":
-            await loadOverview();
-            break;
-        case "messages":
-            await loadMessages();
-            break;
-        case "users":
-            await loadUsers();
-            break;
-        case "features":
-            await loadPlugins();
-            break;
-        case "ai-assistant":
-            await loadAiAssistant();
-            break;
-        case "plugins":
-            await loadPlugins();
-            break;
-        case "plugin-logs":
-            await loadPluginLogs();
-            break;
-        case "settings":
-            await loadSettings();
-            break;
-        case "logs":
-            await loadLogs();
-            break;
-        default:
-            break;
-    }
+    return tabLoaders.refreshCurrentTab();
+}
+
+async function loadPluginTargets(force = false) {
+    return tabLoaders.loadPluginTargets(force);
+}
+
+async function loadPluginTargetsIfNeeded(plugin) {
+    return tabLoaders.loadPluginTargetsIfNeeded(plugin);
+}
+
+async function loadPluginLogs(moduleName = state.selectedPluginLogModule, level = state.selectedPluginLogLevel, keyword = state.selectedPluginLogKeyword) {
+    return tabLoaders.loadPluginLogs(moduleName, level, keyword);
 }
 
 async function reloadFromConfig() {
@@ -1764,6 +1557,8 @@ async function bootstrap() {
         setStatus(`初始化失败：${error.message}`, "bad");
     }
 }
+
+initAppControllers();
 
 bootstrap();
 

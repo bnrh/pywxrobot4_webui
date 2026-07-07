@@ -303,6 +303,7 @@ class AppBuilders:
             payload["callback_secret_configured"] = bool(str(getattr(settings_obj, "callback_secret", "") or "").strip())
         return payload
 
+    @staticmethod
     def merge_secret_settings_updates(
         configured_settings: PluginServiceSettings,
         updates: dict[str, Any],
