@@ -1,4 +1,4 @@
-import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-05";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-06";
 import {
     AI_ASSISTANT_ACTIVE_JOB_STATUSES,
     AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
@@ -8,28 +8,28 @@ import {
     MANUAL_PLUGIN_EXECUTION_TERMINAL_STATUSES,
     OVERVIEW_POLL_INTERVAL_MS,
     OVERVIEW_RENDER_TICK_MS,
-} from "/static/js/polling-config.js?v=20260706-05";
-import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-05";
+} from "/static/js/polling-config.js?v=20260706-06";
+import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-06";
 import {
     escapeHtml,
     formatJson,
     highlightText,
     normalizeInlineText,
-} from "/static/js/dom-utils.js?v=20260706-05";
+} from "/static/js/dom-utils.js?v=20260706-06";
 import {
     formatDuration,
     formatHeartbeatInterval,
     formatStandardDateTime,
     formatUnixTimestamp,
     truncateText,
-} from "/static/js/format-utils.js?v=20260706-05";
+} from "/static/js/format-utils.js?v=20260706-06";
 import {
     getMessageTypeLabel,
     getPayloadValue,
     syncMessageTypeLabels,
-} from "/static/js/message-labels.js?v=20260706-05";
-import { tabMeta } from "/static/js/tab-meta.js?v=20260706-05";
-import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-05";
+} from "/static/js/message-labels.js?v=20260706-06";
+import { tabMeta } from "/static/js/tab-meta.js?v=20260706-06";
+import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-06";
 import {
     getConversationLabel,
     getMessageSummary,
@@ -37,14 +37,26 @@ import {
     getMessageTitle,
     getSenderLabel,
     renderAvatar,
-} from "/static/js/message-presenters.js?v=20260706-05";
+} from "/static/js/message-presenters.js?v=20260706-06";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260706-05";
+} from "/static/js/plugin-config-form.js?v=20260706-06";
+import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-06";
+import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-06";
+import {
+    applySearchableChoiceFilter,
+    applySearchableSelectFilter,
+    closeSearchableSelect,
+    getSearchableSelectElements,
+    handleSearchableSelectInput,
+    initializeSearchableChoiceFilters,
+    selectSearchableSelectOption,
+    syncScopeFieldVisibility,
+} from "/static/js/config-search.js?v=20260706-06";
 
 const state = {
     activeTab: "dashboard",
@@ -175,42 +187,6 @@ let logFilterTimerId = null;
 let pluginLogFilterTimerId = null;
 let messagePollInFlight = null;
 let manualPluginExecutionPollTimerId = null;
-
-function parseJsonObjectInput(value, label) {
-    const rawText = String(value ?? "").trim();
-    if (!rawText) {
-        return {};
-    }
-    let parsed;
-    try {
-        parsed = JSON.parse(rawText);
-    } catch {
-        throw new Error(`${label} 必须是合法 JSON 对象`);
-    }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error(`${label} 必须是 JSON 对象`);
-    }
-    return parsed;
-}
-
-async function copyTextToClipboard(value) {
-    const text = String(value ?? "");
-    if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        return;
-    }
-
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "readonly");
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    textarea.style.pointerEvents = "none";
-    document.body.append(textarea);
-    textarea.select();
-    document.execCommand("copy");
-    textarea.remove();
-}
 
 function setStatus(text, type = "") {
     elements.statusPill.textContent = text;
@@ -877,21 +853,13 @@ async function loadPluginTargets(force = false) {
 
 const WXPID_OPTION_DEFAULT = "__default_first__";
 const WXPID_OPTION_ALL = "__all__";
-const MESSAGE_SUMMARY_PLUGIN_KEYS = new Set(["room_msg_summary", "user_msg_summary"]);
-const DIRECT_EXECUTE_PLUGIN_KEYS = new Set(["room_msg_summary", "user_msg_summary", "export_contacts", "download_recent_user_images"]);
-
-function isPluginInSet(plugin, pluginKeys) {
-    const name = normalizeInlineText(plugin?.name || "").toLowerCase();
-    const moduleName = normalizeInlineText(plugin?.module || "").toLowerCase();
-    return [...pluginKeys].some((pluginKey) => name === pluginKey || moduleName.endsWith(`.${pluginKey}`) || moduleName === pluginKey);
-}
 
 function isMessageSummaryPlugin(plugin) {
-    return isPluginInSet(plugin, MESSAGE_SUMMARY_PLUGIN_KEYS);
+    return Boolean(plugin?.message_summary);
 }
 
 function isDirectExecutePlugin(plugin) {
-    return Boolean(plugin?.direct_execute) || isPluginInSet(plugin, DIRECT_EXECUTE_PLUGIN_KEYS);
+    return Boolean(plugin?.direct_execute);
 }
 
 function getRoomMsgSummaryLookbackSeconds(rangeKey) {
@@ -1226,20 +1194,6 @@ async function openPluginExecuteModal(moduleName) {
     elements.pluginExecuteModal.classList.add("is-visible");
 }
 
-function isNetworkFetchError(error) {
-    const message = normalizeInlineText(error?.message || error);
-    return message === "Failed to fetch" || /NetworkError/i.test(message);
-}
-
-function getMessagePollErrorText(error, failureCount) {
-    if (isNetworkFetchError(error)) {
-        return failureCount > 1
-            ? `消息服务仍未连通，正在第 ${failureCount} 次重试...`
-            : "消息服务暂时不可用，正在自动重连...";
-    }
-    return `消息自动刷新失败：${error.message}`;
-}
-
 function handleMessagePollSuccess() {
     if (state.messagePollFailureCount > 0 && state.activeTab === "messages") {
         setStatus("消息自动刷新已恢复", "good");
@@ -1539,194 +1493,6 @@ function renderPluginCards(targetElement, plugins, emptyText, pluginKind) {
             </article>
         `;
     }).join("");
-}
-
-function normalizeChoiceSearchText(value) {
-    return String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-}
-
-function normalizeScopeModeValue(value) {
-    const normalized = String(value ?? "").trim();
-    return normalized.replace(/^"|"$/g, "");
-}
-
-function applySearchableChoiceFilter(input) {
-    const fieldContainer = input?.closest("[data-config-field]");
-    if (!fieldContainer) {
-        return;
-    }
-    const query = normalizeChoiceSearchText(input.value);
-    const showSelectedInput = fieldContainer.querySelector("[data-config-show-selected]");
-    const showSelectedOnly = Boolean(showSelectedInput?.checked);
-    const choiceItems = [...fieldContainer.querySelectorAll("[data-config-choice-item]")];
-    let visibleCount = 0;
-    for (const item of choiceItems) {
-        const searchText = normalizeChoiceSearchText(item.dataset.searchText || item.textContent || "");
-        const checkedInput = item.querySelector('input[type="checkbox"][data-config-key]');
-        const checkedMatched = !showSelectedOnly || Boolean(checkedInput?.checked);
-        const matched = (!query || searchText.includes(query)) && checkedMatched;
-        item.hidden = !matched;
-        item.style.display = matched ? "" : "none";
-        if (matched) {
-            visibleCount += 1;
-        }
-    }
-    const emptyState = fieldContainer.querySelector("[data-config-search-empty]");
-    if (emptyState) {
-        emptyState.hidden = visibleCount > 0;
-    }
-}
-
-function initializeSearchableChoiceFilters(container) {
-    if (!container) {
-        return;
-    }
-    container.querySelectorAll("[data-config-search-input]").forEach((input) => {
-        applySearchableChoiceFilter(input);
-    });
-}
-
-function getSearchableSelectElements(container) {
-    return {
-        input: container?.querySelector("[data-config-searchable-input]"),
-        hiddenInput: container?.querySelector("[data-config-searchable-value]"),
-        menu: container?.querySelector("[data-config-searchable-menu]"),
-        emptyState: container?.querySelector("[data-config-searchable-empty]"),
-        options: container ? [...container.querySelectorAll("[data-config-searchable-option]")] : [],
-    };
-}
-
-function getSearchableSelectOptionLabel(optionButton) {
-    return String(
-        optionButton?.dataset.optionLabel
-        || optionButton?.querySelector(".config-searchable-select-option-title")?.textContent
-        || ""
-    ).trim();
-}
-
-function getSelectedSearchableSelectOption(container) {
-    const { hiddenInput, options } = getSearchableSelectElements(container);
-    if (!hiddenInput?.value) {
-        return null;
-    }
-    return options.find((option) => option.dataset.optionValue === hiddenInput.value) || null;
-}
-
-function syncSearchableSelectSelection(container) {
-    const selectedOption = getSelectedSearchableSelectOption(container);
-    const { options } = getSearchableSelectElements(container);
-    for (const option of options) {
-        option.classList.toggle("is-selected", option === selectedOption);
-    }
-}
-
-function applySearchableSelectFilter(input) {
-    const container = input?.closest("[data-config-searchable-select]");
-    if (!container) {
-        return;
-    }
-    const { menu, emptyState, options } = getSearchableSelectElements(container);
-    const query = normalizeChoiceSearchText(input.value);
-    let visibleCount = 0;
-    for (const option of options) {
-        const searchText = normalizeChoiceSearchText(option.dataset.searchText || option.textContent || "");
-        const matched = !query || searchText.includes(query);
-        option.hidden = !matched;
-        option.style.display = matched ? "" : "none";
-        if (matched) {
-            visibleCount += 1;
-        }
-    }
-    if (emptyState) {
-        emptyState.hidden = visibleCount > 0;
-    }
-    if (menu) {
-        menu.hidden = false;
-    }
-    container.classList.add("is-open");
-}
-
-function closeSearchableSelect(container, restoreDisplay = false) {
-    if (!container) {
-        return;
-    }
-    const { input, menu } = getSearchableSelectElements(container);
-    const selectedOption = getSelectedSearchableSelectOption(container);
-    if (restoreDisplay && input) {
-        input.value = selectedOption ? getSearchableSelectOptionLabel(selectedOption) : "";
-    }
-    if (menu) {
-        menu.hidden = true;
-    }
-    container.classList.remove("is-open");
-}
-
-function clearSearchableSelectSelection(container) {
-    const { hiddenInput } = getSearchableSelectElements(container);
-    if (hiddenInput) {
-        hiddenInput.value = "";
-    }
-    syncSearchableSelectSelection(container);
-}
-
-function handleSearchableSelectInput(input) {
-    const container = input?.closest("[data-config-searchable-select]");
-    if (!container) {
-        return;
-    }
-    const selectedOption = getSelectedSearchableSelectOption(container);
-    if (selectedOption) {
-        const query = normalizeChoiceSearchText(input.value);
-        const selectedLabel = normalizeChoiceSearchText(getSearchableSelectOptionLabel(selectedOption));
-        const selectedRawValue = normalizeChoiceSearchText(selectedOption.dataset.optionRawValue || "");
-        if (query && query !== selectedLabel && query !== selectedRawValue) {
-            clearSearchableSelectSelection(container);
-        }
-    }
-    applySearchableSelectFilter(input);
-}
-
-function selectSearchableSelectOption(optionButton) {
-    const container = optionButton?.closest("[data-config-searchable-select]");
-    if (!container) {
-        return;
-    }
-    const { input, hiddenInput } = getSearchableSelectElements(container);
-    if (hiddenInput) {
-        hiddenInput.value = optionButton.dataset.optionValue || "";
-    }
-    if (input) {
-        input.value = getSearchableSelectOptionLabel(optionButton);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-    syncSearchableSelectSelection(container);
-    closeSearchableSelect(container, false);
-    hiddenInput?.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
-function syncScopeFieldVisibility(container) {
-    if (!container) {
-        return;
-    }
-
-    const rules = [
-        ["_scope_room_mode", "_scope_room_ids"],
-        ["_scope_friend_mode", "_scope_friend_labels"],
-    ];
-
-    for (const [controllerKey, targetKey] of rules) {
-        const controller = container.querySelector(`[data-config-key="${controllerKey}"]`);
-        const target = container.querySelector(`[data-config-field="${targetKey}"]`);
-        if (!controller || !target) {
-            continue;
-        }
-        const shouldShow = normalizeScopeModeValue(controller.value) === "selected";
-        target.hidden = !shouldShow;
-        target.style.display = shouldShow ? "" : "none";
-        if (shouldShow) {
-            initializeSearchableChoiceFilters(target);
-        }
-    }
 }
 
 function renderPlugins() {
