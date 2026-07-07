@@ -291,10 +291,10 @@ elements.aiAssistantPromptForm.addEventListener("submit", async (event) => {
     actions.renderAiAssistant();
 
     try {
-        let conversationId = getAiAssistantCurrentConversationId();
+        let conversationId = actions.getAiAssistantCurrentConversationId();
         if (!conversationId) {
             await actions.createAiAssistantConversation();
-            conversationId = getAiAssistantCurrentConversationId();
+            conversationId = actions.getAiAssistantCurrentConversationId();
         }
         actions.setStatus("智能插件正在调用模型与工具...");
         const payload = await actions.api.createAiAssistantChatJob(
@@ -328,7 +328,7 @@ elements.messageList.addEventListener("click", (event) => {
     }
     state().selectedMessageId = Number(target.dataset.messageId);
     state().messageAutoFollow = state().selectedMessageId === state().messages[0]?.internal_id;
-    renderMessages();
+    actions.renderMessages();
 });
 
 elements.messageDetail.addEventListener("click", async (event) => {
@@ -388,7 +388,7 @@ async function handlePluginGridAction(event) {
         if (button.dataset.action === "toggle-plugin") {
             actions.setStatus("正在切换插件状态...");
             const result = await actions.api.togglePlugin(moduleName, button.dataset.enabled === "1");
-            applyPluginMutationResult(result);
+            actions.applyPluginMutationResult(result);
             const suffix = result.restart_required ? `，需要重启字段：${result.restart_required_fields.join(", ")}` : "";
             actions.setStatus(`插件状态已更新${suffix}`, result.restart_required ? "bad" : "good");
         } else if (button.dataset.action === "execute-plugin") {
@@ -399,14 +399,14 @@ async function handlePluginGridAction(event) {
             } else {
                 actions.setStatus("正在准备执行范围...");
                 if (plugin) {
-                    await loadPluginTargetsIfNeeded(plugin);
+                    await actions.loadPluginTargetsIfNeeded(plugin);
                 }
                 await actions.openPluginExecuteModal(moduleName);
             }
         } else if (button.dataset.action === "stop-plugin-execution") {
             actions.setStatus("正在停止功能插件...");
             const result = await actions.api.stopPluginExecution(moduleName);
-            applyPluginMutationResult(result);
+            actions.applyPluginMutationResult(result);
             const detail = normalizeInlineText(result?.execution?.detail || "");
             actions.setStatus(detail || "正在停止插件...");
         }
@@ -431,7 +431,7 @@ elements.pluginLogList.addEventListener("click", (event) => {
         return;
     }
     state().selectedPluginLogId = Number(button.dataset.pluginLogId);
-    renderPluginLogs();
+    actions.renderPluginLogs();
 });
 
 elements.pluginLogFilter.addEventListener("change", async () => {
@@ -576,7 +576,7 @@ elements.savePluginConfigButton.addEventListener("click", async () => {
             })();
         actions.setStatus("正在保存插件配置...");
         const result = await actions.api.savePluginConfig(state().pluginConfigModule, config);
-        applyPluginMutationResult(result);
+        actions.applyPluginMutationResult(result);
         actions.closePluginConfigModal();
         const suffix = result.restart_required ? `，需要重启字段：${result.restart_required_fields.join(", ")}` : "";
         actions.setStatus(`插件配置已保存${suffix}`, result.restart_required ? "bad" : "good");
@@ -669,8 +669,8 @@ elements.logLevelFilter.addEventListener("change", async () => {
     }
 });
 
-elements.logModuleFilter.addEventListener("input", scheduleLogFilterRefresh);
-elements.logKeywordFilter.addEventListener("input", scheduleLogFilterRefresh);
+elements.logModuleFilter.addEventListener("input", () => actions.scheduleLogFilterRefresh());
+elements.logKeywordFilter.addEventListener("input", () => actions.scheduleLogFilterRefresh());
 
 elements.refreshLogsButton.addEventListener("click", async () => {
     try {

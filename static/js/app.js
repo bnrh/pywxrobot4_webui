@@ -1,18 +1,18 @@
-import { api, getStoredApiToken, setStoredApiToken } from "/static/js/api.js?v=20260706-13";
+import { api, getStoredApiToken, setStoredApiToken } from "/static/js/api.js?v=20260706-14";
 import {
     AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
     MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS,
     OVERVIEW_POLL_INTERVAL_MS,
     OVERVIEW_RENDER_TICK_MS,
-} from "/static/js/polling-config.js?v=20260706-13";
+} from "/static/js/polling-config.js?v=20260706-14";
 import {
     formatJson,
     normalizeInlineText,
-} from "/static/js/dom-utils.js?v=20260706-13";
-import { syncMessageTypeLabels } from "/static/js/message-labels.js?v=20260706-13";
-import { tabMeta } from "/static/js/tab-meta.js?v=20260706-13";
-import { copyTextToClipboard } from "/static/js/clipboard-utils.js?v=20260706-13";
-import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-13";
+} from "/static/js/dom-utils.js?v=20260706-14";
+import { syncMessageTypeLabels } from "/static/js/message-labels.js?v=20260706-14";
+import { tabMeta } from "/static/js/tab-meta.js?v=20260706-14";
+import { copyTextToClipboard } from "/static/js/clipboard-utils.js?v=20260706-14";
+import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-14";
 import {
     getPluginByModule as findPluginInList,
     getPluginDisplayName as resolvePluginDisplayName,
@@ -23,34 +23,34 @@ import {
     needsPluginTargets,
     normalizeManualPluginExecution,
     sortPluginsForDisplay,
-} from "/static/js/plugin-helpers.js?v=20260706-13";
-import { renderOverviewGrid } from "/static/js/overview-view.js?v=20260706-13";
-import { renderMessagesView } from "/static/js/message-view.js?v=20260706-13";
-import { renderUsersView } from "/static/js/users-view.js?v=20260706-13";
-import { readSettingsForm, renderSettingsView } from "/static/js/settings-view.js?v=20260706-13";
-import { createAiAssistantController } from "/static/js/ai-assistant-controller.js?v=20260706-13";
-import { createTabLoaders } from "/static/js/tab-loaders.js?v=20260706-13";
-import { createPluginModalActions } from "/static/js/plugin-modals.js?v=20260706-13";
-import { registerAppEvents } from "/static/js/app-events.js?v=20260706-13";
-import { bootstrapApp, startAppRuntime } from "/static/js/app-runtime.js?v=20260706-13";
-import { registerPluginFormEventHandlers } from "/static/js/plugin-form-handlers.js?v=20260706-13";
+} from "/static/js/plugin-helpers.js?v=20260706-14";
+import { renderOverviewGrid } from "/static/js/overview-view.js?v=20260706-14";
+import { renderMessagesView } from "/static/js/message-view.js?v=20260706-14";
+import { renderUsersView } from "/static/js/users-view.js?v=20260706-14";
+import { readSettingsForm, renderSettingsView } from "/static/js/settings-view.js?v=20260706-14";
+import { createAiAssistantController } from "/static/js/ai-assistant-controller.js?v=20260706-14";
+import { createTabLoaders } from "/static/js/tab-loaders.js?v=20260706-14";
+import { createPluginModalActions } from "/static/js/plugin-modals.js?v=20260706-14";
+import { registerAppEvents } from "/static/js/app-events.js?v=20260706-14";
+import { bootstrapApp, startAppRuntime } from "/static/js/app-runtime.js?v=20260706-14";
+import { registerPluginFormEventHandlers } from "/static/js/plugin-form-handlers.js?v=20260706-14";
 
 
-import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-13";
-import { waitForDuration } from "/static/js/async-utils.js?v=20260706-13";
-import { createLogFilterActions, renderServiceLogs, syncLogFiltersFromControls as readLogFiltersFromControls } from "/static/js/log-viewer.js?v=20260706-13";
-import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-13";
-import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-13";
+import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-14";
+import { waitForDuration } from "/static/js/async-utils.js?v=20260706-14";
+import { createLogFilterActions, renderServiceLogs } from "/static/js/log-viewer.js?v=20260706-14";
+import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-14";
+import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-14";
 import {
     buildPluginConfigRenderModel,
     buildPluginExecuteRenderModel,
     buildStructuredPluginConfigPayload,
     getPluginModuleNameForForm,
-} from "/static/js/plugin-config-render.js?v=20260706-13";
+} from "/static/js/plugin-config-render.js?v=20260706-14";
 import {
     decodeAiAssistantModelSelection,
     normalizeAiAssistantJobStatus,
-} from "/static/js/ai-assistant-data.js?v=20260706-13";
+} from "/static/js/ai-assistant-data.js?v=20260706-14";
 import {
     appendAiAssistantConfigRow as appendAiAssistantConfigRowView,
     appendAiAssistantPromptPluginRow as appendAiAssistantPromptPluginRowView,
@@ -67,7 +67,7 @@ import {
     syncAiAssistantConfigTableState as syncAiAssistantConfigTableStateView,
     syncAiAssistantPromptPluginCardState as syncAiAssistantPromptPluginCardStateView,
     syncAiAssistantPromptPluginTableState as syncAiAssistantPromptPluginTableStateView,
-} from "/static/js/ai-assistant-ui.js?v=20260706-13";
+} from "/static/js/ai-assistant-ui.js?v=20260706-14";
 
 const state = {
     activeTab: "dashboard",
@@ -436,50 +436,6 @@ function applyAiAssistantPayload(payload, preserveSelection = true) {
     aiAssistantCtrl.applyPayload(payload, preserveSelection);
 }
 
-function getAiAssistantConversations() {
-    return aiAssistantCtrl.getConversations();
-}
-
-function getAiAssistantCurrentConversation() {
-    return aiAssistantCtrl.getCurrentConversation();
-}
-
-function getAiAssistantCurrentConversationId() {
-    return aiAssistantCtrl.getCurrentConversationId();
-}
-
-function getAiAssistantProviders() {
-    return aiAssistantCtrl.getProviders();
-}
-
-function getAiAssistantSettings() {
-    return aiAssistantCtrl.getSettings();
-}
-
-function getAiAssistantPromptPlugins() {
-    return aiAssistantCtrl.getPromptPlugins();
-}
-
-function getAiAssistantPromptPlugin(promptPluginId = state.aiAssistantUi.selectedPromptPluginId) {
-    return aiAssistantCtrl.getPromptPlugin(promptPluginId);
-}
-
-function getAiAssistantProvider(providerKey = state.aiAssistantUi.selectedProvider) {
-    return aiAssistantCtrl.getProvider(providerKey);
-}
-
-function getAiAssistantCurrentSelection() {
-    return aiAssistantCtrl.getCurrentSelection();
-}
-
-function setAiAssistantProviderSelection(providerKey, preferredModel = "", preferredConfigId = "") {
-    aiAssistantCtrl.setProviderSelection(providerKey, preferredModel, preferredConfigId);
-}
-
-function syncAiAssistantUiFromPayload(preserveSelection = true) {
-    aiAssistantCtrl.syncUiFromPayload(preserveSelection);
-}
-
 function aiAssistantUiCtx() {
     return aiAssistantCtrl.buildUiCtx(elements);
 }
@@ -548,93 +504,6 @@ function renderLogs() {
     renderServiceLogs(elements, state.logs, state.logFilters);
 }
 
-
-async function loadOverview() {
-    return tabLoaders.loadOverview();
-}
-
-async function loadMessages() {
-    return tabLoaders.loadMessages();
-}
-
-async function loadUsers() {
-    return tabLoaders.loadUsers();
-}
-
-async function loadPluginTargetsIfNeeded(plugin) {
-    if (!needsPluginTargets(plugin)) {
-        return state.pluginTargets;
-    }
-    return loadPluginTargets();
-}
-
-
-async function refreshMessagesByPoll() {
-    return tabLoaders.refreshMessagesByPoll();
-}
-
-
-async function loadPlugins() {
-    return tabLoaders.loadPlugins();
-}
-
-
-function schedulePluginLogKeywordRefresh() {
-    tabLoaders.schedulePluginLogKeywordRefresh();
-}
-
-
-async function loadSettings() {
-    return tabLoaders.loadSettings();
-}
-
-
-async function loadAiAssistant() {
-    return aiAssistantCtrl.load();
-}
-
-async function createAiAssistantConversation() {
-    return aiAssistantCtrl.createConversation();
-}
-
-async function activateAiAssistantConversation(conversationId) {
-    return aiAssistantCtrl.activateConversation(conversationId);
-}
-
-async function clearAiAssistantConversation() {
-    return aiAssistantCtrl.clearConversation();
-}
-
-async function stopAiAssistantChatJob() {
-    return aiAssistantCtrl.stopChatJob();
-}
-
-async function pollAiAssistantChatJob(jobId) {
-    return aiAssistantCtrl.pollChatJob(jobId);
-}
-
-
-async function loadLogs(fileName = state.selectedLogFile) {
-    return tabLoaders.loadLogs(fileName);
-}
-
-
-async function refreshCurrentTab() {
-    return tabLoaders.refreshCurrentTab();
-}
-
-async function loadPluginTargets(force = false) {
-    return tabLoaders.loadPluginTargets(force);
-}
-
-async function loadPluginTargetsIfNeeded(plugin) {
-    return tabLoaders.loadPluginTargetsIfNeeded(plugin);
-}
-
-async function loadPluginLogs(moduleName = state.selectedPluginLogModule, level = state.selectedPluginLogLevel, keyword = state.selectedPluginLogKeyword) {
-    return tabLoaders.loadPluginLogs(moduleName, level, keyword);
-}
-
 async function reloadFromConfig() {
     setStatus("正在从 SQLite 配置库重载...");
     const result = await api.reloadPlugins();
@@ -646,7 +515,7 @@ async function reloadFromConfig() {
 function switchTab(tabName) {
     state.activeTab = tabName;
     updateHeaderForTab(tabName);
-    refreshCurrentTab().catch((error) => {
+    tabLoaders.refreshCurrentTab().catch((error) => {
         setStatus(`加载失败：${error.message}`, "bad");
     });
 }
@@ -666,11 +535,13 @@ function buildAppActions() {
         reloadFromConfig,
         updateHeaderForTab,
         syncMessageTypeLabels,
+        applyPluginMutationResult,
         loadOverview: () => tabLoaders.loadOverview(),
         loadMessages: () => tabLoaders.loadMessages(),
         loadUsers: () => tabLoaders.loadUsers(),
         loadPlugins: () => tabLoaders.loadPlugins(),
         loadPluginLogs: (...args) => tabLoaders.loadPluginLogs(...args),
+        loadPluginTargetsIfNeeded: (plugin) => tabLoaders.loadPluginTargetsIfNeeded(plugin),
         loadSettings: () => tabLoaders.loadSettings(),
         loadLogs: (...args) => tabLoaders.loadLogs(...args),
         loadAiAssistant: () => aiAssistantCtrl.load(),
@@ -678,6 +549,8 @@ function buildAppActions() {
         refreshMessagesByPoll: () => tabLoaders.refreshMessagesByPoll(),
         schedulePluginLogKeywordRefresh: () => tabLoaders.schedulePluginLogKeywordRefresh(),
         renderOverview,
+        renderMessages,
+        renderPluginLogs,
         renderSettings,
         renderAiAssistant,
         renderAiAssistantConversationList,
@@ -688,6 +561,7 @@ function buildAppActions() {
         clearAiAssistantConversation: () => aiAssistantCtrl.clearConversation(),
         stopAiAssistantChatJob: () => aiAssistantCtrl.stopChatJob(),
         pollAiAssistantChatJob: (jobId) => aiAssistantCtrl.pollChatJob(jobId),
+        getAiAssistantCurrentConversationId: () => aiAssistantCtrl.getCurrentConversationId(),
         getAiAssistantCurrentSelection: () => aiAssistantCtrl.getCurrentSelection(),
         setAiAssistantProviderSelection: (...args) => aiAssistantCtrl.setProviderSelection(...args),
         normalizeAiAssistantJobStatus,
@@ -726,10 +600,6 @@ function buildAppActions() {
         overviewRenderTickMs: OVERVIEW_RENDER_TICK_MS,
         overviewPollIntervalMs: OVERVIEW_POLL_INTERVAL_MS,
     };
-}
-
-function syncLogFiltersFromControls() {
-    logFilterActions.syncLogFiltersFromControls();
 }
 
 initAppControllers();

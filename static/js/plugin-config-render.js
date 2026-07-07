@@ -8,12 +8,12 @@ import {
 import {
     readStructuredPluginConfig,
     renderPluginConfigFields,
+    hasStructuredPluginConfig,
 } from "./plugin-config-form.js";
 import {
     findPluginDynamicModelField,
     getPluginDynamicOptionPayloads,
     getPluginScopeTargets,
-    hasStructuredPluginConfig,
     isMessageSummaryPlugin,
     mergeOptionsWithCurrentValues,
     normalizeRoomMsgSummaryRenderConfig,
