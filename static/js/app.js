@@ -1,18 +1,18 @@
-import { api, getStoredApiToken, setStoredApiToken } from "/static/js/api.js?v=20260706-14";
+import { api, getStoredApiToken, setStoredApiToken } from "/static/js/api.js?v=20260706-15";
 import {
     AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
     MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS,
     OVERVIEW_POLL_INTERVAL_MS,
     OVERVIEW_RENDER_TICK_MS,
-} from "/static/js/polling-config.js?v=20260706-14";
+} from "/static/js/polling-config.js?v=20260706-15";
 import {
     formatJson,
     normalizeInlineText,
-} from "/static/js/dom-utils.js?v=20260706-14";
-import { syncMessageTypeLabels } from "/static/js/message-labels.js?v=20260706-14";
-import { tabMeta } from "/static/js/tab-meta.js?v=20260706-14";
-import { copyTextToClipboard } from "/static/js/clipboard-utils.js?v=20260706-14";
-import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-14";
+} from "/static/js/dom-utils.js?v=20260706-15";
+import { syncMessageTypeLabels } from "/static/js/message-labels.js?v=20260706-15";
+import { tabMeta } from "/static/js/tab-meta.js?v=20260706-15";
+import { copyTextToClipboard } from "/static/js/clipboard-utils.js?v=20260706-15";
+import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-15";
 import {
     getPluginByModule as findPluginInList,
     getPluginDisplayName as resolvePluginDisplayName,
@@ -23,51 +23,35 @@ import {
     needsPluginTargets,
     normalizeManualPluginExecution,
     sortPluginsForDisplay,
-} from "/static/js/plugin-helpers.js?v=20260706-14";
-import { renderOverviewGrid } from "/static/js/overview-view.js?v=20260706-14";
-import { renderMessagesView } from "/static/js/message-view.js?v=20260706-14";
-import { renderUsersView } from "/static/js/users-view.js?v=20260706-14";
-import { readSettingsForm, renderSettingsView } from "/static/js/settings-view.js?v=20260706-14";
-import { createAiAssistantController } from "/static/js/ai-assistant-controller.js?v=20260706-14";
-import { createTabLoaders } from "/static/js/tab-loaders.js?v=20260706-14";
-import { createPluginModalActions } from "/static/js/plugin-modals.js?v=20260706-14";
-import { registerAppEvents } from "/static/js/app-events.js?v=20260706-14";
-import { bootstrapApp, startAppRuntime } from "/static/js/app-runtime.js?v=20260706-14";
-import { registerPluginFormEventHandlers } from "/static/js/plugin-form-handlers.js?v=20260706-14";
+} from "/static/js/plugin-helpers.js?v=20260706-15";
+import { renderOverviewGrid } from "/static/js/overview-view.js?v=20260706-15";
+import { renderMessagesView } from "/static/js/message-view.js?v=20260706-15";
+import { renderUsersView } from "/static/js/users-view.js?v=20260706-15";
+import { readSettingsForm, renderSettingsView } from "/static/js/settings-view.js?v=20260706-15";
+import { createAiAssistantController } from "/static/js/ai-assistant-controller.js?v=20260706-15";
+import { createAiAssistantUiActions } from "/static/js/ai-assistant-ui-actions.js?v=20260706-15";
+import { createTabLoaders } from "/static/js/tab-loaders.js?v=20260706-15";
+import { createPluginModalActions } from "/static/js/plugin-modals.js?v=20260706-15";
+import { registerAppEvents } from "/static/js/app-events.js?v=20260706-15";
+import { bootstrapApp, startAppRuntime } from "/static/js/app-runtime.js?v=20260706-15";
+import { registerPluginFormEventHandlers } from "/static/js/plugin-form-handlers.js?v=20260706-15";
 
 
-import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-14";
-import { waitForDuration } from "/static/js/async-utils.js?v=20260706-14";
-import { createLogFilterActions, renderServiceLogs } from "/static/js/log-viewer.js?v=20260706-14";
-import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-14";
-import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-14";
+import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-15";
+import { waitForDuration } from "/static/js/async-utils.js?v=20260706-15";
+import { createLogFilterActions, renderServiceLogs } from "/static/js/log-viewer.js?v=20260706-15";
+import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-15";
+import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-15";
 import {
     buildPluginConfigRenderModel,
     buildPluginExecuteRenderModel,
     buildStructuredPluginConfigPayload,
     getPluginModuleNameForForm,
-} from "/static/js/plugin-config-render.js?v=20260706-14";
+} from "/static/js/plugin-config-render.js?v=20260706-15";
 import {
     decodeAiAssistantModelSelection,
     normalizeAiAssistantJobStatus,
-} from "/static/js/ai-assistant-data.js?v=20260706-14";
-import {
-    appendAiAssistantConfigRow as appendAiAssistantConfigRowView,
-    appendAiAssistantPromptPluginRow as appendAiAssistantPromptPluginRowView,
-    closeAiAssistantConfigModal as closeAiAssistantConfigModalView,
-    closeAiAssistantConversationModal as closeAiAssistantConversationModalView,
-    closeAiAssistantToolsModal as closeAiAssistantToolsModalView,
-    openAiAssistantConfigModal as openAiAssistantConfigModalView,
-    openAiAssistantConversationModal as openAiAssistantConversationModalView,
-    openAiAssistantToolsModal as openAiAssistantToolsModalView,
-    readAiAssistantSettingsForm as readAiAssistantSettingsFormView,
-    renderAiAssistant as renderAiAssistantView,
-    renderAiAssistantConversationList as renderAiAssistantConversationListView,
-    syncAiAssistantConfigRowState as syncAiAssistantConfigRowStateView,
-    syncAiAssistantConfigTableState as syncAiAssistantConfigTableStateView,
-    syncAiAssistantPromptPluginCardState as syncAiAssistantPromptPluginCardStateView,
-    syncAiAssistantPromptPluginTableState as syncAiAssistantPromptPluginTableStateView,
-} from "/static/js/ai-assistant-ui.js?v=20260706-14";
+} from "/static/js/ai-assistant-data.js?v=20260706-15";
 
 const state = {
     activeTab: "dashboard",
@@ -200,6 +184,7 @@ let messagePollInFlight = null;
 let manualPluginExecutionPollTimerId = null;
 
 let aiAssistantCtrl;
+let aiAssistantUi;
 let tabLoaders;
 let pluginModals;
 
@@ -207,11 +192,12 @@ function initAppControllers() {
     aiAssistantCtrl = createAiAssistantController(() => state, {
         api,
         setStatus,
-        renderAiAssistant,
-        renderAiAssistantConversationList,
+        renderAiAssistant: () => aiAssistantUi.renderAiAssistant(),
+        renderAiAssistantConversationList: () => aiAssistantUi.renderAiAssistantConversationList(),
         waitForDuration,
         aiJobPollIntervalMs: AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
     });
+    aiAssistantUi = createAiAssistantUiActions(() => aiAssistantCtrl.buildUiCtx(elements));
     tabLoaders = createTabLoaders(() => state, {
         api,
         setOverviewData,
@@ -431,75 +417,6 @@ function renderSettings() {
     renderSettingsView(elements, state.settings, getStoredApiToken);
 }
 
-
-function applyAiAssistantPayload(payload, preserveSelection = true) {
-    aiAssistantCtrl.applyPayload(payload, preserveSelection);
-}
-
-function aiAssistantUiCtx() {
-    return aiAssistantCtrl.buildUiCtx(elements);
-}
-
-function renderAiAssistantConversationList() {
-    renderAiAssistantConversationListView(aiAssistantUiCtx());
-}
-
-function renderAiAssistant() {
-    renderAiAssistantView(aiAssistantUiCtx());
-}
-
-function readAiAssistantSettingsForm() {
-    return readAiAssistantSettingsFormView(aiAssistantUiCtx());
-}
-
-function openAiAssistantConversationModal() {
-    openAiAssistantConversationModalView(aiAssistantUiCtx());
-}
-
-function openAiAssistantConfigModal() {
-    openAiAssistantConfigModalView(aiAssistantUiCtx());
-}
-
-function openAiAssistantToolsModal() {
-    openAiAssistantToolsModalView(aiAssistantUiCtx());
-}
-
-function closeAiAssistantConfigModal() {
-    closeAiAssistantConfigModalView(aiAssistantUiCtx());
-}
-
-function closeAiAssistantConversationModal() {
-    closeAiAssistantConversationModalView(aiAssistantUiCtx());
-}
-
-function closeAiAssistantToolsModal() {
-    closeAiAssistantToolsModalView(aiAssistantUiCtx());
-}
-
-function appendAiAssistantPromptPluginRow() {
-    appendAiAssistantPromptPluginRowView(aiAssistantUiCtx());
-}
-
-function syncAiAssistantPromptPluginTableState() {
-    syncAiAssistantPromptPluginTableStateView(aiAssistantUiCtx());
-}
-
-function syncAiAssistantPromptPluginCardState(card) {
-    syncAiAssistantPromptPluginCardStateView(aiAssistantUiCtx(), card);
-}
-
-function appendAiAssistantConfigRow(providerKey) {
-    appendAiAssistantConfigRowView(aiAssistantUiCtx(), providerKey);
-}
-
-function syncAiAssistantConfigTableState() {
-    syncAiAssistantConfigTableStateView(aiAssistantUiCtx());
-}
-
-function syncAiAssistantConfigRowState(row) {
-    syncAiAssistantConfigRowStateView(aiAssistantUiCtx(), row);
-}
-
 function renderLogs() {
     renderServiceLogs(elements, state.logs, state.logFilters);
 }
@@ -552,9 +469,9 @@ function buildAppActions() {
         renderMessages,
         renderPluginLogs,
         renderSettings,
-        renderAiAssistant,
-        renderAiAssistantConversationList,
-        readAiAssistantSettingsForm,
+        renderAiAssistant: () => aiAssistantUi.renderAiAssistant(),
+        renderAiAssistantConversationList: () => aiAssistantUi.renderAiAssistantConversationList(),
+        readAiAssistantSettingsForm: () => aiAssistantUi.readAiAssistantSettingsForm(),
         applyAiAssistantPayload: (payload, preserveSelection = true) => aiAssistantCtrl.applyPayload(payload, preserveSelection),
         createAiAssistantConversation: () => aiAssistantCtrl.createConversation(),
         activateAiAssistantConversation: (conversationId) => aiAssistantCtrl.activateConversation(conversationId),
@@ -566,18 +483,18 @@ function buildAppActions() {
         setAiAssistantProviderSelection: (...args) => aiAssistantCtrl.setProviderSelection(...args),
         normalizeAiAssistantJobStatus,
         decodeAiAssistantModelSelection,
-        openAiAssistantConfigModal,
-        openAiAssistantToolsModal,
-        openAiAssistantConversationModal,
-        closeAiAssistantConfigModal,
-        closeAiAssistantConversationModal,
-        closeAiAssistantToolsModal,
-        appendAiAssistantPromptPluginRow,
-        syncAiAssistantPromptPluginTableState,
-        appendAiAssistantConfigRow,
-        syncAiAssistantConfigTableState,
-        syncAiAssistantPromptPluginCardState,
-        syncAiAssistantConfigRowState,
+        openAiAssistantConfigModal: () => aiAssistantUi.openAiAssistantConfigModal(),
+        openAiAssistantToolsModal: () => aiAssistantUi.openAiAssistantToolsModal(),
+        openAiAssistantConversationModal: () => aiAssistantUi.openAiAssistantConversationModal(),
+        closeAiAssistantConfigModal: () => aiAssistantUi.closeAiAssistantConfigModal(),
+        closeAiAssistantConversationModal: () => aiAssistantUi.closeAiAssistantConversationModal(),
+        closeAiAssistantToolsModal: () => aiAssistantUi.closeAiAssistantToolsModal(),
+        appendAiAssistantPromptPluginRow: () => aiAssistantUi.appendAiAssistantPromptPluginRow(),
+        syncAiAssistantPromptPluginTableState: () => aiAssistantUi.syncAiAssistantPromptPluginTableState(),
+        appendAiAssistantConfigRow: (providerKey) => aiAssistantUi.appendAiAssistantConfigRow(providerKey),
+        syncAiAssistantConfigTableState: () => aiAssistantUi.syncAiAssistantConfigTableState(),
+        syncAiAssistantPromptPluginCardState: (card) => aiAssistantUi.syncAiAssistantPromptPluginCardState(card),
+        syncAiAssistantConfigRowState: (row) => aiAssistantUi.syncAiAssistantConfigRowState(row),
         openPluginConfigModal,
         openPluginExecuteModal,
         closePluginConfigModal,

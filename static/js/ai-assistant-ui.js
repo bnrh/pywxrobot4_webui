@@ -120,106 +120,6 @@ export function renderAiConversation(ctx) {
     ctx.elements.aiAssistantConversation.scrollTop = ctx.elements.aiAssistantConversation.scrollHeight;
 }
 
-export function getAiAssistantConversations(ctx, ) {
-    return listAiAssistantConversations(ctx.aiAssistant);
-}
-
-export function getAiAssistantCurrentConversation(ctx, ) {
-    return readAiAssistantCurrentConversation(ctx.aiAssistant);
-}
-
-export function getAiAssistantCurrentConversationId(ctx, ) {
-    return readAiAssistantCurrentConversationId(ctx.aiAssistant);
-}
-
-export function getAiAssistantProviders(ctx, ) {
-    return listAiAssistantProviders(ctx.aiAssistant);
-}
-
-export function getAiAssistantSettings(ctx, ) {
-    return readAiAssistantSettings(ctx.aiAssistant);
-}
-
-export function getAiAssistantPromptPlugins(ctx, ) {
-    return listAiAssistantPromptPlugins(ctx.getSettings());
-}
-
-export function ctx.getPromptPlugin(ctx, promptPluginId = ctx.aiAssistantUi.selectedPromptPluginId) {
-    return resolveAiAssistantPromptPlugin(
-        ctx.getSettings(),
-        ctx.getPromptPlugins(),
-        promptPluginId
-    );
-}
-
-export function ctx.getProvider(ctx, providerKey = ctx.aiAssistantUi.selectedProvider) {
-    return findAiAssistantProvider(ctx.getProviders(), providerKey);
-}
-
-export function getAiAssistantProviderSettings(ctx, providerKey = ctx.aiAssistantUi.selectedProvider) {
-    return readAiAssistantProviderSettings(ctx.getSettings(), providerKey);
-}
-
-export function getAiAssistantProviderConfigs(ctx, providerKey = ctx.aiAssistantUi.selectedProvider) {
-    return listAiAssistantProviderConfigs(ctx.getSettings(), providerKey);
-}
-
-export function getAiAssistantProviderConfigMeta(ctx, providerKey = ctx.aiAssistantUi.selectedProvider, configId = ctx.aiAssistantUi.selectedProviderConfigId) {
-    return findAiAssistantProviderConfigMeta(ctx.getProvider(providerKey), configId);
-}
-
-export function getAiAssistantProviderConfig(ctx, providerKey = ctx.aiAssistantUi.selectedProvider, configId = ctx.aiAssistantUi.selectedProviderConfigId) {
-    return resolveAiAssistantProviderConfig(
-        getAiAssistantProviderSettings(providerKey),
-        ctx.getProvider(providerKey),
-        configId
-    );
-}
-
-export function getAiAssistantCurrentSelection(ctx, ) {
-    return resolveAiAssistantCurrentSelection(ctx.aiAssistant, ctx.aiAssistantUi);
-}
-
-export function ctx.setProviderSelection(ctx, providerKey, preferredModel = "", preferredConfigId = "") {
-    const nextSelection = resolveAiAssistantProviderSelection(
-        ctx.getSettings(),
-        ctx.getProviders(),
-        providerKey,
-        preferredModel,
-        preferredConfigId
-    );
-    ctx.aiAssistantUi.selectedProvider = nextSelection.selectedProvider;
-    ctx.aiAssistantUi.selectedProviderConfigId = nextSelection.selectedProviderConfigId;
-    ctx.aiAssistantUi.selectedModel = nextSelection.selectedModel;
-}
-
-export function syncAiAssistantUiFromPayload(ctx, preserveSelection = true) {
-    const settings = ctx.getSettings();
-    const promptPlugins = ctx.getPromptPlugins();
-    const providers = ctx.getProviders();
-    if (!promptPlugins.length) {
-        ctx.aiAssistantUi.selectedPromptPluginId = "";
-    } else {
-        const preferredPromptPluginId = preserveSelection && promptPlugins.some((plugin) => plugin.id === ctx.aiAssistantUi.selectedPromptPluginId)
-            ? ctx.aiAssistantUi.selectedPromptPluginId
-            : (promptPlugins.find((plugin) => plugin.id === settings.active_prompt_plugin_id)?.id || promptPlugins[0].id);
-        ctx.aiAssistantUi.selectedPromptPluginId = preferredPromptPluginId;
-    }
-    if (!providers.length) {
-        ctx.aiAssistantUi.selectedProvider = "";
-        ctx.aiAssistantUi.selectedProviderConfigId = "";
-        ctx.aiAssistantUi.selectedModel = "";
-        return;
-    }
-
-    const preferredProvider = preserveSelection && providers.some((provider) => provider.key === ctx.aiAssistantUi.selectedProvider)
-        ? ctx.aiAssistantUi.selectedProvider
-        : (providers.find((provider) => provider.key === settings.active_provider)?.key || providers[0].key);
-    const preferredModel = preserveSelection ? ctx.aiAssistantUi.selectedModel : "";
-    const preferredConfigId = preserveSelection ? ctx.aiAssistantUi.selectedProviderConfigId : "";
-    ctx.setProviderSelection(preferredProvider, preferredModel, preferredConfigId);
-}
-
 export function buildAiAssistantPromptPluginCardMarkup(ctx, promptPlugin = {}) {
     const pluginId = String(promptPlugin.id || createAiAssistantPromptPluginId()).trim();
     const pluginName = String(promptPlugin.name || "").trim();
@@ -298,7 +198,7 @@ export function syncAiAssistantPromptPluginCardState(ctx, card) {
     }
 }
 
-export function appendAiAssistantPromptPluginRow(ctx, ) {
+export function appendAiAssistantPromptPluginRow(ctx) {
     const list = ctx.elements.aiAssistantSettingsForm?.querySelector("[data-ai-prompt-plugin-list]");
     if (!list) {
         return;

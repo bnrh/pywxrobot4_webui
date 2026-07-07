@@ -3,17 +3,33 @@
 import { escapeHtml, formatJson, normalizeInlineText } from "./dom-utils.js";
 import { formatUnixTimestamp, truncateText } from "./format-utils.js";
 import {
+    getMessageTypeCode,
+    getMessageTypeLabel,
+    getPayloadValue,
+} from "./message-labels.js";
+import {
     getConversationLabel,
     getMessageSummary,
     getMessageTimeLabel,
     getMessageTitle,
-    getMessageTypeCode,
-    getMessageTypeLabel,
-    getPayloadValue,
     getSenderLabel,
-} from "./message-labels.js";
-import { renderAvatar } from "./message-presenters.js";
+    renderAvatar,
+} from "./message-presenters.js";
 import { getStatusTone } from "./status-tones.js";
+
+export function resolveSelectedMessageId(messages, selectedMessageId, messageAutoFollow) {
+    if (!Array.isArray(messages) || !messages.length) {
+        return selectedMessageId;
+    }
+    if (
+        messageAutoFollow
+        || !selectedMessageId
+        || !messages.some((item) => item.internal_id === selectedMessageId)
+    ) {
+        return messages[0].internal_id;
+    }
+    return selectedMessageId;
+}
 
 export function renderMessagesView(elements, viewState) {
     const { messages, messageAutoFollow } = viewState;
@@ -25,13 +41,7 @@ export function renderMessagesView(elements, viewState) {
         return { selectedMessageId };
     }
 
-    if (
-        messageAutoFollow
-        || !selectedMessageId
-        || !messages.some((item) => item.internal_id === selectedMessageId)
-    ) {
-        selectedMessageId = messages[0].internal_id;
-    }
+    selectedMessageId = resolveSelectedMessageId(messages, selectedMessageId, messageAutoFollow);
 
     elements.messageList.innerHTML = messages.map((message) => {
         const preview = truncateText(getMessageSummary(message), 88);

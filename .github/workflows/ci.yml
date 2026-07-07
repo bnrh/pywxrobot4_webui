@@ -23,6 +23,8 @@ jobs:
           node tests/js/test_ai_assistant_data.mjs
           node tests/js/test_plugin_config_render.mjs
           node tests/js/test_message_labels.mjs
+          node tests/js/test_message_view.mjs
+          node tests/js/test_ai_assistant_ui_syntax.mjs
 
   docker:
     runs-on: ubuntu-latest
