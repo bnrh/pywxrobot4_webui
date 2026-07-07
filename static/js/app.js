@@ -1,4 +1,4 @@
-import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-09";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-10";
 import {
     AI_ASSISTANT_ACTIVE_JOB_STATUSES,
     AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
@@ -6,26 +6,26 @@ import {
     MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS,
     OVERVIEW_POLL_INTERVAL_MS,
     OVERVIEW_RENDER_TICK_MS,
-} from "/static/js/polling-config.js?v=20260706-09";
-import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-09";
+} from "/static/js/polling-config.js?v=20260706-10";
+import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-10";
 import {
     escapeHtml,
     formatJson,
     highlightText,
     normalizeInlineText,
-} from "/static/js/dom-utils.js?v=20260706-09";
+} from "/static/js/dom-utils.js?v=20260706-10";
 import {
     formatStandardDateTime,
     formatUnixTimestamp,
     truncateText,
-} from "/static/js/format-utils.js?v=20260706-09";
+} from "/static/js/format-utils.js?v=20260706-10";
 import {
     getMessageTypeLabel,
     getPayloadValue,
     syncMessageTypeLabels,
-} from "/static/js/message-labels.js?v=20260706-09";
-import { tabMeta } from "/static/js/tab-meta.js?v=20260706-09";
-import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-09";
+} from "/static/js/message-labels.js?v=20260706-10";
+import { tabMeta } from "/static/js/tab-meta.js?v=20260706-10";
+import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-10";
 import {
     getConversationLabel,
     getMessageSummary,
@@ -33,15 +33,15 @@ import {
     getMessageTitle,
     getSenderLabel,
     renderAvatar,
-} from "/static/js/message-presenters.js?v=20260706-09";
+} from "/static/js/message-presenters.js?v=20260706-10";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260706-09";
-import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-09";
-import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-09";
+} from "/static/js/plugin-config-form.js?v=20260706-10";
+import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-10";
+import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-10";
 import {
     applySearchableChoiceFilter,
     applySearchableSelectFilter,
@@ -50,7 +50,7 @@ import {
     handleSearchableSelectInput,
     selectSearchableSelectOption,
     syncScopeFieldVisibility,
-} from "/static/js/config-search.js?v=20260706-09";
+} from "/static/js/config-search.js?v=20260706-10";
 import {
     getPluginByModule as findPluginInList,
     getPluginDisplayName as resolvePluginDisplayName,
@@ -61,13 +61,13 @@ import {
     needsPluginTargets,
     normalizeManualPluginExecution,
     sortPluginsForDisplay,
-} from "/static/js/plugin-helpers.js?v=20260706-09";
-import { buildOverviewCards } from "/static/js/overview-cards.js?v=20260706-09";
-import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-09";
-import { waitForDuration } from "/static/js/async-utils.js?v=20260706-09";
-import { renderServiceLogs, syncLogFiltersFromControls as readLogFiltersFromControls } from "/static/js/log-viewer.js?v=20260706-09";
-import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-09";
-import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-09";
+} from "/static/js/plugin-helpers.js?v=20260706-10";
+import { buildOverviewCards } from "/static/js/overview-cards.js?v=20260706-10";
+import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-10";
+import { waitForDuration } from "/static/js/async-utils.js?v=20260706-10";
+import { renderServiceLogs, syncLogFiltersFromControls as readLogFiltersFromControls } from "/static/js/log-viewer.js?v=20260706-10";
+import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-10";
+import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-10";
 import {
     applyFetchOptionsSelection,
     buildPluginConfigRenderModel,
@@ -81,31 +81,40 @@ import {
     renderStructuredPluginForm,
     shouldRefreshPluginModelOptions,
     syncRoomMsgSummaryTimeFields,
-} from "/static/js/plugin-config-render.js?v=20260706-09";
+} from "/static/js/plugin-config-render.js?v=20260706-10";
 import {
-    createAiAssistantConfigId,
-    createAiAssistantPromptPluginId,
     decodeAiAssistantModelSelection,
-    encodeAiAssistantModelSelection,
     findAiAssistantProvider,
-    findAiAssistantProviderConfigMeta,
     getAiAssistantCurrentConversation as readAiAssistantCurrentConversation,
     getAiAssistantCurrentConversationId as readAiAssistantCurrentConversationId,
-    getAiAssistantProviderSettings as readAiAssistantProviderSettings,
     getAiAssistantSettings as readAiAssistantSettings,
     isAiAssistantJobActive,
     isAiAssistantJobTerminal,
     listAiAssistantConversations,
     listAiAssistantPromptPlugins,
-    listAiAssistantProviderConfigs,
     listAiAssistantProviders,
     normalizeAiAssistantJobStatus,
-    normalizeAiAssistantModelOptions,
     resolveAiAssistantCurrentSelection,
     resolveAiAssistantPromptPlugin,
-    resolveAiAssistantProviderConfig,
     resolveAiAssistantProviderSelection,
-} from "/static/js/ai-assistant-data.js?v=20260706-09";
+} from "/static/js/ai-assistant-data.js?v=20260706-10";
+import {
+    appendAiAssistantConfigRow as appendAiAssistantConfigRowView,
+    appendAiAssistantPromptPluginRow as appendAiAssistantPromptPluginRowView,
+    closeAiAssistantConfigModal as closeAiAssistantConfigModalView,
+    closeAiAssistantConversationModal as closeAiAssistantConversationModalView,
+    closeAiAssistantToolsModal as closeAiAssistantToolsModalView,
+    openAiAssistantConfigModal as openAiAssistantConfigModalView,
+    openAiAssistantConversationModal as openAiAssistantConversationModalView,
+    openAiAssistantToolsModal as openAiAssistantToolsModalView,
+    readAiAssistantSettingsForm as readAiAssistantSettingsFormView,
+    renderAiAssistant as renderAiAssistantView,
+    renderAiAssistantConversationList as renderAiAssistantConversationListView,
+    syncAiAssistantConfigRowState as syncAiAssistantConfigRowStateView,
+    syncAiAssistantConfigTableState as syncAiAssistantConfigTableStateView,
+    syncAiAssistantPromptPluginCardState as syncAiAssistantPromptPluginCardStateView,
+    syncAiAssistantPromptPluginTableState as syncAiAssistantPromptPluginTableStateView,
+} from "/static/js/ai-assistant-ui.js?v=20260706-10";
 
 const state = {
     activeTab: "dashboard",
@@ -671,117 +680,6 @@ function applyAiAssistantPayload(payload, preserveSelection = true) {
     }
 }
 
-function renderAiAssistantConversationList() {
-    if (!elements.aiAssistantConversationList) {
-        return;
-    }
-    const conversations = getAiAssistantConversations();
-    if (!conversations.length) {
-        elements.aiAssistantConversationList.innerHTML = '<div class="empty-state">还没有历史对话。点击“新建对话”后开始提问即可自动保存。</div>';
-        return;
-    }
-    elements.aiAssistantConversationList.innerHTML = conversations.map((conversation) => `
-        <button class="smart-conversation-card ${conversation.is_active ? "is-active" : ""}" type="button" data-ai-conversation-id="${escapeHtml(conversation.id || "")}">
-            <div class="smart-conversation-card-head">
-                <div>
-                    <h6 class="smart-conversation-title">${escapeHtml(conversation.title || "未命名对话")}</h6>
-                    <div class="detail-meta">更新时间 ${escapeHtml(formatStandardDateTime(conversation.updated_at) || conversation.updated_at || "未知")}</div>
-                </div>
-                <div class="badge-row">
-                    ${conversation.has_running_message ? '<span class="badge warn">进行中</span>' : ""}
-                    ${conversation.is_active ? '<span class="badge good">当前</span>' : ""}
-                </div>
-            </div>
-            <div class="detail-text smart-conversation-preview">${escapeHtml(conversation.last_message_preview || "暂无消息")}</div>
-            <div class="detail-meta">共 ${escapeHtml(String(conversation.message_count || 0))} 条消息</div>
-        </button>
-    `).join("");
-}
-
-function renderAiConversation() {
-    if (!elements.aiAssistantConversation) {
-        return;
-    }
-
-    const messages = Array.isArray(getAiAssistantCurrentConversation()?.messages)
-        ? getAiAssistantCurrentConversation().messages
-        : [];
-    if (!messages.length) {
-        elements.aiAssistantConversation.innerHTML = '<div class="empty-state">还没有对话。点击“新建对话”开始新的会话，或直接在当前会话中输入问题。</div>';
-        return;
-    }
-
-    elements.aiAssistantConversation.innerHTML = messages.map((message) => {
-        const role = message.role === "assistant" ? "assistant" : "user";
-        const roleLabel = role === "assistant" ? "智能插件" : "用户";
-        const toolTraces = Array.isArray(message.tool_traces) ? message.tool_traces : [];
-        const reasoningContent = String(message.reasoning_content || "").trim();
-        const status = String(message.status || (message.error ? "failed" : "completed")).trim().toLowerCase();
-        const statusTone = message.error || status === "failed"
-            ? "bad"
-            : (status === "running" || status === "stopped")
-                ? "warn"
-                : (role === "assistant" ? "good" : "");
-        const statusLabel = status === "running"
-            ? "处理中"
-            : status === "stopped"
-                ? "已停止"
-            : status === "failed"
-                ? "失败"
-                : (role === "assistant" ? "已完成" : "已发送");
-        const showReasoning = Boolean(reasoningContent);
-        const messageBody = message.content || ((status === "running" || status === "stopped")
-            ? (message.progress_message || (status === "running" ? "正在处理中..." : "本次对话已手动停止。"))
-            : "无内容");
-        return `
-            <article class="smart-chat-message ${role === "assistant" ? "is-assistant" : "is-user"} ${message.error || status === "failed" ? "is-error" : ""}">
-                <div class="smart-chat-message-head">
-                    <div class="badge-row">
-                        <span class="badge ${statusTone}">${escapeHtml(roleLabel)}</span>
-                        <span class="badge ${statusTone}">${escapeHtml(statusLabel)}</span>
-                        ${message.provider_label ? `<span class="badge">${escapeHtml(message.provider_label)}</span>` : ""}
-                        ${message.prompt_plugin_name ? `<span class="badge">${escapeHtml(message.prompt_plugin_name)}</span>` : ""}
-                        ${message.model ? `<span class="badge">${escapeHtml(message.model)}</span>` : ""}
-                    </div>
-                    <div class="detail-meta">${escapeHtml(formatStandardDateTime(message.updated_at) || message.updated_at || "")}</div>
-                </div>
-                ${message.progress_message ? `<div class="smart-chat-progress">${escapeHtml(message.progress_message)}</div>` : ""}
-                ${showReasoning ? `
-                    <section class="smart-reasoning-block">
-                        <div class="detail-meta">思考过程</div>
-                        <pre class="code-block smart-reasoning-content">${escapeHtml(reasoningContent)}</pre>
-                    </section>
-                ` : ""}
-                ${toolTraces.length ? `
-                    <div class="smart-tool-trace-list">
-                        ${toolTraces.map((trace) => {
-                            const traceStatus = String(trace.status || "ok").toLowerCase();
-                            const traceTone = traceStatus === "running" ? "warn" : (traceStatus === "ok" ? "good" : "bad");
-                            const traceLabel = traceStatus === "running" ? "工具运行中" : (traceStatus === "ok" ? "工具成功" : "工具失败");
-                            return `
-                                <section class="smart-tool-trace-item ${traceStatus === "running" ? "is-running" : ""}">
-                                    <div class="smart-tool-trace-head">
-                                        <div class="badge-row">
-                                            <span class="badge ${traceTone}">${escapeHtml(traceLabel)}</span>
-                                            <span class="badge">${escapeHtml(trace.name || "unknown_tool")}</span>
-                                        </div>
-                                    </div>
-                                    <div class="detail-meta">参数</div>
-                                    <pre class="code-block">${escapeHtml(formatJson(trace.arguments || {}))}</pre>
-                                    ${trace.error ? `<div class="detail-text">${escapeHtml(trace.error)}</div>` : ""}
-                                </section>
-                            `;
-                        }).join("")}
-                    </div>
-                ` : ""}
-                <div class="detail-text smart-chat-message-body">${escapeHtml(messageBody)}</div>
-            </article>
-        `;
-    }).join("");
-
-    elements.aiAssistantConversation.scrollTop = elements.aiAssistantConversation.scrollHeight;
-}
-
 function getAiAssistantConversations() {
     return listAiAssistantConversations(state.aiAssistant);
 }
@@ -816,26 +714,6 @@ function getAiAssistantPromptPlugin(promptPluginId = state.aiAssistantUi.selecte
 
 function getAiAssistantProvider(providerKey = state.aiAssistantUi.selectedProvider) {
     return findAiAssistantProvider(getAiAssistantProviders(), providerKey);
-}
-
-function getAiAssistantProviderSettings(providerKey = state.aiAssistantUi.selectedProvider) {
-    return readAiAssistantProviderSettings(getAiAssistantSettings(), providerKey);
-}
-
-function getAiAssistantProviderConfigs(providerKey = state.aiAssistantUi.selectedProvider) {
-    return listAiAssistantProviderConfigs(getAiAssistantSettings(), providerKey);
-}
-
-function getAiAssistantProviderConfigMeta(providerKey = state.aiAssistantUi.selectedProvider, configId = state.aiAssistantUi.selectedProviderConfigId) {
-    return findAiAssistantProviderConfigMeta(getAiAssistantProvider(providerKey), configId);
-}
-
-function getAiAssistantProviderConfig(providerKey = state.aiAssistantUi.selectedProvider, configId = state.aiAssistantUi.selectedProviderConfigId) {
-    return resolveAiAssistantProviderConfig(
-        getAiAssistantProviderSettings(providerKey),
-        getAiAssistantProvider(providerKey),
-        configId
-    );
 }
 
 function getAiAssistantCurrentSelection() {
@@ -882,519 +760,92 @@ function syncAiAssistantUiFromPayload(preserveSelection = true) {
     setAiAssistantProviderSelection(preferredProvider, preferredModel, preferredConfigId);
 }
 
-function buildAiAssistantPromptPluginCardMarkup(promptPlugin = {}) {
-    const pluginId = String(promptPlugin.id || createAiAssistantPromptPluginId()).trim();
-    const pluginName = String(promptPlugin.name || "").trim();
-    const prompt = String(promptPlugin.prompt || promptPlugin.system_prompt || "").trim();
-    const maxToolRounds = String(promptPlugin.max_tool_rounds ?? 20).trim() || "20";
-    const temperature = String(promptPlugin.temperature ?? 0.2).trim() || "0.2";
-    const hasInput = Boolean(pluginName || prompt || maxToolRounds !== "20" || temperature !== "0.2");
-    const validationErrors = [];
-    if (hasInput && !prompt) {
-        validationErrors.push("提示词不能为空。");
-    }
-
-    return `
-        <article class="smart-prompt-plugin-card ${validationErrors.length ? "is-invalid" : ""}" data-ai-prompt-plugin-row>
-            <input type="hidden" data-field="id" value="${escapeHtml(pluginId)}">
-            <div class="smart-prompt-plugin-head">
-                <label class="field-group smart-prompt-plugin-name-field">
-                    <span class="field-label">插件名称</span>
-                    <input data-field="name" type="text" value="${escapeHtml(pluginName)}" placeholder="例如：群聊总结">
-                </label>
-                <label class="field-group smart-prompt-plugin-number-field">
-                    <span class="field-label">工具调用轮数上限</span>
-                    <input data-field="max_tool_rounds" type="number" min="1" max="500" step="1" value="${escapeHtml(maxToolRounds)}">
-                </label>
-                <label class="field-group smart-prompt-plugin-number-field">
-                    <span class="field-label">温度 temperature</span>
-                    <input data-field="temperature" type="number" min="0" max="1.5" step="any" value="${escapeHtml(temperature)}">
-                </label>
-                <div class="config-object-table-actions smart-prompt-plugin-actions">
-                    <button class="button ghost compact" type="button" data-ai-config-action="remove-prompt-plugin">删除</button>
-                </div>
-            </div>
-            <label class="field-group">
-                <span class="field-label">提示词</span>
-                <textarea class="config-editor smart-prompt-plugin-editor" data-field="prompt" placeholder="为这个智能插件填写单独的系统提示词">${escapeHtml(prompt)}</textarea>
-            </label>
-            <div class="detail-meta">该提示词会与内置时间提示、工具路由规则一起注入到模型上下文中。</div>
-            <div class="config-object-table-error" data-ai-prompt-plugin-error>${escapeHtml(validationErrors.join(" "))}</div>
-        </article>
-    `;
+function aiAssistantUiCtx() {
+    return {
+        elements,
+        get aiAssistant() {
+            return state.aiAssistant;
+        },
+        get aiAssistantUi() {
+            return state.aiAssistantUi;
+        },
+        get aiRequestInFlight() {
+            return state.aiRequestInFlight;
+        },
+        get aiActiveChatJob() {
+            return state.aiActiveChatJob;
+        },
+        getConversations: getAiAssistantConversations,
+        getCurrentConversation: getAiAssistantCurrentConversation,
+        getCurrentConversationId: getAiAssistantCurrentConversationId,
+        getProviders: getAiAssistantProviders,
+        getSettings: getAiAssistantSettings,
+        getPromptPlugins: getAiAssistantPromptPlugins,
+        getPromptPlugin: getAiAssistantPromptPlugin,
+        getProvider: getAiAssistantProvider,
+        getCurrentSelection: getAiAssistantCurrentSelection,
+        setProviderSelection: setAiAssistantProviderSelection,
+    };
 }
 
-function syncAiAssistantPromptPluginTableState() {
-    const list = elements.aiAssistantSettingsForm?.querySelector("[data-ai-prompt-plugin-list]");
-    if (!list) {
-        return;
-    }
-    const rows = list.querySelectorAll("[data-ai-prompt-plugin-row]");
-    const emptyState = list.querySelector("[data-ai-prompt-plugin-empty]");
-    if (!rows.length) {
-        if (!emptyState) {
-            list.innerHTML = '<div class="empty-state smart-ai-config-empty" data-ai-prompt-plugin-empty>还没有任何提示词插件。点击右上角“新增提示词插件”后，分别填写名称、提示词和轮数上限。</div>';
-        }
-        return;
-    }
-    emptyState?.remove();
-}
-
-function syncAiAssistantPromptPluginCardState(card) {
-    if (!card) {
-        return;
-    }
-    const name = card.querySelector('[data-field="name"]')?.value.trim() || "";
-    const prompt = card.querySelector('[data-field="prompt"]')?.value.trim() || "";
-    const maxToolRounds = card.querySelector('[data-field="max_tool_rounds"]')?.value.trim() || "20";
-    const temperature = card.querySelector('[data-field="temperature"]')?.value.trim() || "0.2";
-    const hasInput = Boolean(name || prompt || maxToolRounds !== "20" || temperature !== "0.2");
-    const validationErrors = [];
-    if (hasInput && !prompt) {
-        validationErrors.push("提示词不能为空。");
-    }
-    card.classList.toggle("is-invalid", validationErrors.length > 0);
-    const errorNode = card.querySelector("[data-ai-prompt-plugin-error]");
-    if (errorNode) {
-        errorNode.textContent = validationErrors.join(" ");
-    }
-}
-
-function appendAiAssistantPromptPluginRow() {
-    const list = elements.aiAssistantSettingsForm?.querySelector("[data-ai-prompt-plugin-list]");
-    if (!list) {
-        return;
-    }
-
-    const currentPromptPlugin = getAiAssistantPromptPlugin();
-    syncAiAssistantPromptPluginTableState();
-    list.querySelector("[data-ai-prompt-plugin-empty]")?.remove();
-    list.insertAdjacentHTML(
-        "beforeend",
-        buildAiAssistantPromptPluginCardMarkup({
-            id: createAiAssistantPromptPluginId(),
-            name: "",
-            prompt: currentPromptPlugin?.prompt || getAiAssistantSettings().system_prompt || "",
-            max_tool_rounds: currentPromptPlugin?.max_tool_rounds ?? getAiAssistantSettings().max_tool_rounds ?? 20,
-            temperature: currentPromptPlugin?.temperature ?? getAiAssistantSettings().temperature ?? 0.2,
-        })
-    );
-    syncAiAssistantPromptPluginCardState(list.lastElementChild);
-}
-
-function buildAiAssistantProviderSelectOptions(selectedProviderKey = "") {
-    return getAiAssistantProviders().map((provider) => `
-        <option value="${escapeHtml(provider.key)}" ${provider.key === selectedProviderKey ? "selected" : ""}>${escapeHtml(provider.label)}</option>
-    `).join("");
-}
-
-function buildAiAssistantConfigRowMarkup(providerKey = "", providerConfig = {}, providerConfigMeta = null) {
-    const provider = getAiAssistantProvider(providerKey) || getAiAssistantProviders()[0] || null;
-    const normalizedProviderKey = provider?.key || providerKey || "zhipu";
-    const configId = String(providerConfig.id || createAiAssistantConfigId(normalizedProviderKey)).trim();
-    const configName = String(providerConfig.name || "").trim();
-    const apiKey = String(providerConfig.api_key || "").trim();
-    const enabled = Boolean(providerConfig.enabled);
-    const baseUrlEditable = Boolean(provider?.allow_custom_base_url);
-    const defaultBaseUrl = String(provider?.default_base_url || "").trim();
-    const baseUrl = baseUrlEditable
-        ? (String(providerConfig.base_url || "").trim() || defaultBaseUrl)
-        : defaultBaseUrl;
-    const savedModelOptions = Array.isArray(providerConfigMeta?.model_options) ? providerConfigMeta.model_options.length : 0;
-    const statusMessage = providerConfigMeta?.model_fetch_error
-        ? `模型列表获取失败：${providerConfigMeta.model_fetch_error}`
-        : (apiKey
-            ? (savedModelOptions ? `已载入 ${savedModelOptions} 个模型选项` : "保存后会自动刷新模型列表")
-            : "填写并保存 API Key 后可自动载入模型列表");
-    const validationErrors = [];
-    if (enabled && !apiKey) {
-        validationErrors.push("启用中的配置必须填写 API Key。")
-    }
-    if (baseUrlEditable && apiKey && !baseUrl) {
-        validationErrors.push("通用 OpenAI 配置必须填写 Base URL。")
-    }
-
-    return `
-        <div class="config-object-table-row smart-model-config-row ${validationErrors.length ? "is-invalid" : "is-editing"}" data-ai-config-row>
-            <input type="hidden" data-field="id" value="${escapeHtml(configId)}">
-            <div class="config-object-table-cell config-object-table-editor-cell">
-                <select data-field="provider_key">
-                    ${buildAiAssistantProviderSelectOptions(normalizedProviderKey)}
-                </select>
-                <div class="detail-meta" data-ai-provider-meta>${escapeHtml(provider?.description || "")}</div>
-            </div>
-            <div class="config-object-table-cell config-object-table-editor-cell">
-                <input data-field="name" type="text" value="${escapeHtml(configName)}" placeholder="例如：主账号 / 备用 Key">
-            </div>
-            <div class="config-object-table-cell config-object-table-editor-cell">
-                <input data-field="api_key" type="password" autocomplete="off" value="${escapeHtml(apiKey)}" placeholder="输入 ${escapeHtml(provider?.label || "AI")} API Key">
-            </div>
-            <div class="config-object-table-cell config-object-table-editor-cell">
-                <input data-field="base_url" type="text" value="${escapeHtml(baseUrl)}" ${baseUrlEditable ? "" : "disabled"} placeholder="${escapeHtml(defaultBaseUrl || "https://api.openai.com/v1")}">
-                <div class="detail-meta" data-ai-base-url-hint>${escapeHtml(baseUrlEditable ? "仅通用 OpenAI 需要填写 Base URL" : `固定地址：${defaultBaseUrl || "代码内置"}`)}</div>
-            </div>
-            <div class="config-object-table-cell config-object-table-editor-cell smart-config-switch-cell">
-                <label class="switch">
-                    <input data-field="enabled" type="checkbox" ${enabled ? "checked" : ""}>
-                    <span class="switch-slider"></span>
-                </label>
-                <div class="detail-meta" data-ai-config-status>${escapeHtml(statusMessage)}</div>
-            </div>
-            <div class="config-object-table-actions">
-                <button class="button ghost compact" type="button" data-ai-config-action="remove-row">删除</button>
-            </div>
-            <div class="config-object-table-error" data-ai-config-error>${escapeHtml(validationErrors.join(" "))}</div>
-        </div>
-    `;
-}
-
-function syncAiAssistantConfigTableState() {
-    const tableBody = elements.aiAssistantSettingsForm?.querySelector("[data-ai-config-table-body]");
-    if (!tableBody) {
-        return;
-    }
-    const rows = tableBody.querySelectorAll("[data-ai-config-row]");
-    const existingEmptyState = tableBody.querySelector("[data-ai-config-empty]");
-    if (!rows.length) {
-        if (!existingEmptyState) {
-            tableBody.innerHTML = '<div class="empty-state smart-ai-config-empty" data-ai-config-empty>还没有任何模型配置。点击右上角“新增配置”后，按行填写厂商、名称和 API Key。</div>';
-        }
-        return;
-    }
-    existingEmptyState?.remove();
-}
-
-function syncAiAssistantConfigRowState(row) {
-    if (!row) {
-        return;
-    }
-
-    const providerKey = row.querySelector('[data-field="provider_key"]')?.value.trim() || "";
-    const provider = getAiAssistantProvider(providerKey) || getAiAssistantProviders()[0] || null;
-    const apiKey = row.querySelector('[data-field="api_key"]')?.value.trim() || "";
-    const enabled = Boolean(row.querySelector('[data-field="enabled"]')?.checked);
-    const baseUrlInput = row.querySelector('[data-field="base_url"]');
-    const providerMeta = row.querySelector("[data-ai-provider-meta]");
-    const baseUrlHint = row.querySelector("[data-ai-base-url-hint]");
-    const statusNode = row.querySelector("[data-ai-config-status]");
-    const errorNode = row.querySelector("[data-ai-config-error]");
-    const defaultBaseUrl = String(provider?.default_base_url || "").trim();
-    const baseUrlEditable = Boolean(provider?.allow_custom_base_url);
-
-    if (providerMeta) {
-        providerMeta.textContent = provider?.description || "";
-    }
-
-    if (baseUrlInput instanceof HTMLInputElement) {
-        baseUrlInput.disabled = !baseUrlEditable;
-        if (baseUrlEditable) {
-            baseUrlInput.placeholder = defaultBaseUrl || "https://api.openai.com/v1";
-            if (!baseUrlInput.value.trim()) {
-                baseUrlInput.value = defaultBaseUrl;
-            }
-        } else {
-            baseUrlInput.value = defaultBaseUrl;
-        }
-    }
-
-    if (baseUrlHint) {
-        baseUrlHint.textContent = baseUrlEditable ? "仅通用 OpenAI 需要填写 Base URL" : `固定地址：${defaultBaseUrl || "代码内置"}`;
-    }
-
-    if (statusNode) {
-        statusNode.textContent = apiKey ? "保存后会自动刷新模型列表" : "填写并保存 API Key 后可自动载入模型列表";
-    }
-
-    const validationErrors = [];
-    if (enabled && !apiKey) {
-        validationErrors.push("启用中的配置必须填写 API Key。")
-    }
-    if (baseUrlEditable && apiKey && !(baseUrlInput?.value.trim())) {
-        validationErrors.push("通用 OpenAI 配置必须填写 Base URL。")
-    }
-    row.classList.toggle("is-invalid", validationErrors.length > 0);
-    row.classList.toggle("is-editing", validationErrors.length === 0);
-    if (errorNode) {
-        errorNode.textContent = validationErrors.join(" ");
-    }
-}
-
-function appendAiAssistantConfigRow(providerKey = state.aiAssistantUi.selectedProvider || getAiAssistantProviders()[0]?.key || "zhipu") {
-    const tableBody = elements.aiAssistantSettingsForm?.querySelector("[data-ai-config-table-body]");
-    if (!tableBody) {
-        return;
-    }
-
-    syncAiAssistantConfigTableState();
-    tableBody.querySelector("[data-ai-config-empty]")?.remove();
-
-    const provider = getAiAssistantProvider(providerKey) || getAiAssistantProviders()[0] || null;
-    tableBody.insertAdjacentHTML(
-        "beforeend",
-        buildAiAssistantConfigRowMarkup(
-            provider?.key || providerKey,
-            {
-                id: createAiAssistantConfigId(provider?.key || providerKey),
-                name: "",
-                enabled: false,
-                api_key: "",
-                base_url: provider?.default_base_url || "",
-            },
-            null,
-        )
-    );
-    syncAiAssistantConfigRowState(tableBody.lastElementChild);
-}
-
-function closeAiAssistantConfigModal() {
-    elements.aiAssistantConfigModal?.classList.remove("is-visible");
-}
-
-function closeAiAssistantConversationModal() {
-    elements.aiAssistantConversationModal?.classList.remove("is-visible");
-}
-
-function openAiAssistantConversationModal() {
-    closeAiAssistantConfigModal();
-    closeAiAssistantToolsModal();
-    renderAiAssistantConversationList();
-    elements.aiAssistantConversationModal?.classList.add("is-visible");
-}
-
-function openAiAssistantConfigModal() {
-    closeAiAssistantToolsModal();
-    closeAiAssistantConversationModal();
-    renderAiAssistant();
-    elements.aiAssistantConfigModal?.classList.add("is-visible");
-}
-
-function closeAiAssistantToolsModal() {
-    elements.aiAssistantToolsModal?.classList.remove("is-visible");
-}
-
-function openAiAssistantToolsModal() {
-    closeAiAssistantConfigModal();
-    closeAiAssistantConversationModal();
-    renderAiAssistant();
-    elements.aiAssistantToolsModal?.classList.add("is-visible");
+function renderAiAssistantConversationList() {
+    renderAiAssistantConversationListView(aiAssistantUiCtx());
 }
 
 function renderAiAssistant() {
-    if (!state.aiAssistant) {
-        return;
-    }
+    renderAiAssistantView(aiAssistantUiCtx());
+}
 
-    const settings = getAiAssistantSettings();
-    const providers = getAiAssistantProviders();
-    const promptPlugins = getAiAssistantPromptPlugins();
-    const tools = Array.isArray(state.aiAssistant.tools) ? state.aiAssistant.tools : [];
-    const currentConversation = getAiAssistantCurrentConversation();
-    const currentConversationTitle = currentConversation?.title || "未命名对话";
-    const currentJob = state.aiActiveChatJob || {};
-    const currentConversationJobActive = isAiAssistantJobActive(currentJob)
-        && currentConversation?.id
-        && currentJob.conversation_id === currentConversation.id;
-    const currentConversationJobStopping = currentConversationJobActive && normalizeAiAssistantJobStatus(currentJob.status) === "stopping";
-    const {
-        provider: selectedProvider,
-        providerSettings: selectedProviderSettings,
-        modelOptions,
-        selectedConfig,
-        selectedConfigMeta,
-        selectedModel,
-        selectionValue,
-        selectedPromptPlugin,
-    } = getAiAssistantCurrentSelection();
-    const configuredRows = providers.reduce((count, provider) => {
-        const providerSettings = settings.providers?.[provider.key] || {};
-        const configs = Array.isArray(providerSettings.configs) ? providerSettings.configs : [];
-        return count + configs.filter((config) => config.api_key).length;
-    }, 0);
-    const configRowMarkup = providers.flatMap((provider) => {
-        const providerSettings = settings.providers?.[provider.key] || {};
-        const providerConfigs = Array.isArray(providerSettings.configs) ? providerSettings.configs : [];
-        const providerMetaConfigs = new Map(
-            (Array.isArray(provider.configs) ? provider.configs : []).map((config) => [config.id, config])
-        );
-        return providerConfigs.map((providerConfig) => buildAiAssistantConfigRowMarkup(
-            provider.key,
-            providerConfig,
-            providerMetaConfigs.get(providerConfig.id) || null,
-        ));
-    }).join("");
-    const promptPluginRowMarkup = promptPlugins.map((promptPlugin) => buildAiAssistantPromptPluginCardMarkup(promptPlugin)).join("");
+function readAiAssistantSettingsForm() {
+    return readAiAssistantSettingsFormView(aiAssistantUiCtx());
+}
 
-    if (elements.aiAssistantProviderSelect) {
-        elements.aiAssistantProviderSelect.innerHTML = providers.map((provider) => `
-            <option value="${escapeHtml(provider.key)}" ${provider.key === selectedProvider?.key ? "selected" : ""}>${escapeHtml(provider.label)}</option>
-        `).join("");
-    }
+function openAiAssistantConversationModal() {
+    openAiAssistantConversationModalView(aiAssistantUiCtx());
+}
 
-    if (elements.aiAssistantModelSelect) {
-        elements.aiAssistantModelSelect.innerHTML = modelOptions.length
-            ? modelOptions.map((option) => `
-                <option value="${escapeHtml(option.selectionValue)}" ${option.selectionValue === selectionValue ? "selected" : ""}>${escapeHtml(option.label)}</option>
-            `).join("")
-            : '<option value="">暂无可用模型</option>';
-        elements.aiAssistantModelSelect.disabled = !selectedProvider || (!modelOptions.length && !selectedConfig?.api_key);
-    }
+function openAiAssistantConfigModal() {
+    openAiAssistantConfigModalView(aiAssistantUiCtx());
+}
 
-    if (elements.aiAssistantPromptPluginSelect) {
-        elements.aiAssistantPromptPluginSelect.innerHTML = promptPlugins.length
-            ? promptPlugins.map((promptPlugin) => `
-                <option value="${escapeHtml(promptPlugin.id || "")}" ${promptPlugin.id === selectedPromptPlugin?.id ? "selected" : ""}>${escapeHtml(promptPlugin.name || "未命名提示词插件")}</option>
-            `).join("")
-            : '<option value="">暂无提示词插件</option>';
-        elements.aiAssistantPromptPluginSelect.disabled = !promptPlugins.length;
-    }
+function openAiAssistantToolsModal() {
+    openAiAssistantToolsModalView(aiAssistantUiCtx());
+}
 
-    if (elements.toggleAiAssistantConfigButton) {
-        elements.toggleAiAssistantConfigButton.textContent = "配置";
-    }
+function closeAiAssistantConfigModal() {
+    closeAiAssistantConfigModalView(aiAssistantUiCtx());
+}
 
-    if (elements.toggleAiAssistantToolsButton) {
-        elements.toggleAiAssistantToolsButton.textContent = `工具列表 (${tools.length})`;
-    }
+function closeAiAssistantConversationModal() {
+    closeAiAssistantConversationModalView(aiAssistantUiCtx());
+}
 
-    if (elements.newAiAssistantConversationButton) {
-        elements.newAiAssistantConversationButton.disabled = state.aiRequestInFlight;
-    }
+function closeAiAssistantToolsModal() {
+    closeAiAssistantToolsModalView(aiAssistantUiCtx());
+}
 
-    if (elements.openAiAssistantConversationSwitcherButton) {
-        elements.openAiAssistantConversationSwitcherButton.disabled = !getAiAssistantConversations().length;
-    }
+function appendAiAssistantPromptPluginRow() {
+    appendAiAssistantPromptPluginRowView(aiAssistantUiCtx());
+}
 
-    if (elements.clearAiAssistantConversationButton) {
-        elements.clearAiAssistantConversationButton.disabled = state.aiRequestInFlight || !currentConversation?.id;
-    }
+function syncAiAssistantPromptPluginTableState() {
+    syncAiAssistantPromptPluginTableStateView(aiAssistantUiCtx());
+}
 
-    if (elements.stopAiAssistantChatButton) {
-        elements.stopAiAssistantChatButton.disabled = !currentConversationJobActive || currentConversationJobStopping;
-        elements.stopAiAssistantChatButton.textContent = currentConversationJobStopping ? "停止中..." : "停止对话";
-    }
+function syncAiAssistantPromptPluginCardState(card) {
+    syncAiAssistantPromptPluginCardStateView(aiAssistantUiCtx(), card);
+}
 
-    if (elements.aiAssistantSettingsForm) {
-        elements.aiAssistantSettingsForm.innerHTML = `
-            <section class="config-field-shell field-span-2 smart-prompt-plugin-shell">
-                <div class="config-field-head smart-provider-head">
-                    <div>
-                        <h5 class="detail-section-title">提示词插件配置</h5>
-                        <div class="detail-meta">为不同场景维护独立的插件名称、提示词、工具调用轮数上限和温度；聊天页顶部按需切换。</div>
-                        <div class="detail-meta">模型 API Key 配置与提示词插件配置解耦，可复用同一套厂商配置。</div>
-                    </div>
-                    <button class="button secondary compact smart-toolbar-button" type="button" data-ai-config-action="add-prompt-plugin">新增提示词插件</button>
-                </div>
-                <div class="smart-prompt-plugin-list" data-ai-prompt-plugin-list>
-                    ${promptPluginRowMarkup || '<div class="empty-state smart-ai-config-empty" data-ai-prompt-plugin-empty>还没有任何提示词插件。点击右上角“新增提示词插件”后，分别填写名称、提示词和轮数上限。</div>'}
-                </div>
-            </section>
-            <section class="config-field-shell field-span-2 smart-model-config-shell">
-                <div class="config-field-head smart-provider-head">
-                    <div>
-                        <h5 class="detail-section-title">模型配置</h5>
-                        <div class="detail-meta">每一行对应一套可选模型配置，固定厂商的网关参数已直接写死；通用 OpenAI 额外填写 Base URL 即可。</div>
-                        <div class="detail-meta">当前共保存 ${configuredRows} 条已填写 API Key 的配置，聊天页顶部按“模型名称 / 实际模型”选择。</div>
-                    </div>
-                    <button class="button secondary compact smart-toolbar-button" type="button" data-ai-config-action="add-row">新增配置</button>
-                </div>
-                <div class="config-object-table-shell smart-model-config-table">
-                    <div class="config-object-table-header smart-model-config-header">
-                        <div class="config-object-table-heading">厂商</div>
-                        <div class="config-object-table-heading">模型名称</div>
-                        <div class="config-object-table-heading">API Key</div>
-                        <div class="config-object-table-heading">Base URL</div>
-                        <div class="config-object-table-heading">启用</div>
-                        <div class="config-object-table-heading is-actions">操作</div>
-                    </div>
-                    <div class="smart-model-config-body" data-ai-config-table-body>
-                        ${configRowMarkup || '<div class="empty-state smart-ai-config-empty" data-ai-config-empty>还没有任何模型配置。点击右上角“新增配置”后，按行填写厂商、名称和 API Key。</div>'}
-                    </div>
-                </div>
-            </section>
-            <section class="config-field-shell field-span-2">
-                <div class="config-field-head smart-provider-head">
-                    <div>
-                        <h5 class="detail-section-title">工具权限</h5>
-                        <div class="detail-meta">默认仅允许只读查询工具。启用后，模型才可调用发消息、改标签等写操作工具。</div>
-                    </div>
-                </div>
-                <label class="field-group field-span-2">
-                    <span class="field-label">允许写操作工具 allow_write_tools</span>
-                    <input data-field="allow_write_tools" type="checkbox" ${getAiAssistantSettings().allow_write_tools ? "checked" : ""}>
-                </label>
-            </section>
-        `;
-        elements.aiAssistantSettingsForm.querySelectorAll("[data-ai-prompt-plugin-row]").forEach((card) => {
-            syncAiAssistantPromptPluginCardState(card);
-        });
-        elements.aiAssistantSettingsForm.querySelectorAll("[data-ai-config-row]").forEach((row) => {
-            syncAiAssistantConfigRowState(row);
-        });
-    }
+function appendAiAssistantConfigRow(providerKey) {
+    appendAiAssistantConfigRowView(aiAssistantUiCtx(), providerKey);
+}
 
-    if (elements.aiAssistantAlert) {
-        const selectedLabel = selectedProvider?.label || "未选择厂商";
-        const selectedPromptPluginLabel = selectedPromptPlugin?.name || "未选择提示词插件";
-        if (selectedConfig?.enabled && selectedConfig?.api_key) {
-            elements.aiAssistantAlert.className = `settings-alert is-visible ${selectedConfigMeta?.model_fetch_error ? "bad" : "good"}`;
-            elements.aiAssistantAlert.textContent = selectedConfigMeta?.model_fetch_error
-                ? `${selectedPromptPluginLabel} · ${selectedLabel} · ${selectedConfig.name || "未命名配置"} 已启用，但模型列表自动获取失败，当前会回退到 ${selectedModel}。`
-                : `${selectedPromptPluginLabel} · ${selectedLabel} · ${selectedConfig.name || "未命名配置"} 已配置并启用，当前对话模型为 ${selectedModel}。配置会保存在本地 SQLite。`;
-        } else if (selectedConfig?.api_key) {
-            elements.aiAssistantAlert.className = "settings-alert is-visible bad";
-            elements.aiAssistantAlert.textContent = `${selectedPromptPluginLabel} · ${selectedLabel} · ${selectedConfig.name || "未命名配置"} 已填写 API Key，但当前未启用。发送前请先在配置中启用。`;
-        } else if (selectedConfig) {
-            elements.aiAssistantAlert.className = "settings-alert is-visible bad";
-            elements.aiAssistantAlert.textContent = `${selectedPromptPluginLabel} · ${selectedLabel} · ${selectedConfig.name || "未命名配置"} 尚未填写 API Key。点击上方配置按钮后保存，才能开始对话。`;
-        } else {
-            elements.aiAssistantAlert.className = "settings-alert is-visible bad";
-            elements.aiAssistantAlert.textContent = `${selectedPromptPluginLabel} · ${selectedLabel} 还没有任何配置。点击上方配置按钮新增一行并保存后，才能开始对话。`;
-        }
-    }
+function syncAiAssistantConfigTableState() {
+    syncAiAssistantConfigTableStateView(aiAssistantUiCtx());
+}
 
-    if (elements.aiAssistantToolMeta) {
-        const readOnlyCount = tools.filter((tool) => tool.read_only).length;
-        elements.aiAssistantToolMeta.textContent = `共 ${tools.length} 个工具，${readOnlyCount} 个只读，${tools.length - readOnlyCount} 个写操作`;
-    }
-
-    if (elements.aiAssistantToolGrid) {
-        elements.aiAssistantToolGrid.innerHTML = tools.map((tool) => `
-            <article class="smart-tool-card">
-                <div class="smart-tool-card-head">
-                    <h6 class="smart-tool-name">${escapeHtml(tool.name || "unknown")}</h6>
-                    <span class="badge ${tool.read_only ? "good" : "warn"}">${escapeHtml(tool.read_only ? "只读" : "写操作")}</span>
-                </div>
-                <div class="detail-meta">${escapeHtml(tool.description || "")}</div>
-            </article>
-        `).join("");
-    }
-
-    if (elements.aiAssistantProviderBadgeRow) {
-        elements.aiAssistantProviderBadgeRow.innerHTML = selectedProvider
-            ? `
-                <span class="badge">${escapeHtml(selectedPromptPlugin?.name || "未选择提示词插件")}</span>
-                <span class="badge good">${escapeHtml(selectedProvider.label)}</span>
-                <span class="badge">${escapeHtml(selectedConfig?.name || "未命名配置")}</span>
-                <span class="badge">${escapeHtml(selectedModel || selectedProvider.default_model || "")}</span>
-                <span class="badge">${escapeHtml(`工具轮数 ${selectedPromptPlugin?.max_tool_rounds ?? settings.max_tool_rounds ?? 20}`)}</span>
-                <span class="badge ${selectedConfig?.api_key ? "good" : "bad"}">${escapeHtml(selectedConfig?.api_key ? "已配置 API Key" : "未配置 API Key")}</span>
-                <span class="badge ${selectedConfig?.enabled ? "good" : "warn"}">${escapeHtml(selectedConfig?.enabled ? "已启用" : "未启用")}</span>
-            `
-            : '<span class="badge bad">未配置 AI 厂商</span>';
-    }
-
-    if (elements.aiAssistantConversationMeta) {
-        elements.aiAssistantConversationMeta.textContent = selectedProvider
-            ? `${currentConversationTitle} · ${selectedPromptPlugin?.name || "未选择提示词插件"} · ${selectedProvider.label}${selectedConfig?.name ? ` / ${selectedConfig.name}` : ""} 当前会话模型：${selectedModel || selectedProvider.default_model || "未设置"}。${currentConversationJobActive ? `当前任务：${currentJob.progress_message || "处理中..."}` : (selectedConfigMeta?.model_fetch_error ? "模型列表自动获取失败，已回退到默认模型。" : `当前共可选 ${modelOptions.length} 个模型选项。`)}`
-            : "请先配置并启用一个 AI 厂商。";
-    }
-
-    if (elements.sendAiAssistantPromptButton) {
-        elements.sendAiAssistantPromptButton.disabled = state.aiRequestInFlight || !(selectedConfig?.enabled && selectedConfig?.api_key);
-    }
-
-    renderAiAssistantConversationList();
-    renderAiConversation();
+function syncAiAssistantConfigRowState(row) {
+    syncAiAssistantConfigRowStateView(aiAssistantUiCtx(), row);
 }
 
 function renderLogs() {
@@ -1639,100 +1090,6 @@ function readSettingsForm() {
         api_token: form.api_token.value.trim(),
         callback_secret: form.callback_secret.value.trim(),
     };
-}
-
-function readAiAssistantSettingsForm() {
-    const form = elements.aiAssistantSettingsForm;
-    const providers = getAiAssistantProviders();
-    const normalizedProviders = Object.fromEntries(providers.map((provider) => [provider.key, { configs: [] }]));
-    const payload = {
-        active_provider: state.aiAssistantUi.selectedProvider || state.aiAssistant?.settings?.active_provider || "zhipu",
-        active_prompt_plugin_id: "",
-        system_prompt: "",
-        temperature: 0.2,
-        max_tool_rounds: 20,
-        allow_write_tools: false,
-        prompt_plugins: [],
-        providers: normalizedProviders,
-    };
-
-    const promptPluginRows = Array.from(form.querySelectorAll("[data-ai-prompt-plugin-row]"));
-    for (const [index, row] of promptPluginRows.entries()) {
-        const rawName = row.querySelector('[data-field="name"]')?.value.trim() || "";
-        const rawPrompt = row.querySelector('[data-field="prompt"]')?.value.trim() || "";
-        const rawMaxToolRounds = row.querySelector('[data-field="max_tool_rounds"]')?.value.trim() || "20";
-        const rawTemperature = row.querySelector('[data-field="temperature"]')?.value.trim() || "0.2";
-        const hasInput = Boolean(rawName || rawPrompt || rawMaxToolRounds !== "20" || rawTemperature !== "0.2");
-        if (!hasInput) {
-            continue;
-        }
-        if (!rawPrompt) {
-            throw new Error(`${rawName || `提示词插件 ${index + 1}`} 的提示词不能为空`);
-        }
-        payload.prompt_plugins.push({
-            id: row.querySelector('[data-field="id"]')?.value.trim() || createAiAssistantPromptPluginId(),
-            name: rawName || `提示词插件 ${payload.prompt_plugins.length + 1}`,
-            prompt: rawPrompt,
-            temperature: Number(rawTemperature || 0.2),
-            max_tool_rounds: Number(rawMaxToolRounds || 20),
-        });
-    }
-
-    if (!payload.prompt_plugins.length) {
-        const fallbackPromptPlugin = getAiAssistantPromptPlugin() || {
-            id: createAiAssistantPromptPluginId(),
-            name: "通用助手",
-            prompt: state.aiAssistant?.settings?.system_prompt || "",
-            temperature: state.aiAssistant?.settings?.temperature ?? 0.2,
-            max_tool_rounds: state.aiAssistant?.settings?.max_tool_rounds ?? 20,
-        };
-        payload.prompt_plugins.push({
-            id: fallbackPromptPlugin.id || createAiAssistantPromptPluginId(),
-            name: fallbackPromptPlugin.name || "通用助手",
-            prompt: fallbackPromptPlugin.prompt || state.aiAssistant?.settings?.system_prompt || "",
-            temperature: Number(fallbackPromptPlugin.temperature ?? 0.2),
-            max_tool_rounds: Number(fallbackPromptPlugin.max_tool_rounds ?? 20),
-        });
-    }
-
-    const selectedPromptPlugin = payload.prompt_plugins.find((plugin) => plugin.id === state.aiAssistantUi.selectedPromptPluginId)
-        || payload.prompt_plugins[0];
-    payload.active_prompt_plugin_id = selectedPromptPlugin.id;
-    payload.system_prompt = selectedPromptPlugin.prompt;
-    payload.temperature = Number(selectedPromptPlugin.temperature ?? 0.2);
-    payload.max_tool_rounds = Number(selectedPromptPlugin.max_tool_rounds ?? 20);
-    payload.allow_write_tools = Boolean(form.querySelector('[data-field="allow_write_tools"]')?.checked);
-
-    const configRows = Array.from(form.querySelectorAll("[data-ai-config-row]"));
-    for (const row of configRows) {
-        const providerKey = row.querySelector('[data-field="provider_key"]')?.value.trim() || "";
-        const provider = getAiAssistantProvider(providerKey);
-        if (!provider || !payload.providers[providerKey]) {
-            continue;
-        }
-
-        const rawName = row.querySelector('[data-field="name"]')?.value.trim() || "";
-        const apiKey = row.querySelector('[data-field="api_key"]')?.value.trim() || "";
-        const enabled = Boolean(row.querySelector('[data-field="enabled"]')?.checked);
-        const rawBaseUrl = row.querySelector('[data-field="base_url"]')?.value.trim() || "";
-        const baseUrl = provider.allow_custom_base_url
-            ? (rawBaseUrl || provider.default_base_url || "")
-            : (provider.default_base_url || "");
-        const isBlankRow = !rawName && !apiKey && !enabled && (!provider.allow_custom_base_url || !rawBaseUrl || rawBaseUrl === provider.default_base_url);
-        if (isBlankRow) {
-            continue;
-        }
-
-        payload.providers[providerKey].configs.push({
-            id: row.querySelector('[data-field="id"]')?.value.trim() || createAiAssistantConfigId(providerKey),
-            name: rawName || `${provider.label} 配置 ${payload.providers[providerKey].configs.length + 1}`,
-            enabled,
-            api_key: apiKey,
-            base_url: baseUrl,
-        });
-    }
-
-    return payload;
 }
 
 function syncLogFiltersFromControls() {
