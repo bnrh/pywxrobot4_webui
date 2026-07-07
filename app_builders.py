@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from app_config import (
     DIRECT_EXECUTE_PLUGIN_MODULES,
+    MESSAGE_SUMMARY_PLUGIN_MODULES,
     RESTART_REQUIRED_FIELDS,
     SECRET_SETTINGS_PLACEHOLDER,
     SYSTEM_SETTINGS_FIELDS,
@@ -92,6 +93,7 @@ class AppBuilders:
                     "config_schema": item.get("config_schema") or [],
                     "scope_targets": item.get("scope_targets") or [],
                     "direct_execute": normalize_plugin_module_name(item["module"]) in DIRECT_EXECUTE_PLUGIN_MODULES,
+                    "message_summary": normalize_plugin_module_name(item["module"]) in MESSAGE_SUMMARY_PLUGIN_MODULES,
                     "manual_execution": self.runtime.get_manual_plugin_execution_snapshot(item["module"]),
                 }
             )

@@ -55,6 +55,10 @@ DIRECT_EXECUTE_PLUGIN_MODULES = {
     DOWNLOAD_RECENT_USER_IMAGES_PLUGIN_MODULE,
     DONT_REVOKE_PLUGIN_MODULE,
 }
+MESSAGE_SUMMARY_PLUGIN_MODULES = {
+    normalize_plugin_module_name("plugins.room_msg_summary"),
+    normalize_plugin_module_name("plugins.user_msg_summary"),
+}
 
 
 def sanitize_stored_settings(settings: PluginServiceSettings) -> PluginServiceSettings:

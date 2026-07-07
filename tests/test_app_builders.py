@@ -19,6 +19,18 @@ def test_build_plugin_payload_includes_enabled_flag() -> None:
     if payload:
         assert "enabled" in payload[0]
         assert "loaded" in payload[0]
+        assert "direct_execute" in payload[0]
+        assert "message_summary" in payload[0]
+
+
+def test_message_summary_flag_only_for_summary_plugins() -> None:
+    runtime = PluginRuntime(PluginServiceSettings())
+    builders = AppBuilders(runtime)
+    payload = {item["module"]: item for item in builders.build_plugin_payload()}
+    room_summary = payload.get("plugins.room_msg_summary")
+    if room_summary is not None:
+        assert room_summary["message_summary"] is True
+        assert room_summary["direct_execute"] is True
 
 
 def test_sort_option_items_orders_by_label() -> None:
