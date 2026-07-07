@@ -251,9 +251,11 @@ class AppBuilders:
         }
 
     def build_overview(self) -> dict:
-        settings_payload = build_settings_payload()
+        settings_payload = self.build_settings_payload()
         uptime_seconds = int((datetime.now().astimezone() - self.runtime.started_at).total_seconds()) if self.runtime.started_at else 0
-        user_payload = build_user_payload()
+        user_payload = self.build_user_payload()
+        active_workers = sum(1 for task in self.runtime._workers if not task.done())
+        rejected_count = self.runtime.message_store.count_queue_rejections()
         return {
             "name": "wxrobot_api webui plugin server",
             "settings_storage_path": str(SETTINGS_DB_PATH),
@@ -270,6 +272,15 @@ class AppBuilders:
             "pending_restart_fields": settings_payload["restart_required_fields"],
             "runtime_started_at": format_local_datetime(self.runtime.started_at),
             "uptime_seconds": uptime_seconds,
+            "runtime_metrics": {
+                "workers_active": active_workers,
+                "workers_configured": self.runtime.settings.worker_count,
+                "queue_rejections": rejected_count,
+                "recent_messages": len(self.runtime.recent_messages),
+                "recent_plugin_logs": len(self.runtime.recent_plugin_logs),
+                "queue_capacity": self.runtime.settings.queue_size,
+                "queue_enqueue_wait_seconds": self.runtime.settings.queue_enqueue_wait_seconds,
+            },
             "heartbeat": {
                 "enabled": user_payload["enabled"],
                 "interval_seconds": user_payload["interval_seconds"],
@@ -305,8 +316,8 @@ class AppBuilders:
 
     def build_settings_payload(self) -> dict:
         configured_settings = PluginServiceSettings.from_storage()
-        runtime_payload = serialize_system_settings(self.runtime.settings)
-        configured_payload = serialize_system_settings(configured_settings)
+        runtime_payload = self.serialize_system_settings(self.runtime.settings)
+        configured_payload = self.serialize_system_settings(configured_settings)
         restart_required_fields = [
             field
             for field in RESTART_REQUIRED_FIELDS
@@ -328,7 +339,7 @@ class AppBuilders:
         logs, filtered_total = self.runtime.get_plugin_logs(limit, module_name, normalized_level, normalized_keyword)
         plugin_options = [
             {"module": item["module"], "name": item["name"]}
-            for item in build_plugin_payload()
+            for item in self.build_plugin_payload()
         ]
         available_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         return {

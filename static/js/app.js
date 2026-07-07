@@ -1,4 +1,4 @@
-import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-10";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-11";
 import {
     AI_ASSISTANT_ACTIVE_JOB_STATUSES,
     AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
@@ -6,42 +6,22 @@ import {
     MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS,
     OVERVIEW_POLL_INTERVAL_MS,
     OVERVIEW_RENDER_TICK_MS,
-} from "/static/js/polling-config.js?v=20260706-10";
-import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-10";
+} from "/static/js/polling-config.js?v=20260706-11";
+import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-11";
 import {
-    escapeHtml,
     formatJson,
-    highlightText,
     normalizeInlineText,
-} from "/static/js/dom-utils.js?v=20260706-10";
-import {
-    formatStandardDateTime,
-    formatUnixTimestamp,
-    truncateText,
-} from "/static/js/format-utils.js?v=20260706-10";
-import {
-    getMessageTypeLabel,
-    getPayloadValue,
-    syncMessageTypeLabels,
-} from "/static/js/message-labels.js?v=20260706-10";
-import { tabMeta } from "/static/js/tab-meta.js?v=20260706-10";
-import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-10";
-import {
-    getConversationLabel,
-    getMessageSummary,
-    getMessageTimeLabel,
-    getMessageTitle,
-    getSenderLabel,
-    renderAvatar,
-} from "/static/js/message-presenters.js?v=20260706-10";
+} from "/static/js/dom-utils.js?v=20260706-11";
+import { syncMessageTypeLabels } from "/static/js/message-labels.js?v=20260706-11";
+import { tabMeta } from "/static/js/tab-meta.js?v=20260706-11";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260706-10";
-import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-10";
-import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-10";
+} from "/static/js/plugin-config-form.js?v=20260706-11";
+import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-11";
+import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-11";
 import {
     applySearchableChoiceFilter,
     applySearchableSelectFilter,
@@ -50,7 +30,7 @@ import {
     handleSearchableSelectInput,
     selectSearchableSelectOption,
     syncScopeFieldVisibility,
-} from "/static/js/config-search.js?v=20260706-10";
+} from "/static/js/config-search.js?v=20260706-11";
 import {
     getPluginByModule as findPluginInList,
     getPluginDisplayName as resolvePluginDisplayName,
@@ -61,13 +41,16 @@ import {
     needsPluginTargets,
     normalizeManualPluginExecution,
     sortPluginsForDisplay,
-} from "/static/js/plugin-helpers.js?v=20260706-10";
-import { buildOverviewCards } from "/static/js/overview-cards.js?v=20260706-10";
-import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-10";
-import { waitForDuration } from "/static/js/async-utils.js?v=20260706-10";
-import { renderServiceLogs, syncLogFiltersFromControls as readLogFiltersFromControls } from "/static/js/log-viewer.js?v=20260706-10";
-import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-10";
-import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-10";
+} from "/static/js/plugin-helpers.js?v=20260706-11";
+import { renderOverviewGrid } from "/static/js/overview-view.js?v=20260706-11";
+import { renderMessagesView } from "/static/js/message-view.js?v=20260706-11";
+import { renderUsersView } from "/static/js/users-view.js?v=20260706-11";
+import { renderSettingsView } from "/static/js/settings-view.js?v=20260706-11";
+import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-11";
+import { waitForDuration } from "/static/js/async-utils.js?v=20260706-11";
+import { renderServiceLogs, syncLogFiltersFromControls as readLogFiltersFromControls } from "/static/js/log-viewer.js?v=20260706-11";
+import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-11";
+import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-11";
 import {
     applyFetchOptionsSelection,
     buildPluginConfigRenderModel,
@@ -81,7 +64,7 @@ import {
     renderStructuredPluginForm,
     shouldRefreshPluginModelOptions,
     syncRoomMsgSummaryTimeFields,
-} from "/static/js/plugin-config-render.js?v=20260706-10";
+} from "/static/js/plugin-config-render.js?v=20260706-11";
 import {
     decodeAiAssistantModelSelection,
     findAiAssistantProvider,
@@ -97,7 +80,7 @@ import {
     resolveAiAssistantCurrentSelection,
     resolveAiAssistantPromptPlugin,
     resolveAiAssistantProviderSelection,
-} from "/static/js/ai-assistant-data.js?v=20260706-10";
+} from "/static/js/ai-assistant-data.js?v=20260706-11";
 import {
     appendAiAssistantConfigRow as appendAiAssistantConfigRowView,
     appendAiAssistantPromptPluginRow as appendAiAssistantPromptPluginRowView,
@@ -114,7 +97,7 @@ import {
     syncAiAssistantConfigTableState as syncAiAssistantConfigTableStateView,
     syncAiAssistantPromptPluginCardState as syncAiAssistantPromptPluginCardStateView,
     syncAiAssistantPromptPluginTableState as syncAiAssistantPromptPluginTableStateView,
-} from "/static/js/ai-assistant-ui.js?v=20260706-10";
+} from "/static/js/ai-assistant-ui.js?v=20260706-11";
 
 const state = {
     activeTab: "dashboard",
@@ -435,166 +418,20 @@ function updateHeaderForTab(tabName) {
 }
 
 function renderOverview() {
-    if (!state.overview) {
-        return;
-    }
-
-    const cards = buildOverviewCards(state.overview, state.overviewFetchedAt);
-
-    elements.overviewGrid.innerHTML = cards.map((item) => `
-        <article class="overview-card tone-${escapeHtml(item.tone)}">
-            <div class="overview-label">${escapeHtml(item.label)}</div>
-            <div class="overview-value${item.valueClass ? ` ${item.valueClass}` : ""}">${escapeHtml(item.value)}</div>
-            <div class="overview-hint">${escapeHtml(item.hint)}</div>
-            ${item.body || ""}
-        </article>
-    `).join("");
+    renderOverviewGrid(elements, state.overview, state.overviewFetchedAt);
 }
 
 function renderUsers() {
-    if (!state.users) {
-        elements.userGrid.innerHTML = '<div class="empty-state">还没有可展示的用户信息。</div>';
-        return;
-    }
-
-    const userPayload = state.users;
-    const users = Array.isArray(userPayload.users) ? userPayload.users : [];
-
-    if (!userPayload.enabled) {
-        elements.userGrid.innerHTML = '<div class="empty-state">心跳检测已关闭，请在系统设置中将心跳间隔设置为大于 0 的秒数。</div>';
-        return;
-    }
-
-    if (!users.length) {
-        elements.userGrid.innerHTML = userPayload.healthy === false
-            ? '<div class="empty-state">心跳检测执行失败，暂时无法获取登录账号，请检查主服务连接。</div>'
-            : '<div class="empty-state">当前未获取到任何登录账号。</div>';
-        return;
-    }
-
-    elements.userGrid.innerHTML = users.map((user, index) => {
-        const nickname = normalizeInlineText(user.nickname || "");
-        const userTitle = `用户${index + 1}`;
-        const wechatId = normalizeInlineText(user.wxh || "") || "未设置微信号";
-        return `
-            <article class="user-card">
-                <div class="user-card-head">
-                    <div>
-                        <h4 class="user-name">${escapeHtml(userTitle)}</h4>
-                    </div>
-                </div>
-                <div class="user-info-list">
-                    <div class="user-info-item"><span class="user-info-label">昵称</span><span class="user-info-value">${escapeHtml(nickname || "未提供")}</span></div>
-                    <div class="user-info-item"><span class="user-info-label">微信号</span><span class="user-info-value">${escapeHtml(wechatId === "未设置微信号" ? "未提供" : wechatId)}</span></div>
-                    <div class="user-info-item"><span class="user-info-label">wxid</span><span class="user-info-value user-info-code">${escapeHtml(normalizeInlineText(user.wxid || "") || "未提供")}</span></div>
-                    <div class="user-info-item"><span class="user-info-label">wxpid</span><span class="user-info-value">${escapeHtml(user.wxpid !== undefined && user.wxpid !== null && user.wxpid !== "" ? String(user.wxpid) : "未提供")}</span></div>
-                </div>
-            </article>
-        `;
-    }).join("");
+    renderUsersView(elements, state.users);
 }
 
 function renderMessages() {
-    if (!state.messages.length) {
-        elements.messageList.innerHTML = '<div class="empty-state">还没有收到任何消息。</div>';
-        elements.messageDetail.innerHTML = '<div class="empty-state">请选择左侧消息查看详情。</div>';
-        return;
-    }
-
-    if (
-        state.messageAutoFollow
-        || !state.selectedMessageId
-        || !state.messages.some((item) => item.internal_id === state.selectedMessageId)
-    ) {
-        state.selectedMessageId = state.messages[0].internal_id;
-    }
-
-    elements.messageList.innerHTML = state.messages.map((message) => {
-        const preview = truncateText(getMessageSummary(message), 88);
-        const typeLabel = getMessageTypeLabel(message);
-        const conversationLabel = getConversationLabel(message);
-        const senderLabel = getSenderLabel(message);
-        const timeLabel = getMessageTimeLabel(message);
-        const badges = [
-            `<span class="badge ${getStatusTone(message.status)}">${escapeHtml(message.status)}</span>`,
-            `<span class="badge">${escapeHtml(typeLabel)}</span>`,
-        ].join("");
-
-        return `
-            <button class="message-item ${message.internal_id === state.selectedMessageId ? "is-active" : ""}" data-message-id="${message.internal_id}" type="button">
-                ${renderAvatar(message)}
-                <div class="message-main">
-                    <div class="message-item-head">
-                        <div class="message-primary">
-                            <h4 class="message-title">${escapeHtml(getMessageTitle(message))}</h4>
-                            <div class="detail-meta message-subline">${escapeHtml(timeLabel)}${message.is_group_message && senderLabel ? ` · ${escapeHtml(senderLabel)}` : !message.is_group_message && conversationLabel ? ` · ${escapeHtml(conversationLabel)}` : ""}</div>
-                        </div>
-                        <div class="badge-row message-badges">${badges}</div>
-                    </div>
-                    <p class="message-copy">${escapeHtml(preview)}</p>
-                </div>
-            </button>
-        `;
-    }).join("");
-
-    const selected = state.messages.find((message) => message.internal_id === state.selectedMessageId);
-    const selectedConversation = getConversationLabel(selected);
-    const selectedSender = getSenderLabel(selected);
-    const selectedTypeLabel = getMessageTypeLabel(selected);
-    const selectedTextContent = normalizeInlineText(selected.text_content || "");
-    const rawPayloadText = formatJson(selected.payload);
-    const shouldShowTextContent = getMessageTypeCode(selected) === 1 && Boolean(selectedTextContent);
-    const selectedSourceTime = getPayloadValue(selected, "create_time", "timestamp", "ts");
-    const sourceTimestamp = typeof selectedSourceTime === "string" && /[-:]/.test(selectedSourceTime)
-        ? selectedSourceTime
-        : formatUnixTimestamp(selectedSourceTime);
-    const results = selected.plugin_results?.length
-        ? selected.plugin_results.map((item) => `
-            <div class="badge-row">
-                <span class="badge ${item.handled ? "good" : ""}">${escapeHtml(item.plugin)}</span>
-                <span class="badge ${item.stop_processing ? "good" : ""}">${item.handled ? "已处理" : "跳过"}</span>
-            </div>
-            <div class="detail-meta">${escapeHtml(item.detail || "无额外说明")}</div>
-        `).join("")
-        : '<div class="empty-state">插件尚未返回处理结果。</div>';
-
-    elements.messageDetail.innerHTML = `
-        <div class="detail-head">
-            <div>
-                <h4 class="detail-title">${escapeHtml(getMessageTitle(selected))}</h4>
-            </div>
-            <div class="badge-row">
-                <span class="badge ${getStatusTone(selected.status)}">${escapeHtml(selected.status)}</span>
-                <span class="badge">${escapeHtml(selectedTypeLabel)}</span>
-                <span class="badge">${selected.is_group_message ? "群聊" : "单聊"}</span>
-            </div>
-        </div>
-        <div class="detail-section">
-            <h5 class="detail-section-title">消息信息</h5>
-            <div class="detail-meta">消息 ID：${escapeHtml(selected.msgid || `内部消息 ${selected.internal_id}`)}</div>
-            <div class="detail-meta">会话：${escapeHtml(selectedConversation)}</div>
-            <div class="detail-meta">发送者：${escapeHtml(selected.sender_display_name || selectedSender)}</div>
-            ${selected.is_group_message ? `<div class="detail-meta">群成员：${escapeHtml(selected.room_sender_display_name || selectedSender)}</div>` : ""}
-        </div>
-        ${shouldShowTextContent ? `<div class="detail-section"><h5 class="detail-section-title">消息内容</h5><div class="detail-text">${escapeHtml(selectedTextContent)}</div></div>` : ""}
-        <div class="detail-section">
-            <h5 class="detail-section-title">处理时间</h5>
-            <div class="detail-meta">接收时间：${escapeHtml(selected.received_at || "未知")}</div>
-            <div class="detail-meta">消息时间：${escapeHtml(sourceTimestamp || "上游未提供")}</div>
-            <div class="detail-meta">完成时间：${escapeHtml(selected.processed_at || "处理中")}</div>
-        </div>
-        <div class="detail-section">
-            <h5 class="detail-section-title">插件结果</h5>
-            <div>${results}</div>
-        </div>
-        <div class="detail-section">
-            <div class="detail-section-head">
-                <h5 class="detail-section-title">原始负载</h5>
-                <button class="button ghost compact" type="button" data-action="copy-message-payload">复制原始负载</button>
-            </div>
-            <pre class="code-block">${escapeHtml(rawPayloadText)}</pre>
-        </div>
-    `;
+    const result = renderMessagesView(elements, {
+        messages: state.messages,
+        selectedMessageId: state.selectedMessageId,
+        messageAutoFollow: state.messageAutoFollow,
+    });
+    state.selectedMessageId = result.selectedMessageId;
 }
 
 function renderPlugins() {
@@ -621,44 +458,7 @@ function renderPluginLogs() {
 }
 
 function renderSettings() {
-    if (!state.settings) {
-        return;
-    }
-
-    const configSettings = state.settings.config;
-    const runtimeSettings = state.settings.runtime;
-    const form = elements.settingsForm;
-
-    for (const [key, value] of Object.entries(configSettings)) {
-        const field = form.elements.namedItem(key);
-        if (!field) {
-            continue;
-        }
-        if (field.type === "checkbox") {
-            field.checked = Boolean(value);
-        } else {
-            field.value = value;
-        }
-    }
-
-    if (state.settings.restart_required) {
-        elements.settingsAlert.className = "settings-alert is-visible bad";
-        elements.settingsAlert.textContent = `检测到需要重启的字段：${state.settings.restart_required_fields.join(", ")}。当前运行值仍为 ${runtimeSettings.host}:${runtimeSettings.port}。`;
-    } else if (state.settings.api_auth_enabled && !getStoredApiToken()) {
-        elements.settingsAlert.className = "settings-alert is-visible bad";
-        elements.settingsAlert.textContent = "已启用 Web API 访问令牌，但当前浏览器尚未保存令牌。请填写 api_token 并保存系统设置。";
-    } else {
-        elements.settingsAlert.className = "settings-alert is-visible good";
-        const authHints = [];
-        if (state.settings.api_auth_enabled) {
-            authHints.push("Web API 鉴权已启用");
-        }
-        if (state.settings.callback_auth_enabled) {
-            authHints.push("消息回调密钥已启用");
-        }
-        const suffix = authHints.length ? ` ${authHints.join("，")}。` : "";
-        elements.settingsAlert.textContent = `当前 SQLite 配置与运行时配置一致。保存后可热重载的字段会立即生效。${suffix}`;
-    }
+    renderSettingsView(elements, state.settings, getStoredApiToken);
 }
 
 function applyAiAssistantPayload(payload, preserveSelection = true) {

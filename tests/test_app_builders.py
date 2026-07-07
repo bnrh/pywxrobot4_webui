@@ -42,6 +42,18 @@ def test_sort_option_items_orders_by_label() -> None:
     assert [item["value"] for item in sorted_items] == ["a", "b"]
 
 
+def test_build_overview_includes_runtime_metrics() -> None:
+    runtime = PluginRuntime(PluginServiceSettings())
+    builders = AppBuilders(runtime)
+    overview = builders.build_overview()
+    metrics = overview.get("runtime_metrics") or {}
+    assert metrics.get("workers_configured") == runtime.settings.worker_count
+    assert "queue_rejections" in metrics
+    assert "recent_messages" in metrics
+    assert "recent_plugin_logs" in metrics
+    assert metrics.get("queue_capacity") == runtime.settings.queue_size
+
+
 def test_build_room_member_options_deduplicates_and_sorts() -> None:
     members = AppBuilders.build_room_member_options(
         [
