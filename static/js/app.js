@@ -1,4 +1,4 @@
-import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-08";
+import { api, getStoredApiToken, setStoredApiToken, SECRET_SETTINGS_PLACEHOLDER } from "/static/js/api.js?v=20260706-09";
 import {
     AI_ASSISTANT_ACTIVE_JOB_STATUSES,
     AI_ASSISTANT_JOB_POLL_INTERVAL_MS,
@@ -6,26 +6,26 @@ import {
     MANUAL_PLUGIN_EXECUTION_POLL_INTERVAL_MS,
     OVERVIEW_POLL_INTERVAL_MS,
     OVERVIEW_RENDER_TICK_MS,
-} from "/static/js/polling-config.js?v=20260706-08";
-import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-08";
+} from "/static/js/polling-config.js?v=20260706-09";
+import { connectRuntimeEventStream, shouldPollMessages } from "/static/js/runtime-events.js?v=20260706-09";
 import {
     escapeHtml,
     formatJson,
     highlightText,
     normalizeInlineText,
-} from "/static/js/dom-utils.js?v=20260706-08";
+} from "/static/js/dom-utils.js?v=20260706-09";
 import {
     formatStandardDateTime,
     formatUnixTimestamp,
     truncateText,
-} from "/static/js/format-utils.js?v=20260706-08";
+} from "/static/js/format-utils.js?v=20260706-09";
 import {
     getMessageTypeLabel,
     getPayloadValue,
     syncMessageTypeLabels,
-} from "/static/js/message-labels.js?v=20260706-08";
-import { tabMeta } from "/static/js/tab-meta.js?v=20260706-08";
-import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-08";
+} from "/static/js/message-labels.js?v=20260706-09";
+import { tabMeta } from "/static/js/tab-meta.js?v=20260706-09";
+import { getLogLevelClass, getLogTone, getStatusTone } from "/static/js/status-tones.js?v=20260706-09";
 import {
     getConversationLabel,
     getMessageSummary,
@@ -33,53 +33,55 @@ import {
     getMessageTitle,
     getSenderLabel,
     renderAvatar,
-} from "/static/js/message-presenters.js?v=20260706-08";
+} from "/static/js/message-presenters.js?v=20260706-09";
 import {
     handleStructuredConfigAction,
     hasStructuredPluginConfig,
     readStructuredPluginConfig,
-    renderPluginConfigFields,
     validateStructuredPluginConfig,
-} from "/static/js/plugin-config-form.js?v=20260706-08";
-import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-08";
-import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-08";
+} from "/static/js/plugin-config-form.js?v=20260706-09";
+import { copyTextToClipboard, parseJsonObjectInput } from "/static/js/clipboard-utils.js?v=20260706-09";
+import { getMessagePollErrorText } from "/static/js/message-poll.js?v=20260706-09";
 import {
     applySearchableChoiceFilter,
     applySearchableSelectFilter,
     closeSearchableSelect,
     getSearchableSelectElements,
     handleSearchableSelectInput,
-    initializeSearchableChoiceFilters,
     selectSearchableSelectOption,
     syncScopeFieldVisibility,
-} from "/static/js/config-search.js?v=20260706-08";
+} from "/static/js/config-search.js?v=20260706-09";
 import {
-    findPluginDynamicModelField,
-    getPluginDynamicOptionPayloads,
-    getPluginScopeTargets,
     getPluginByModule as findPluginInList,
     getPluginDisplayName as resolvePluginDisplayName,
     handleManualPluginExecutionTransitions,
     hasPluginLogData,
     isDirectExecutePlugin,
     isManualPluginExecutionActive,
-    isMessageSummaryPlugin,
-    mergeOptionsWithCurrentValues,
     needsPluginTargets,
     normalizeManualPluginExecution,
-    normalizeRoomMsgSummaryRenderConfig,
-    parseStructuredFieldValue,
     sortPluginsForDisplay,
-    WXPID_OPTION_ALL,
-    WXPID_OPTION_DEFAULT,
-    buildRoomMsgSummaryTimeWindow,
-} from "/static/js/plugin-helpers.js?v=20260706-08";
-import { buildOverviewCards } from "/static/js/overview-cards.js?v=20260706-08";
-import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-08";
-import { waitForDuration } from "/static/js/async-utils.js?v=20260706-08";
-import { renderServiceLogs, syncLogFiltersFromControls as readLogFiltersFromControls } from "/static/js/log-viewer.js?v=20260706-08";
-import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-08";
-import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-08";
+} from "/static/js/plugin-helpers.js?v=20260706-09";
+import { buildOverviewCards } from "/static/js/overview-cards.js?v=20260706-09";
+import { updateHeaderForTab as syncHeaderForTab } from "/static/js/tab-ui.js?v=20260706-09";
+import { waitForDuration } from "/static/js/async-utils.js?v=20260706-09";
+import { renderServiceLogs, syncLogFiltersFromControls as readLogFiltersFromControls } from "/static/js/log-viewer.js?v=20260706-09";
+import { renderPluginLogsView } from "/static/js/plugin-log-viewer.js?v=20260706-09";
+import { renderPluginCards } from "/static/js/plugin-cards.js?v=20260706-09";
+import {
+    applyFetchOptionsSelection,
+    buildPluginConfigRenderModel,
+    buildPluginExecuteRenderModel,
+    buildStructuredPluginConfigPayload,
+    getPluginModuleNameForForm,
+    handlePluginFetchOptions,
+    preparePluginConfigRenderModel,
+    preparePluginExecuteRenderModel,
+    refreshPluginModelOptionsForm,
+    renderStructuredPluginForm,
+    shouldRefreshPluginModelOptions,
+    syncRoomMsgSummaryTimeFields,
+} from "/static/js/plugin-config-render.js?v=20260706-09";
 import {
     createAiAssistantConfigId,
     createAiAssistantPromptPluginId,
@@ -103,7 +105,7 @@ import {
     resolveAiAssistantPromptPlugin,
     resolveAiAssistantProviderConfig,
     resolveAiAssistantProviderSelection,
-} from "/static/js/ai-assistant-data.js?v=20260706-08";
+} from "/static/js/ai-assistant-data.js?v=20260706-09";
 
 const state = {
     activeTab: "dashboard",
@@ -303,619 +305,31 @@ function getPluginLogById(logId) {
     return state.pluginLogs?.logs?.find((item) => item.internal_id === logId) || null;
 }
 
-function buildStructuredPluginConfigPayload(plugin) {
-    const nextConfig = readStructuredPluginConfig(elements.pluginConfigForm, plugin);
-    const mergedConfig = { ...(plugin.config || {}) };
-    for (const field of Array.isArray(plugin.config_schema) ? plugin.config_schema : []) {
-        delete mergedConfig[field.key];
-        for (const alias of Array.isArray(field.aliases) ? field.aliases : []) {
-            delete mergedConfig[alias];
-        }
-    }
+function pluginRenderCtx() {
     return {
-        ...mergedConfig,
-        ...nextConfig,
+        api,
+        elements,
+        pluginTargets: state.pluginTargets,
+        users: state.users,
+        moduleState: {
+            pluginConfigModule: state.pluginConfigModule,
+            pluginExecuteModule: state.pluginExecuteModule,
+        },
+        getPluginByModule,
+        getPluginModuleName: (formElement) => getPluginModuleNameForForm(formElement, elements, {
+            pluginConfigModule: state.pluginConfigModule,
+            pluginExecuteModule: state.pluginExecuteModule,
+        }),
+        setStatus,
     };
 }
 
-async function loadPluginDynamicOptionPayloads(plugin, config) {
-    const payloads = { ...getPluginDynamicOptionPayloads(plugin) };
-    const modelField = findPluginDynamicModelField(plugin);
-    if (!plugin?.module || !modelField) {
-        return payloads;
-    }
-
-    if (modelField.manual_fetch_options) {
-        if (!payloads.model_options) {
-            const currentModelKey = normalizeInlineText(modelField.key || "model") || "model";
-            payloads.model_options = {
-                options: mergeOptionsWithCurrentValues([], config?.[currentModelKey]),
-                error: "",
-            };
-        }
-        return payloads;
-    }
-
-    try {
-        payloads.model_options = await api.getPluginModelOptions(plugin.module, config || {});
-    } catch (error) {
-        const currentModelKey = normalizeInlineText(modelField.key || "model") || "model";
-        const currentModelValue = config?.[currentModelKey];
-        payloads.model_options = {
-            options: mergeOptionsWithCurrentValues([], currentModelValue),
-            error: error.message || String(error),
-        };
-    }
-    return payloads;
+function buildPluginConfigRenderModelForPlugin(plugin) {
+    return buildPluginConfigRenderModel(plugin, state.pluginTargets, state.users);
 }
 
-function resolveTargetOptionsBySource(optionsSource, currentValues, plugin = null) {
-    if (optionsSource === "room_options") {
-        return mergeOptionsWithCurrentValues(state.pluginTargets?.room_options || [], currentValues);
-    }
-    if (optionsSource === "label_options") {
-        return Array.isArray(state.pluginTargets?.label_options) ? [...state.pluginTargets.label_options] : [];
-    }
-    if (optionsSource === "wxpid_options") {
-        return mergeOptionsWithCurrentValues(state.pluginTargets?.wxpid_options || [], currentValues);
-    }
-    if (optionsSource === "model_options") {
-        const modelOptions = getPluginDynamicOptionPayloads(plugin).model_options;
-        return mergeOptionsWithCurrentValues(modelOptions?.options || [], currentValues);
-    }
-    return [];
-}
-
-function hydrateDynamicFieldOptions(field, configValue, plugin = null) {
-    if (!field || typeof field !== "object") {
-        return field;
-    }
-
-    const nextField = { ...field };
-    if (field.options_source) {
-        nextField.options = resolveTargetOptionsBySource(field.options_source, configValue, plugin);
-    }
-
-    if (field.options_source === "model_options") {
-        const modelOptionsPayload = getPluginDynamicOptionPayloads(plugin).model_options;
-        if (modelOptionsPayload?.error) {
-            nextField.description = [
-                field.description,
-                `当前模型列表读取失败：${modelOptionsPayload.error}`,
-            ].filter(Boolean).join(" ");
-        }
-    }
-
-    if (Array.isArray(field.columns)) {
-        nextField.columns = field.columns.map((column) => {
-            if (!column || typeof column !== "object" || !column.options_source) {
-                return column;
-            }
-            const currentValues = Array.isArray(configValue)
-                ? configValue.map((row) => row && typeof row === "object" ? row[column.key] : undefined)
-                : [];
-            return {
-                ...column,
-                options: resolveTargetOptionsBySource(column.options_source, currentValues, plugin),
-            };
-        });
-    }
-
-    return nextField;
-}
-
-function renderStructuredPluginForm(formElement, renderPlugin) {
-    renderPluginConfigFields(formElement, renderPlugin);
-    syncRoomMsgSummaryTimeFields(formElement);
-    initializeSearchableChoiceFilters(formElement);
-    syncScopeFieldVisibility(formElement);
-}
-
-async function preparePluginConfigRenderModel(plugin, configOverride = undefined, renderOptions = {}) {
-    const sourcePlugin = {
-        ...plugin,
-        config: configOverride !== undefined ? configOverride : plugin?.config,
-    };
-    const dynamicOptionPayloads = renderOptions.forceModelOptions
-        ? {
-            ...getPluginDynamicOptionPayloads(sourcePlugin),
-            model_options: await api.getPluginModelOptions(sourcePlugin.module, sourcePlugin.config || {}),
-        }
-        : await loadPluginDynamicOptionPayloads(sourcePlugin, sourcePlugin.config || {});
-    return buildPluginConfigRenderModel({
-        ...sourcePlugin,
-        dynamic_option_payloads: dynamicOptionPayloads,
-    });
-}
-
-async function preparePluginExecuteRenderModel(plugin, configOverride = undefined, renderOptions = {}) {
-    const scopeTargets = getPluginScopeTargets(plugin);
-    const config = { ...(configOverride !== undefined ? configOverride : (plugin?.config || {})) };
-    if (config.wxpid === undefined || config.wxpid === null || config.wxpid === "") {
-        config.wxpid = WXPID_OPTION_DEFAULT;
-    }
-    if (scopeTargets.includes("rooms") && config._scope_room_mode === undefined) {
-        config._scope_room_mode = "selected";
-    }
-    if (scopeTargets.includes("friend_labels") && config._scope_friend_mode === undefined) {
-        config._scope_friend_mode = "selected";
-    }
-
-    const dynamicOptionPayloads = renderOptions.forceModelOptions
-        ? {
-            ...getPluginDynamicOptionPayloads(plugin),
-            model_options: await api.getPluginModelOptions(plugin.module, config || {}),
-        }
-        : await loadPluginDynamicOptionPayloads(plugin, config);
-    return buildPluginExecuteRenderModel({
-        ...plugin,
-        config,
-        dynamic_option_payloads: dynamicOptionPayloads,
-    });
-}
-
-async function refreshPluginModelOptionsForm(formElement) {
-    const moduleName = getPluginModuleNameForForm(formElement);
-    if (!moduleName) {
-        return null;
-    }
-
-    const plugin = getPluginByModule(moduleName);
-    if (!plugin || !findPluginDynamicModelField(plugin) || !hasStructuredPluginConfig(plugin)) {
-        return null;
-    }
-
-    const currentRenderPlugin = formElement === elements.pluginConfigForm
-        ? buildPluginConfigRenderModel(plugin)
-        : buildPluginExecuteRenderModel(plugin);
-    const nextConfig = readStructuredPluginConfig(formElement, currentRenderPlugin);
-    const renderPlugin = formElement === elements.pluginConfigForm
-        ? await preparePluginConfigRenderModel(plugin, nextConfig, { forceModelOptions: true })
-        : await preparePluginExecuteRenderModel(plugin, nextConfig, { forceModelOptions: true });
-
-    if (moduleName !== getPluginModuleNameForForm(formElement)) {
-        return null;
-    }
-    renderStructuredPluginForm(formElement, renderPlugin);
-    return renderPlugin;
-}
-
-function shouldRefreshPluginModelOptions(plugin, fieldKey) {
-    const modelField = findPluginDynamicModelField(plugin);
-    if (!modelField) {
-        return false;
-    }
-    if (modelField.manual_fetch_options) {
-        return false;
-    }
-    const refreshOnFields = Array.isArray(modelField.refresh_on_fields)
-        ? modelField.refresh_on_fields.map((item) => normalizeInlineText(item)).filter(Boolean)
-        : [];
-    if (refreshOnFields.length) {
-        return refreshOnFields.includes(normalizeInlineText(fieldKey));
-    }
-    return ["base_url", "api_key"].includes(normalizeInlineText(fieldKey));
-}
-
-function getFetchOptionsFieldShell(element) {
-    return element?.closest(".config-fetch-options-field") || null;
-}
-
-function getFetchOptionsTargetInput(element) {
-    const fieldShell = getFetchOptionsFieldShell(element);
-    const targetInput = fieldShell?.querySelector("input[data-column-key], input[data-config-key]");
-    return targetInput instanceof HTMLInputElement ? targetInput : null;
-}
-
-function readFetchOptionsRequestValue(inputElement) {
-    if (inputElement instanceof HTMLSelectElement) {
-        return parseStructuredFieldValue(inputElement.value);
-    }
-    if (inputElement instanceof HTMLInputElement && inputElement.type === "checkbox") {
-        return Boolean(inputElement.checked);
-    }
-    if (inputElement instanceof HTMLInputElement && inputElement.type === "number") {
-        const text = String(inputElement.value || "").trim();
-        if (!text) {
-            return undefined;
-        }
-        const value = Number(text);
-        return Number.isFinite(value) ? value : undefined;
-    }
-    if (inputElement instanceof HTMLInputElement || inputElement instanceof HTMLTextAreaElement) {
-        return inputElement.value;
-    }
-    return "";
-}
-
-function buildFetchOptionsSelectMarkup(fieldKey, options, currentValue) {
-    const normalizedCurrentValue = JSON.stringify(currentValue ?? "");
-    return `
-        <select data-config-fetch-options-select="${escapeHtml(fieldKey)}" style="margin-top:8px;">
-            ${options.map((option) => {
-                const optionValue = Object.prototype.hasOwnProperty.call(option, "value") ? option.value : option;
-                const optionLabel = Object.prototype.hasOwnProperty.call(option, "label") ? option.label : String(optionValue ?? "");
-                const encodedValue = escapeHtml(JSON.stringify(optionValue));
-                return `<option value="${encodedValue}" ${JSON.stringify(optionValue) === normalizedCurrentValue ? "selected" : ""}>${escapeHtml(optionLabel)}</option>`;
-            }).join("")}
-        </select>
-    `;
-}
-
-function updateFetchOptionsSelect(fieldShell, fieldKey, options, currentValue) {
-    if (!fieldShell || !fieldKey) {
-        return;
-    }
-    const mergedOptions = mergeOptionsWithCurrentValues(options, currentValue);
-    const existingSelect = fieldShell.querySelector(`[data-config-fetch-options-select="${fieldKey}"]`);
-    const nextMarkup = buildFetchOptionsSelectMarkup(fieldKey, mergedOptions, currentValue);
-    if (existingSelect) {
-        existingSelect.outerHTML = nextMarkup;
-    } else {
-        fieldShell.insertAdjacentHTML("beforeend", nextMarkup);
-    }
-    const nextSelect = fieldShell.querySelector(`[data-config-fetch-options-select="${fieldKey}"]`);
-    const hasCurrentValue = mergedOptions.some((option) => {
-        const optionValue = Object.prototype.hasOwnProperty.call(option, "value") ? option.value : option;
-        return JSON.stringify(optionValue) === JSON.stringify(currentValue ?? "");
-    });
-    if (nextSelect instanceof HTMLSelectElement && !hasCurrentValue) {
-        nextSelect.selectedIndex = -1;
-    }
-}
-
-function buildPluginModelOptionsRequestConfig(formElement, plugin, fieldContainer, targetInput, fieldKey, parentFieldKey) {
-    if (!plugin) {
-        return {
-            __model_field_key: fieldKey,
-            __model_parent_field_key: parentFieldKey,
-        };
-    }
-
-    const renderPlugin = formElement === elements.pluginConfigForm
-        ? buildPluginConfigRenderModel(plugin)
-        : buildPluginExecuteRenderModel(plugin);
-    const currentConfig = readStructuredPluginConfig(formElement, renderPlugin);
-    if (!parentFieldKey) {
-        return {
-            ...currentConfig,
-            __model_field_key: fieldKey,
-        };
-    }
-
-    const modelField = findPluginDynamicModelField(plugin, fieldKey, parentFieldKey);
-    const rowContainer = targetInput?.closest("[data-config-row-editor]") || targetInput?.closest("[data-config-row]");
-    const rowConfig = {};
-    for (const key of [fieldKey, modelField?.base_url_key || "base_url", modelField?.api_key_key || "api_key"]) {
-        const normalizedKey = normalizeInlineText(key);
-        if (!normalizedKey) {
-            continue;
-        }
-        const rowInput = rowContainer?.querySelector(`[data-column-key="${normalizedKey}"]`);
-        if (!rowInput) {
-            continue;
-        }
-        rowConfig[normalizedKey] = readFetchOptionsRequestValue(rowInput);
-    }
-    return {
-        ...rowConfig,
-        __model_field_key: fieldKey,
-        __model_parent_field_key: parentFieldKey,
-    };
-}
-
-function applyFetchOptionsSelection(selectElement) {
-    const targetInput = getFetchOptionsTargetInput(selectElement);
-    if (!(targetInput instanceof HTMLInputElement)) {
-        return;
-    }
-    const nextValue = parseStructuredFieldValue(selectElement.value);
-    targetInput.value = nextValue === undefined || nextValue === null ? "" : String(nextValue);
-    targetInput.dispatchEvent(new Event("input", { bubbles: true }));
-    targetInput.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
-async function handlePluginFetchOptions(button, formElement) {
-    const moduleName = getPluginModuleNameForForm(formElement);
-    if (!moduleName) {
-        setStatus("当前未选中插件，无法获取模型列表", "bad");
-        return true;
-    }
-
-    const plugin = getPluginByModule(moduleName);
-    const targetInput = getFetchOptionsTargetInput(button);
-    const fieldKey = normalizeInlineText(button?.getAttribute("data-target-key") || targetInput?.getAttribute("data-column-key") || targetInput?.getAttribute("data-config-key") || "");
-    const fieldContainer = button?.closest("[data-config-field]");
-    const parentFieldKey = fieldContainer?.getAttribute("data-config-type") === "object-list"
-        ? normalizeInlineText(fieldContainer?.getAttribute("data-config-field") || "")
-        : "";
-    if (!plugin || !fieldKey || !(targetInput instanceof HTMLInputElement) || !findPluginDynamicModelField(plugin, fieldKey, parentFieldKey)) {
-        setStatus("当前插件未配置模型列表读取能力", "bad");
-        return true;
-    }
-
-    const originalText = button.textContent || "获取模型列表";
-    button.disabled = true;
-    button.textContent = "获取中...";
-    try {
-        setStatus("正在获取模型列表...");
-        const requestConfig = buildPluginModelOptionsRequestConfig(formElement, plugin, fieldContainer, targetInput, fieldKey, parentFieldKey);
-        const modelOptionsPayload = await api.getPluginModelOptions(moduleName, requestConfig);
-        const nextOptions = Array.isArray(modelOptionsPayload?.options) ? modelOptionsPayload.options : [];
-        updateFetchOptionsSelect(getFetchOptionsFieldShell(button), fieldKey, nextOptions, targetInput.value);
-        if (modelOptionsPayload?.error) {
-            setStatus(`模型列表读取失败：${modelOptionsPayload.error}`, "bad");
-            return true;
-        }
-        const optionCount = nextOptions.length;
-        if (optionCount > 0) {
-            setStatus(`已获取 ${optionCount} 个模型，可继续手动输入或从下拉中选择`, "good");
-        } else {
-            setStatus("模型列表为空，请确认上游服务是否返回模型数据", "bad");
-        }
-    } catch (error) {
-        setStatus(`模型列表读取失败：${error.message}`, "bad");
-    } finally {
-        button.disabled = false;
-        button.textContent = originalText;
-    }
-    return true;
-}
-
-function buildPluginScopeFields(plugin, modeDefaults = {}) {
-    const scopeTargets = getPluginScopeTargets(plugin);
-    const config = plugin?.config || {};
-    const fields = [];
-
-    if (scopeTargets.includes("rooms")) {
-        const roomOptions = mergeOptionsWithCurrentValues(state.pluginTargets?.room_options || [], config._scope_room_ids || []);
-        fields.push({
-            key: "_scope_room_mode",
-            label: "群聊范围",
-            type: "select",
-            full_width: false,
-            default: modeDefaults._scope_room_mode || "all",
-            options: [
-                { label: "全部群聊", value: "all" },
-                { label: "指定群聊", value: "selected" },
-                { label: "不作用于任何群聊", value: "none" },
-            ],
-            description: "默认作用于全部群聊。选择“指定群聊”后，在下方勾选具体群聊。",
-        });
-        fields.push({
-            key: "_scope_room_ids",
-            label: "指定群聊",
-            type: "searchable-multi-checkbox",
-            options: roomOptions,
-            default: [],
-            search_placeholder: "搜索群名称或 wxid",
-            show_selected_label: "仅显示已勾选群聊",
-            empty_text: "没有匹配到群聊。",
-            empty_no_options_text: "当前还没有可选群聊。",
-            description: roomOptions.length
-                ? "仅当上方选择“指定群聊”时生效。支持按群名称或 wxid 搜索筛选。"
-                : "当前未读取到群聊列表，可先刷新用户或稍后重试。",
-        });
-    }
-
-    if (scopeTargets.includes("friend_labels")) {
-        const labelOptions = mergeOptionsWithCurrentValues(state.pluginTargets?.label_options || [], config._scope_friend_labels || []);
-        fields.push({
-            key: "_scope_friend_mode",
-            label: "好友范围",
-            type: "select",
-            full_width: false,
-            default: modeDefaults._scope_friend_mode || "all",
-            options: [
-                { label: "全部好友", value: "all" },
-                { label: "指定好友标签", value: "selected" },
-                { label: "不作用于任何好友", value: "none" },
-            ],
-            description: "好友范围通过标签控制。选择“指定好友标签”后，在下方勾选标签。",
-        });
-        fields.push({
-            key: "_scope_friend_labels",
-            label: "指定好友标签",
-            type: "searchable-multi-checkbox",
-            options: labelOptions,
-            default: [],
-            search_placeholder: "搜索好友标签",
-            show_selected_label: "仅显示已勾选标签",
-            empty_text: "没有匹配到好友标签。",
-            empty_no_options_text: "当前还没有可选好友标签。",
-            description: labelOptions.length
-                ? "仅当上方选择“指定好友标签”时生效。支持按标签名搜索筛选。"
-                : "当前未读取到标签列表，可先刷新用户或稍后重试。",
-        });
-    }
-
-    return fields;
-}
-
-async function loadPluginTargets(force = false) {
-    if (!force && state.pluginTargets) {
-        return state.pluginTargets;
-    }
-    state.pluginTargets = await api.getPluginTargets();
-    return state.pluginTargets;
-}
-
-function getPluginModuleNameForForm(formElement) {
-    if (formElement === elements.pluginConfigForm) {
-        return state.pluginConfigModule;
-    }
-    if (formElement === elements.pluginExecuteForm) {
-        return state.pluginExecuteModule;
-    }
-    return "";
-}
-
-function syncRoomMsgSummaryTimeFields(formElement, { force = false } = {}) {
-    const moduleName = getPluginModuleNameForForm(formElement);
-    const plugin = moduleName ? getPluginByModule(moduleName) : null;
-    if (!isMessageSummaryPlugin(plugin)) {
-        return;
-    }
-
-    const timeRangeInput = formElement.querySelector('[data-config-key="time_range"]');
-    const startInput = formElement.querySelector('[data-config-key="start_time"]');
-    const endInput = formElement.querySelector('[data-config-key="end_time"]');
-    if (!(timeRangeInput instanceof HTMLSelectElement) || !(startInput instanceof HTMLInputElement) || !(endInput instanceof HTMLInputElement)) {
-        return;
-    }
-
-    const timeRangeValue = parseStructuredFieldValue(timeRangeInput.value) || "2h";
-    const { startTime, endTime } = buildRoomMsgSummaryTimeWindow(timeRangeValue);
-    if (force || !normalizeInlineText(startInput.value)) {
-        startInput.value = startTime;
-    }
-    if (force || !normalizeInlineText(endInput.value)) {
-        endInput.value = endTime;
-    }
-}
-
-function buildWxpidFieldSchema(field, currentValue, description = "") {
-    return {
-        ...field,
-        type: "select",
-        default: Object.prototype.hasOwnProperty.call(field, "default") ? field.default : WXPID_OPTION_DEFAULT,
-        options: getWxpidFieldOptions(currentValue),
-        description: description || field.description || "默认使用首个登录微信进程；也可选择遍历所有当前登录进程。",
-    };
-}
-
-function getWxpidFieldOptions(currentValue) {
-    const seen = new Set();
-    const options = [
-        { label: "默认第一个微信进程", value: WXPID_OPTION_DEFAULT },
-        { label: "所有微信进程", value: WXPID_OPTION_ALL },
-    ];
-    const targetOptions = Array.isArray(state.pluginTargets?.wxpid_options) ? state.pluginTargets.wxpid_options : [];
-
-    for (const option of targetOptions) {
-        const numericValue = Number(option?.value);
-        if (!Number.isFinite(numericValue)) {
-            continue;
-        }
-        const key = String(numericValue);
-        if (seen.has(key)) {
-            continue;
-        }
-        seen.add(key);
-        options.push({
-            label: normalizeInlineText(option?.label || `微信进程(${numericValue})`) || `微信进程(${numericValue})`,
-            search_text: normalizeInlineText(option?.search_text || ""),
-            value: numericValue,
-        });
-    }
-
-    if (!targetOptions.length) {
-        const users = Array.isArray(state.users?.users) ? state.users.users : [];
-        for (const user of users) {
-            const numericValue = Number(user?.wxpid ?? user?.pid);
-            if (!Number.isFinite(numericValue)) {
-                continue;
-            }
-            const key = String(numericValue);
-            if (seen.has(key)) {
-                continue;
-            }
-            seen.add(key);
-            const nickname = normalizeInlineText(user?.nickname || user?.display_name || "") || "未命名账号";
-            const wxid = normalizeInlineText(user?.wxid || "");
-            options.push({
-                label: wxid ? `${nickname}(${wxid})` : `${nickname}(${numericValue})`,
-                value: numericValue,
-            });
-        }
-    }
-
-    const normalizedCurrentValue = String(currentValue ?? "").trim();
-    if (
-        options.length <= 2
-        && normalizedCurrentValue
-        && normalizedCurrentValue !== WXPID_OPTION_DEFAULT
-        && normalizedCurrentValue !== WXPID_OPTION_ALL
-        && !seen.has(normalizedCurrentValue)
-    ) {
-        const fallbackValue = Number(normalizedCurrentValue);
-        options.push({
-            label: `当前配置(${normalizedCurrentValue})`,
-            value: Number.isFinite(fallbackValue) ? fallbackValue : normalizedCurrentValue,
-        });
-    }
-
-    return options;
-}
-
-function buildPluginConfigRenderModel(plugin) {
-    const sourcePlugin = isMessageSummaryPlugin(plugin)
-        ? { ...plugin, config: normalizeRoomMsgSummaryRenderConfig(plugin) }
-        : plugin;
-
-    if (!sourcePlugin || !Array.isArray(sourcePlugin.config_schema)) {
-        return sourcePlugin;
-    }
-
-    return {
-        ...sourcePlugin,
-        config_schema: sourcePlugin.config_schema.map((field) => {
-            if (!field || typeof field !== "object") {
-                return field;
-            }
-            const currentValue = sourcePlugin.config?.[field.key];
-            let nextField = hydrateDynamicFieldOptions(field, currentValue, sourcePlugin);
-            if (nextField.key === "wxpid") {
-                nextField = buildWxpidFieldSchema(nextField, currentValue);
-            }
-            if (Array.isArray(nextField.columns)) {
-                nextField = {
-                    ...nextField,
-                    columns: nextField.columns.map((column) => {
-                        if (!column || typeof column !== "object" || column.key !== "wxpid") {
-                            return column;
-                        }
-                        return buildWxpidFieldSchema(column, undefined, column.description || "默认使用首个登录微信进程；也可选择遍历所有当前登录进程。");
-                    }),
-                };
-            }
-            return nextField;
-        }).concat(
-            sourcePlugin.message_dependent
-                ? buildPluginScopeFields(sourcePlugin).filter((field) => !sourcePlugin.config_schema.some((item) => item?.key === field.key))
-                : []
-        ),
-    };
-}
-
-function buildPluginExecuteRenderModel(plugin) {
-    const scopeTargets = getPluginScopeTargets(plugin);
-    const config = { ...(plugin?.config || {}) };
-    if (config.wxpid === undefined || config.wxpid === null || config.wxpid === "") {
-        config.wxpid = WXPID_OPTION_DEFAULT;
-    }
-    if (scopeTargets.includes("rooms") && config._scope_room_mode === undefined) {
-        config._scope_room_mode = "selected";
-    }
-    if (scopeTargets.includes("friend_labels") && config._scope_friend_mode === undefined) {
-        config._scope_friend_mode = "selected";
-    }
-    const renderPlugin = buildPluginConfigRenderModel({ ...plugin, config });
-    return {
-        ...renderPlugin,
-        config,
-        config_schema: [
-            ...(Array.isArray(renderPlugin.config_schema)
-                ? renderPlugin.config_schema
-                    .filter((field) => field?.key === "wxpid")
-                    .map((field) => ({
-                        ...field,
-                        description: field.description || "本次执行默认使用首个登录微信进程；这里的选择不会覆盖已保存配置。",
-                    }))
-                : []),
-            ...buildPluginScopeFields({ ...plugin, config }, config),
-        ],
-    };
+function buildPluginExecuteRenderModelForPlugin(plugin) {
+    return buildPluginExecuteRenderModel(plugin, state.pluginTargets, state.users);
 }
 
 async function openPluginConfigModal(moduleName) {
@@ -927,14 +341,14 @@ async function openPluginConfigModal(moduleName) {
     if (needsPluginTargets(plugin)) {
         await loadPluginTargets(true);
     }
-    const renderPlugin = await preparePluginConfigRenderModel(plugin);
+    const renderPlugin = await preparePluginConfigRenderModel(plugin, state.pluginTargets, state.users, api);
     state.pluginConfigModule = moduleName;
     elements.pluginConfigModalTitle.textContent = `${plugin.name} 配置`;
     if (hasStructuredPluginConfig(renderPlugin)) {
         elements.pluginConfigMeta.textContent = "插件配置会以结构化表单保存到 SQLite，并在支持的范围内立即热重载。";
         elements.pluginConfigForm.hidden = false;
         elements.pluginConfigEditor.hidden = true;
-        renderStructuredPluginForm(elements.pluginConfigForm, renderPlugin);
+        renderStructuredPluginForm(elements.pluginConfigForm, renderPlugin, pluginRenderCtx());
     } else {
         elements.pluginConfigMeta.textContent = "当前插件尚未提供结构化配置描述，暂时仍使用 JSON 编辑。";
         elements.pluginConfigForm.hidden = true;
@@ -980,7 +394,7 @@ async function openPluginExecuteModal(moduleName) {
     if (needsPluginTargets(plugin)) {
         await loadPluginTargets(true);
     }
-    const renderPlugin = await preparePluginExecuteRenderModel(plugin);
+    const renderPlugin = await preparePluginExecuteRenderModel(plugin, state.pluginTargets, state.users, api);
     if (!renderPlugin.config_schema.length) {
         setStatus("正在执行功能插件...");
         await executePluginWithConfig(moduleName, {});
@@ -989,7 +403,7 @@ async function openPluginExecuteModal(moduleName) {
     state.pluginExecuteModule = moduleName;
     elements.pluginExecuteModalTitle.textContent = `${plugin.name} 执行范围`;
     elements.pluginExecuteMeta.textContent = "执行前选择这次运行要作用的微信进程、群聊、好友标签或公众号。本次选择不会覆盖已保存配置。";
-    renderStructuredPluginForm(elements.pluginExecuteForm, renderPlugin);
+    renderStructuredPluginForm(elements.pluginExecuteForm, renderPlugin, pluginRenderCtx());
     elements.pluginExecuteModal.classList.add("is-visible");
 }
 
@@ -2841,7 +2255,7 @@ elements.pluginConfigForm.addEventListener("click", (event) => {
     if (!plugin) {
         return;
     }
-    const renderPlugin = buildPluginConfigRenderModel(plugin);
+    const renderPlugin = buildPluginConfigRenderModelForPlugin(plugin);
     if (handleStructuredConfigAction(elements.pluginConfigForm, renderPlugin, event)) {
         event.preventDefault();
     }
@@ -2918,7 +2332,7 @@ async function handleProjectFilePick(button, formElement) {
         const fetchOptionsButton = event.target.closest("[data-config-fetch-options]");
         if (fetchOptionsButton) {
             event.preventDefault();
-            await handlePluginFetchOptions(fetchOptionsButton, formElement);
+            await handlePluginFetchOptions(fetchOptionsButton, formElement, pluginRenderCtx());
             return;
         }
         const optionButton = event.target.closest("[data-config-searchable-option]");
@@ -2997,13 +2411,13 @@ async function handleProjectFilePick(button, formElement) {
                 syncScopeFieldVisibility(formElement);
             }
             if (fieldKey === "time_range") {
-                syncRoomMsgSummaryTimeFields(formElement, { force: true });
+                syncRoomMsgSummaryTimeFields(formElement, pluginRenderCtx().getPluginModuleName, getPluginByModule, { force: true });
             }
             if (event.type === "change") {
-                const moduleName = getPluginModuleNameForForm(formElement);
+                const moduleName = pluginRenderCtx().getPluginModuleName(formElement);
                 const plugin = moduleName ? getPluginByModule(moduleName) : null;
                 if (plugin && shouldRefreshPluginModelOptions(plugin, fieldKey)) {
-                    void refreshPluginModelOptionsForm(formElement);
+                    void refreshPluginModelOptionsForm(formElement, pluginRenderCtx());
                 }
             }
         });
@@ -3060,7 +2474,7 @@ elements.savePluginConfigButton.addEventListener("click", async () => {
         if (!plugin) {
             throw new Error("未找到指定插件");
         }
-        const renderPlugin = buildPluginConfigRenderModel(plugin);
+        const renderPlugin = buildPluginConfigRenderModelForPlugin(plugin);
         if (hasStructuredPluginConfig(renderPlugin)) {
             const validation = validateStructuredPluginConfig(elements.pluginConfigForm, renderPlugin);
             if (!validation.valid) {
@@ -3068,7 +2482,7 @@ elements.savePluginConfigButton.addEventListener("click", async () => {
             }
         }
         const config = hasStructuredPluginConfig(renderPlugin)
-            ? buildStructuredPluginConfigPayload(renderPlugin)
+            ? buildStructuredPluginConfigPayload(elements.pluginConfigForm, renderPlugin)
             : (() => {
                 const configText = elements.pluginConfigEditor.value.trim() || "{}";
                 return configText ? JSON.parse(configText) : {};
@@ -3097,7 +2511,7 @@ elements.executePluginButton.addEventListener("click", async () => {
         if (!plugin) {
             throw new Error("未找到指定功能插件");
         }
-        const renderPlugin = buildPluginExecuteRenderModel(plugin);
+        const renderPlugin = buildPluginExecuteRenderModelForPlugin(plugin);
         const config = hasStructuredPluginConfig(renderPlugin)
             ? readStructuredPluginConfig(elements.pluginExecuteForm, renderPlugin)
             : {};
