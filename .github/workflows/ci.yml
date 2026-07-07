@@ -18,7 +18,9 @@ jobs:
       - name: Run tests
         run: python -m pytest tests -q
       - name: Run frontend module smoke tests
-        run: node tests/js/test_overview_cards.mjs
+        run: |
+          node tests/js/test_overview_cards.mjs
+          node tests/js/test_ai_assistant_data.mjs
 
   docker:
     runs-on: ubuntu-latest

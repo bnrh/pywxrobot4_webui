@@ -13,6 +13,42 @@ export function syncLogFiltersFromControls(elements) {
     };
 }
 
+export function createLogFilterActions(getState, actions) {
+    function syncLogFiltersFromControlsLocal() {
+        getState().logFilters = syncLogFiltersFromControls(actions.elements);
+    }
+
+    async function applyLogFilters(statusText = "正在应用日志筛选...") {
+        syncLogFiltersFromControlsLocal();
+        actions.setStatus(statusText);
+        await actions.loadLogs(getState().selectedLogFile);
+        const logs = getState().logs;
+        if (Number(logs?.line_count || 0) > 0) {
+            actions.setStatus(`日志筛选已更新，命中 ${logs.matched_line_count || 0} 行`, "good");
+            return;
+        }
+        actions.setStatus("当前筛选条件下没有命中日志");
+    }
+
+    function scheduleLogFilterRefresh(getLogFilterTimerId, setLogFilterTimerId) {
+        syncLogFiltersFromControlsLocal();
+        if (getLogFilterTimerId() !== null) {
+            window.clearTimeout(getLogFilterTimerId());
+        }
+        setLogFilterTimerId(window.setTimeout(() => {
+            applyLogFilters().catch((error) => {
+                actions.setStatus(`日志筛选失败：${error.message}`, "bad");
+            });
+        }, 250));
+    }
+
+    return {
+        syncLogFiltersFromControls: syncLogFiltersFromControlsLocal,
+        applyLogFilters,
+        scheduleLogFilterRefresh,
+    };
+}
+
 export function renderServiceLogs(elements, logs, logFilters) {
     if (!logs) {
         elements.logMeta.textContent = "尚未加载日志。";
