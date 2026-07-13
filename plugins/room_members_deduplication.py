@@ -16,6 +16,7 @@ name = "room_members_deduplication"
 description = "按配置检查多个群聊组中的重复成员，并导出 CSV 报表"
 category = "functional"
 message_dependent = False
+direct_execute = True
 
 
 WINDOWS_DOWNLOADS_FOLDER_GUID = "{374DE290-123F-4565-9164-39C4925E467B}"
