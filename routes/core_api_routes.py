@@ -6,16 +6,16 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from loguru import logger
 
 from ai_assistant import load_openai_compatible_model_options
 from app_builders import AppBuilders
 from app_config import (
-    FRONTEND_INDEX_PAGE,
     PLUGIN_ASSET_IMAGE_EXTENSIONS,
     PLUGIN_ASSET_MAX_BYTES,
 )
+from frontend_assets import render_frontend_index_html
 from api_schemas import PluginConfigUpdateRequest
 from config import PROJECT_ROOT, normalize_plugin_module_name
 from message import MessageEvent
@@ -29,8 +29,8 @@ def register_core_api_routes(app: FastAPI, ctx: AppContext, callback_path: str) 
     builders = ctx.builders
 
     @app.get("/")
-    async def index() -> FileResponse:
-        return FileResponse(FRONTEND_INDEX_PAGE)
+    async def index() -> HTMLResponse:
+        return HTMLResponse(render_frontend_index_html())
 
     @app.get("/api/overview")
     async def overview() -> dict:
