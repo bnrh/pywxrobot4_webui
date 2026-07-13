@@ -1,17 +1,17 @@
 import asyncio
 
-from app_builders import AppBuilders
-from app_config import (
+from server.builders import AppBuilders
+from server.app_config import (
     INVITE_TO_ROOM_PLUGIN_MODULE,
     INVITE_TO_TOOM_LEGACY_MODULE,
     REMOVED_PLUGIN_MODULES,
     SECRET_SETTINGS_PLACEHOLDER,
     sanitize_stored_settings,
 )
-from config import PluginServiceSettings
-from contact_directory_cache import PLUGIN_TARGETS_CACHE_TTL_SECONDS
+from core.config import PluginServiceSettings
+from runtime.contact_directory_cache import PLUGIN_TARGETS_CACHE_TTL_SECONDS
 from manager import PluginManager
-from runtime import PluginRuntime
+from runtime.engine import PluginRuntime
 
 
 def test_sanitize_stored_settings_removes_legacy_plugin() -> None:

@@ -1,4 +1,4 @@
-from message_types import MESSAGE_TYPE_LABELS, build_message_types_payload
+from messaging.types import MESSAGE_TYPE_LABELS, build_message_types_payload
 
 
 def test_build_message_types_payload_includes_extended_labels() -> None:

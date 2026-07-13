@@ -26,7 +26,7 @@ pip install fastapi uvicorn loguru pydantic
 
 ## 3. 默认端口与关键配置
 
-项目默认值来自 [config.py](../config.py)：
+项目默认值来自 [core/config.py](../core/config.py)：
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |

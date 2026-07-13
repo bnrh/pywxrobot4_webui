@@ -9,7 +9,7 @@ from datetime import datetime
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
-from server_context import AppContext
+from server.context import AppContext
 
 
 def register_observability_routes(app: FastAPI, ctx: AppContext) -> None:

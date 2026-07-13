@@ -5,11 +5,11 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from loguru import logger
 
-from api_schemas import PluginConfigUpdateRequest, PluginExecuteRequest, PluginToggleRequest
-from config import PluginServiceSettings
+from server.schemas import PluginConfigUpdateRequest, PluginExecuteRequest, PluginToggleRequest
+from core.config import PluginServiceSettings
 from manager import PluginManager
-from runtime_sync import sync_runtime_with_config
-from server_context import AppContext
+from runtime.sync import sync_runtime_with_config
+from server.context import AppContext
 
 
 def register_plugin_admin_routes(app: FastAPI, ctx: AppContext) -> None:

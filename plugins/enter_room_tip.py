@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 
-from config import PROJECT_ROOT
+from core.config import PROJECT_ROOT
 
 from ._plugin_sdk import MESSAGE_TYPES, find_xml_tag_text, get_message_type, normalize_text, parse_xml_attributes, sleep
 

@@ -1,6 +1,6 @@
 import pytest
 
-from security import extract_bearer_token, is_public_request_path
+from server.security import extract_bearer_token, is_public_request_path
 
 
 def test_extract_bearer_token() -> None:

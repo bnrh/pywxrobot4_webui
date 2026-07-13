@@ -8,7 +8,7 @@ from itertools import count
 from pathlib import Path
 from typing import Any
 
-from plugin_log_store import PluginLogStore
+from manager.plugin_log_store import PluginLogStore
 
 
 class PluginLogRepository:

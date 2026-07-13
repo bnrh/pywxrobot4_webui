@@ -1,10 +1,10 @@
 import tempfile
 from pathlib import Path
 
-import db_connection
-from message_repository import MessageRepository
-from plugin_log_repository import PluginLogRepository
-from runtime import PLUGIN_LOG_LIMIT, RECENT_MESSAGE_LIMIT, PluginRuntime, now_iso
+import core.db_connection as db_connection
+from messaging.repository import MessageRepository
+from manager.plugin_log_repository import PluginLogRepository
+from runtime.engine import PLUGIN_LOG_LIMIT, RECENT_MESSAGE_LIMIT, PluginRuntime, now_iso
 
 
 def _clear_connection_cache(db_path: Path) -> None:
@@ -28,7 +28,7 @@ def test_now_iso_format() -> None:
 
 
 def test_plugin_runtime_initial_state() -> None:
-    from config import PluginServiceSettings
+    from core.config import PluginServiceSettings
 
     runtime = PluginRuntime(PluginServiceSettings())
     assert runtime.recent_messages.maxlen is None or len(runtime.recent_messages) <= RECENT_MESSAGE_LIMIT
@@ -40,7 +40,7 @@ def test_plugin_runtime_initial_state() -> None:
 
 
 def test_build_runtime_event_metrics_shape() -> None:
-    from config import PluginServiceSettings
+    from core.config import PluginServiceSettings
 
     runtime = PluginRuntime(PluginServiceSettings())
     metrics = runtime.build_runtime_event_metrics()

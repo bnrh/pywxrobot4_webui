@@ -1,4 +1,4 @@
-from frontend_assets import clear_frontend_asset_cache, render_frontend_index_html, resolve_frontend_asset_hrefs
+from server.frontend_assets import clear_frontend_asset_cache, render_frontend_index_html, resolve_frontend_asset_hrefs
 
 
 def test_resolve_frontend_asset_hrefs_prefers_dist_when_present() -> None:

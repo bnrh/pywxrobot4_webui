@@ -10,18 +10,18 @@ from fastapi.responses import FileResponse, HTMLResponse
 from loguru import logger
 
 from ai_assistant import load_openai_compatible_model_options
-from app_builders import AppBuilders
-from app_config import (
+from server.builders import AppBuilders
+from server.app_config import (
     PLUGIN_ASSET_IMAGE_EXTENSIONS,
     PLUGIN_ASSET_MAX_BYTES,
 )
-from frontend_assets import render_frontend_index_html
-from api_schemas import PluginConfigUpdateRequest
-from config import PROJECT_ROOT, normalize_plugin_module_name
-from message import MessageEvent
-from runtime import RECENT_MESSAGE_LIMIT
-from server_context import AppContext
-from upload_paths import resolve_project_relative_dir, sanitize_upload_path_segment
+from server.frontend_assets import render_frontend_index_html
+from server.schemas import PluginConfigUpdateRequest
+from core.config import PROJECT_ROOT, normalize_plugin_module_name
+from messaging.event import MessageEvent
+from runtime.engine import RECENT_MESSAGE_LIMIT
+from server.context import AppContext
+from server.upload_paths import resolve_project_relative_dir, sanitize_upload_path_segment
 
 
 def register_core_api_routes(app: FastAPI, ctx: AppContext, callback_path: str) -> None:
@@ -150,7 +150,7 @@ def register_core_api_routes(app: FastAPI, ctx: AppContext, callback_path: str) 
 
     @app.get("/api/message-types")
     async def message_types() -> dict:
-        from message_types import build_message_types_payload
+        from messaging.types import build_message_types_payload
 
         return build_message_types_payload()
 

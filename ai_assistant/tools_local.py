@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from client import WxRobotApiClient
+from core.client import WxRobotApiClient
 
 from utils.normalize import normalize_text
 

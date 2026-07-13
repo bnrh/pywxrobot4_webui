@@ -2,7 +2,7 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
-from contact_directory_cache import ContactDirectoryCache, ContactProfile
+from runtime.contact_directory_cache import ContactDirectoryCache, ContactProfile
 
 
 class FakeApiClient:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from client import WxRobotApiClient
+from core.client import WxRobotApiClient
 
 from utils.http_client import encode_json_body, request as http_request
 from utils.normalize import is_truthy

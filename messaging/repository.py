@@ -8,7 +8,7 @@ from itertools import count
 from pathlib import Path
 from typing import Any
 
-from message_store import RecentMessageStore
+from messaging.store import RecentMessageStore
 
 
 class MessageRepository:

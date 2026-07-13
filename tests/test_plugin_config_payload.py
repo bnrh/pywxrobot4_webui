@@ -1,4 +1,4 @@
-from plugin_config_payload import (
+from manager.plugin_config_payload import (
     INVITE_TO_ROOM_ALIAS_MODULE,
     INVITE_TO_ROOM_PLUGIN_MODULE,
     normalize_plugin_config_for_payload,

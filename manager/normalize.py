@@ -15,10 +15,10 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from config import PLUGIN_PACKAGE, normalize_plugin_module_name
-from message import MessageEvent
-from message_types import MESSAGE_FILTER_ALIASES
-from plugin_base import PluginContext, PluginExecutionContext, PluginLogger, PluginResult, PluginStateStore
+from core.config import PLUGIN_PACKAGE, normalize_plugin_module_name
+from messaging.event import MessageEvent
+from messaging.types import MESSAGE_FILTER_ALIASES
+from manager.plugin_base import PluginContext, PluginExecutionContext, PluginLogger, PluginResult, PluginStateStore
 from plugins._global_blacklist import (
     BLACKLIST_MEMBERS_NAMESPACE,
     BLACKLIST_PLUGIN_MODULE,

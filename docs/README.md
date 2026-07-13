@@ -15,8 +15,8 @@ wxrobot_webui 是面向 wxrobot_api 的 Web 控制台与插件运行时。它负
 
 当前项目包含三层核心能力：
 
-1. Web UI 与运行时：由 [main.py](../main.py) 和 [server.py](../server.py) 提供页面、API、消息队列和插件生命周期管理。
-2. Python 插件系统：由 [manager](../manager)、[plugin_base.py](../plugin_base.py) 和 [plugins](../plugins) 目录中的插件模块构成。
+1. Web UI 与运行时：由 [main.py](../main.py)、[server](../server) 与 [runtime](../runtime) 提供页面、API、消息队列和插件生命周期管理。
+2. Python 插件系统：由 [manager](../manager)（含 `plugin_base`）和 [plugins](../plugins) 目录中的插件模块构成。
 3. AI 工具代理：由 [ai_assistant](../ai_assistant) 提供多厂商模型配置、MCP 工具发现与调用、对话持久化与异步任务执行。
 
 ## 推荐阅读顺序
@@ -30,13 +30,13 @@ wxrobot_webui 是面向 wxrobot_api 的 Web 控制台与插件运行时。它负
 ## 目录速览
 
 - [main.py](../main.py)：服务启动入口。
-- [server.py](../server.py)：FastAPI 应用、页面接口、插件运行时、消息回调入口。
-- [config.py](../config.py)：系统配置、SQLite 存储、兼容旧配置迁移。
-- [db_connection.py](../db_connection.py)：线程局部 SQLite 连接、写锁与批量 commit。
+- [server](../server)：FastAPI 应用壳、中间件、页面资源与 API schema。
+- [runtime](../runtime)：消息队列、心跳、插件运行时与 SSE 事件。
+- [core](../core)：系统配置、SQLite 连接、wxrobot API 客户端。
+- [messaging](../messaging)：消息模型与最近消息持久化。
 - [utils/http_client.py](../utils/http_client.py)：统一异步 httpx 客户端。
 - [ai_assistant](../ai_assistant)：AI 厂商配置、MCP 工具执行、对话与任务管理。
-- [manager](../manager)：插件发现、热重载、调度、周期任务。
-- [plugin_base.py](../plugin_base.py)：插件上下文、日志、状态存储抽象。
+- [manager](../manager)：插件发现、热重载、调度、周期任务与插件基类。
 - [plugins](../plugins)：全部消息插件、功能插件和周期插件实现。
 - [plugins/_plugin_sdk.py](../plugins/_plugin_sdk.py)：插件公共 SDK（归一化、HTTP、SQL 行解析等）。
 - [frontend/index.html](../frontend/index.html)：控制台页面骨架（Tab / Modal 片段动态加载）。

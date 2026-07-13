@@ -1,4 +1,4 @@
-from ai_assistant_store import (
+from ai_assistant.store import (
     AI_ASSISTANT_JOB_ACTIVE_STATUSES,
     AI_ASSISTANT_JOB_TERMINAL_STATUSES,
     create_ai_assistant_conversation_payload,

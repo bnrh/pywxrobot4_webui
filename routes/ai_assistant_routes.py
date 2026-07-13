@@ -16,8 +16,8 @@ from ai_assistant import (
     resolve_ai_assistant_prompt_plugin,
     run_ai_assistant,
 )
-from ai_assistant_jobs import build_ai_assistant_page_payload, run_ai_assistant_chat_job
-from ai_assistant_store import (
+from ai_assistant.jobs import build_ai_assistant_page_payload, run_ai_assistant_chat_job
+from ai_assistant.store import (
     AI_ASSISTANT_JOB_ACTIVE_STATUSES,
     AI_ASSISTANT_JOB_TERMINAL_STATUSES,
     activate_ai_assistant_conversation_payload,
@@ -33,9 +33,9 @@ from ai_assistant_store import (
     set_ai_assistant_job_task,
     update_ai_assistant_message_payload,
 )
-from api_schemas import AiAssistantChatJobCreateRequest, AiAssistantChatRequest, AiAssistantSettingsUpdateRequest
-from config import WebuiSettingsStore
-from server_context import AppContext
+from server.schemas import AiAssistantChatJobCreateRequest, AiAssistantChatRequest, AiAssistantSettingsUpdateRequest
+from core.config import WebuiSettingsStore
+from server.context import AppContext
 
 
 def register_ai_assistant_routes(app: FastAPI, ctx: AppContext) -> None:

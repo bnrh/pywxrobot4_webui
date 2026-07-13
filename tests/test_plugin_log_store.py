@@ -1,9 +1,9 @@
-import db_connection
+import core.db_connection as db_connection
 import tempfile
 from pathlib import Path
 
-from db_connection import get_sqlite_connection
-from plugin_log_store import PluginLogStore
+from core.db_connection import get_sqlite_connection
+from manager.plugin_log_store import PluginLogStore
 
 
 def test_plugin_log_store_append_and_load() -> None:

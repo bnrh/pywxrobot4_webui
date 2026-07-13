@@ -1,7 +1,7 @@
 from pathlib import Path
 from time import time
 
-from config import PROJECT_ROOT
+from core.config import PROJECT_ROOT
 from ._plugin_sdk import normalize_text, random_between, sleep, unique_strings, is_truthy
 
 try:

@@ -11,7 +11,7 @@ import uuid
 import httpx
 
 from ai_assistant import run_openai_compatible_chat_completion
-from config import PROJECT_ROOT
+from core.config import PROJECT_ROOT
 
 from ._plugin_sdk import (
     MESSAGE_TYPES,

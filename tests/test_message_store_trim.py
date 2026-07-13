@@ -1,9 +1,9 @@
 import tempfile
 from pathlib import Path
 
-import db_connection
-from message_store import RecentMessageStore
-from plugin_log_store import PluginLogStore
+import core.db_connection as db_connection
+from messaging.store import RecentMessageStore
+from manager.plugin_log_store import PluginLogStore
 
 
 def _clear_connection_cache(db_path: Path) -> None:

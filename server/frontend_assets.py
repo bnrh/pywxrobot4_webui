@@ -6,7 +6,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from app_config import FRONTEND_INDEX_PAGE, STATIC_DIR
+from server.app_config import FRONTEND_INDEX_PAGE, STATIC_DIR
 
 STYLESHEET_RE = re.compile(
     r'(<link\b[^>]*\brel=["\']stylesheet["\'][^>]*\bhref=["\'])([^"\']+)(["\'])',

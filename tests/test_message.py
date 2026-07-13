@@ -1,4 +1,4 @@
-from message import MessageEvent
+from messaging.event import MessageEvent
 
 
 def test_message_event_parses_nested_payload() -> None:

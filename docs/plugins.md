@@ -2,12 +2,12 @@
 
 ## 1. 插件运行模型
 
-当前插件系统由 [manager](../manager)、[plugin_base.py](../plugin_base.py)、[plugins/_plugin_sdk.py](../plugins/_plugin_sdk.py) 和 [plugins](../plugins) 目录共同组成。
+当前插件系统由 [manager](../manager)（含 `plugin_base`）、[plugins/_plugin_sdk.py](../plugins/_plugin_sdk.py) 和 [plugins](../plugins) 目录共同组成。
 
 核心链路如下：
 
 1. wxrobot_api 将消息回调到 `/messages`。
-2. [server.py](../server.py) 将消息写入异步队列。
+2. [runtime](../runtime) 将消息写入异步队列。
 3. Worker 协程从队列中取出消息。
 4. [manager](../manager) 依次调度已启用插件。
 5. 插件通过 `context.api` 调用 wxrobot_api，通过 `context.logger` 记录结构化日志，通过 `context.state` 持久化状态。

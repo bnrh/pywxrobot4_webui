@@ -9,7 +9,7 @@ from routes.core_api_routes import register_core_api_routes
 from routes.observability_routes import register_observability_routes
 from routes.plugin_admin_routes import register_plugin_admin_routes
 from routes.settings_routes import register_settings_routes
-from server_context import AppContext
+from server.context import AppContext
 
 
 def register_app_routes(app: FastAPI, ctx: AppContext, callback_path: str) -> None:

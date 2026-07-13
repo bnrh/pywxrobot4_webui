@@ -1,7 +1,7 @@
 import re
 from typing import Any
 
-from config import normalize_plugin_module_name
+from core.config import normalize_plugin_module_name
 
 from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text, unique_strings
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from config import PluginServiceSettings
+from core.config import PluginServiceSettings
 from server import create_app
 
 

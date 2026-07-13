@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from db_connection import (
+from core.db_connection import (
     FLUSH_NOW,
     get_pending_write_count,
     get_sqlite_connection,
@@ -9,8 +9,8 @@ from db_connection import (
     sqlite_execute_read,
     sqlite_execute_write,
 )
-from message_store import RecentMessageStore
-from plugin_base import PluginStateStore
+from messaging.store import RecentMessageStore
+from manager.plugin_base import PluginStateStore
 
 
 def _external_count(db_path: Path, table: str = "items") -> int:

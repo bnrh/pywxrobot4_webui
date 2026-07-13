@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from app_builders import AppBuilders
-from app_config import LOG_DIR
-from api_schemas import SystemSettingsUpdateRequest
-from config import PluginServiceSettings
-from log_reader import build_log_payload as build_service_log_payload
-from runtime_sync import sync_runtime_with_config
-from server_context import AppContext
+from server.builders import AppBuilders
+from server.app_config import LOG_DIR
+from server.schemas import SystemSettingsUpdateRequest
+from core.config import PluginServiceSettings
+from server.log_reader import build_log_payload as build_service_log_payload
+from runtime.sync import sync_runtime_with_config
+from server.context import AppContext
 
 
 def register_settings_routes(app: FastAPI, ctx: AppContext) -> None:

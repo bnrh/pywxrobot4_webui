@@ -1,8 +1,8 @@
 from datetime import datetime
 from pathlib import Path
 
-from log_reader import build_log_entries, filter_log_entries, parse_log_line
-from upload_paths import resolve_project_relative_dir, sanitize_upload_path_segment
+from server.log_reader import build_log_entries, filter_log_entries, parse_log_line
+from server.upload_paths import resolve_project_relative_dir, sanitize_upload_path_segment
 
 
 def test_parse_log_line() -> None:
@@ -30,7 +30,7 @@ def test_sanitize_upload_path_segment() -> None:
 
 
 def test_resolve_project_relative_dir(tmp_path, monkeypatch) -> None:
-    import upload_paths
+    import server.upload_paths as upload_paths
 
     monkeypatch.setattr(upload_paths, "PROJECT_ROOT", tmp_path)
     resolved = resolve_project_relative_dir("uploads/assets")

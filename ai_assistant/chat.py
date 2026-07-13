@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from client import WxRobotApiClient
+from core.client import WxRobotApiClient
 
 from copy import deepcopy
 

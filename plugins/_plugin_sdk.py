@@ -7,7 +7,7 @@ from html import unescape
 from pathlib import Path
 from typing import Any, Mapping
 
-from config import PROJECT_ROOT
+from core.config import PROJECT_ROOT
 from utils.http_client import get_bytes, get_text, post_json, request as http_request
 from utils.normalize import collapse_whitespace, is_truthy, normalize_wxpid
 
