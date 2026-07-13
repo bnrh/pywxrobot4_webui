@@ -10,6 +10,7 @@ import {
     selectSearchableSelectOption,
     syncScopeFieldVisibility,
 } from "./config-search.js";
+import { bindOnce } from "./dom-bind.js";
 
 export async function handleProjectFilePick(button, formElement, actions) {
     const targetInput = button.closest(".config-file-picker")?.querySelector("input[data-column-key], input[data-config-key]");
@@ -76,9 +77,10 @@ export async function handleProjectFilePick(button, formElement, actions) {
 
 export function registerPluginFormEventHandlers(actions) {
     const { elements } = actions;
+    const formElements = [elements.pluginConfigForm, elements.pluginExecuteForm].filter(Boolean);
 
-    [elements.pluginConfigForm, elements.pluginExecuteForm].forEach((formElement) => {
-        formElement.addEventListener("click", async (event) => {
+    formElements.forEach((formElement, index) => {
+        bindOnce(formElement, `pluginForm.click.${index}`, "click", async (event) => {
             const pickFileButton = event.target.closest("[data-config-pick-project-file]");
             if (pickFileButton) {
                 event.preventDefault();
@@ -121,17 +123,15 @@ export function registerPluginFormEventHandlers(actions) {
             }
         });
 
-        formElement.addEventListener("focusin", (event) => {
+        bindOnce(formElement, `pluginForm.focusin.${index}`, "focusin", (event) => {
             const searchableInput = event.target.closest("[data-config-searchable-input]");
             if (searchableInput) {
                 applySearchableSelectFilter(searchableInput);
             }
         });
-    });
 
-    [elements.pluginConfigForm, elements.pluginExecuteForm].forEach((formElement) => {
         ["input", "change", "search", "keyup", "compositionend"].forEach((eventName) => {
-            formElement.addEventListener(eventName, (event) => {
+            bindOnce(formElement, `pluginForm.${eventName}.${index}`, eventName, (event) => {
                 const target = event.target instanceof Element ? event.target : null;
                 const editorRow = target?.closest("[data-config-row-editor]");
                 if (editorRow) {

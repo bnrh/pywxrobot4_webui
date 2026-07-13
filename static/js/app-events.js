@@ -7,6 +7,7 @@ import { registerPluginsEvents } from "./app-events-plugins.js";
 import { registerSettingsEvents } from "./app-events-settings.js";
 import { registerShellEvents } from "./app-events-shell.js";
 import { registerUsersEvents } from "./app-events-users.js";
+import { registerPluginFormEventHandlers } from "./plugin-form-handlers.js";
 
 export function registerAppEvents(actions) {
     registerShellEvents(actions);
@@ -16,4 +17,6 @@ export function registerAppEvents(actions) {
     registerPluginsEvents(actions);
     registerSettingsEvents(actions);
     registerLogsEvents(actions);
+    // Modal 片段懒加载后才有配置/执行表单节点。
+    registerPluginFormEventHandlers(actions);
 }

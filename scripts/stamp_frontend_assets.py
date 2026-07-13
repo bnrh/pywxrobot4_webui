@@ -15,7 +15,7 @@ MANIFEST_CANDIDATES = (
     ROOT / "static" / "dist" / ".vite" / "manifest.json",
     ROOT / "static" / "dist" / "manifest.json",
 )
-ENTRY_KEY = "static/js/app.js"
+ENTRY_KEY = "static/js/app.entry.js"
 SOURCE_CSS = "/static/css/app.css"
 SOURCE_JS = "/static/js/app.js"
 STYLESHEET_RE = re.compile(
@@ -62,10 +62,19 @@ def resolve_dist_assets(manifest: dict) -> tuple[str, str]:
     entry = manifest.get(ENTRY_KEY)
     if not isinstance(entry, dict):
         # Vite may key by basename depending on config; fall back to first entry chunk.
-        for value in manifest.values():
-            if isinstance(value, dict) and value.get("isEntry") and value.get("file"):
+        for key, value in manifest.items():
+            if not isinstance(value, dict) or not value.get("isEntry") or not value.get("file"):
+                continue
+            key_text = str(key)
+            name = str(value.get("name") or "")
+            if key_text.endswith("app.entry.js") or key_text.endswith("app.js") or name in {"app", "app.entry"}:
                 entry = value
                 break
+        if not isinstance(entry, dict):
+            for value in manifest.values():
+                if isinstance(value, dict) and value.get("isEntry") and value.get("file"):
+                    entry = value
+                    break
     if not isinstance(entry, dict) or not entry.get("file"):
         raise RuntimeError(f"Vite manifest 缺少入口 {ENTRY_KEY}")
 

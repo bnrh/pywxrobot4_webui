@@ -13,7 +13,7 @@ export default defineConfig({
     manifest: true,
     cssCodeSplit: false,
     rollupOptions: {
-      input: path.join(rootDir, "static/js/app.js"),
+      input: path.join(rootDir, "static/js/app.entry.js"),
       output: {
         entryFileNames: "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",
