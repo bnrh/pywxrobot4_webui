@@ -84,8 +84,9 @@ class PythonPlugin:
         self._loaded_revision = self._current_revision()
 
     def _current_revision(self) -> int:
+        # 冻结打包后可能没有独立 .py 文件，用 0 表示不可热重载源文件
         if not self.spec.path.exists():
-            raise FileNotFoundError(f"未找到 Python 插件文件: {self.spec.path}")
+            return 0
         return self.spec.path.stat().st_mtime_ns
 
     def _apply_metadata(self, metadata: dict[str, Any]) -> None:

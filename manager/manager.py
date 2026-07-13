@@ -82,20 +82,42 @@ class PluginManager:
 
     @staticmethod
     def _discover_plugin_specs() -> dict[str, PluginSpec]:
-        if not PLUGIN_DIR.exists():
-            return {}
         specs: dict[str, PluginSpec] = {}
-        for path in sorted(PLUGIN_DIR.glob("*.py")):
-            if not path.is_file() or path.stem == "__init__" or path.stem.startswith("_"):
+        if PLUGIN_DIR.exists():
+            for path in sorted(PLUGIN_DIR.glob("*.py")):
+                if not path.is_file() or path.stem == "__init__" or path.stem.startswith("_"):
+                    continue
+                module_name = f"{PLUGIN_PACKAGE}.{path.stem}"
+                normalized_module_name = normalize_plugin_module_name(module_name)
+                if normalized_module_name in LEGACY_PLUGIN_ALIAS_MODULES:
+                    continue
+                specs[normalized_module_name] = PluginSpec(
+                    module_name=normalized_module_name,
+                    path=path,
+                    stem=path.stem,
+                )
+        if specs:
+            return specs
+
+        # Nuitka 等冻结环境：插件已编译进包内，目录下可能没有 .py，改用包扫描
+        try:
+            package = importlib.import_module(PLUGIN_PACKAGE)
+        except ImportError:
+            return {}
+        import pkgutil
+
+        for module_info in pkgutil.iter_modules(list(getattr(package, "__path__", []) or [])):
+            stem = str(module_info.name or "").strip()
+            if not stem or stem == "__init__" or stem.startswith("_"):
                 continue
-            module_name = f"{PLUGIN_PACKAGE}.{path.stem}"
+            module_name = f"{PLUGIN_PACKAGE}.{stem}"
             normalized_module_name = normalize_plugin_module_name(module_name)
             if normalized_module_name in LEGACY_PLUGIN_ALIAS_MODULES:
                 continue
             specs[normalized_module_name] = PluginSpec(
                 module_name=normalized_module_name,
-                path=path,
-                stem=path.stem,
+                path=PLUGIN_DIR / f"{stem}.py",
+                stem=stem,
             )
         return specs
 

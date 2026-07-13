@@ -20,6 +20,12 @@ tmp/
 node_modules/
 static/dist/
 
+# Nuitka build output
+dist/
+*.build/
+*.dist/
+*.onefile-build/
+
 # Editor settings
 .vscode/*
 !.vscode/settings.json

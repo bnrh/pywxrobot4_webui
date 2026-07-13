@@ -1,3 +1,7 @@
+import multiprocessing
+
+multiprocessing.freeze_support()
+
 from server import main
 
 

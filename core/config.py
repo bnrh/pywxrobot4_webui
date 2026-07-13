@@ -1,6 +1,8 @@
 import configparser
 import json
+import os
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +11,19 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from core.db_connection import get_sqlite_connection
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+def resolve_project_root() -> Path:
+    """源码运行取仓库根；Nuitka/冻结运行取可执行文件所在目录。"""
+    executable = Path(sys.executable).resolve()
+    if executable.name.lower() not in {"python.exe", "pythonw.exe", "python", "python3"}:
+        # onefile 模式下资源在临时目录，可写数据仍放回原始 exe 旁
+        onefile_dir = os.environ.get("NUITKA_ONEFILE_DIRECTORY") or os.environ.get("NUITKA_ONEFILE_PARENT")
+        if onefile_dir:
+            return Path(onefile_dir).resolve()
+        return executable.parent
+    return Path(__file__).resolve().parents[1]
+
+
+PROJECT_ROOT = resolve_project_root()
 CONFIG_PATH = PROJECT_ROOT / "config.ini"
 SETTINGS_DB_PATH = PROJECT_ROOT / "webui.sqlite3"
 WEBUI_SECTION = "webui"

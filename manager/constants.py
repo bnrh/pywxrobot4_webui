@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from core.config import PROJECT_ROOT
 
-PLUGIN_DIR = Path(__file__).resolve().parent.parent / "plugins"
+PLUGIN_DIR = PROJECT_ROOT / "plugins"
 PYTHON_SDK_VERSION = "2.0.0"
 PLUGIN_SCOPE_ROOM_MODE = "_scope_room_mode"
 PLUGIN_SCOPE_ROOM_IDS = "_scope_room_ids"
