@@ -109,9 +109,6 @@ def compile_with_nuitka() -> None:
         "--nofollow-import-to=_pytest",
         "--nofollow-import-to=py",
         "--nofollow-import-to=node_modules",
-        "--company-name=wxrobot",
-        "--product-name=wxrobot_webui",
-        "--file-description=wxrobot WebUI Plugin Server",
         "main.py",
     ]
     run(command)
