@@ -1,6 +1,14 @@
 /** AI 助手页面渲染、配置表单与 Modal 控制。 */
 
-import { escapeHtml, formatJson } from "./dom-utils.js";
+import {
+    badge,
+    emptyState,
+    el,
+    escapeHtml,
+    formatJson,
+    replaceChildren,
+    text,
+} from "./dom-utils.js";
 import { formatStandardDateTime } from "./format-utils.js";
 import {
     createAiAssistantConfigId,
@@ -15,25 +23,126 @@ export function renderAiAssistantConversationList(ctx) {
     }
     const conversations = ctx.getConversations();
     if (!conversations.length) {
-        ctx.elements.aiAssistantConversationList.innerHTML = '<div class="empty-state">还没有历史对话。点击“新建对话”后开始提问即可自动保存。</div>';
+        replaceChildren(
+            ctx.elements.aiAssistantConversationList,
+            emptyState("还没有历史对话。点击“新建对话”后开始提问即可自动保存。"),
+        );
         return;
     }
-    ctx.elements.aiAssistantConversationList.innerHTML = conversations.map((conversation) => `
-        <button class="smart-conversation-card ${conversation.is_active ? "is-active" : ""}" type="button" data-ai-conversation-id="${escapeHtml(conversation.id || "")}">
-            <div class="smart-conversation-card-head">
-                <div>
-                    <h6 class="smart-conversation-title">${escapeHtml(conversation.title || "未命名对话")}</h6>
-                    <div class="detail-meta">更新时间 ${escapeHtml(formatStandardDateTime(conversation.updated_at) || conversation.updated_at || "未知")}</div>
-                </div>
-                <div class="badge-row">
-                    ${conversation.has_running_message ? '<span class="badge warn">进行中</span>' : ""}
-                    ${conversation.is_active ? '<span class="badge good">当前</span>' : ""}
-                </div>
-            </div>
-            <div class="detail-text smart-conversation-preview">${escapeHtml(conversation.last_message_preview || "暂无消息")}</div>
-            <div class="detail-meta">共 ${escapeHtml(String(conversation.message_count || 0))} 条消息</div>
-        </button>
-    `).join("");
+    replaceChildren(
+        ctx.elements.aiAssistantConversationList,
+        ...conversations.map((conversation) => el(
+            "button",
+            {
+                className: `smart-conversation-card ${conversation.is_active ? "is-active" : ""}`,
+                type: "button",
+                dataset: { aiConversationId: conversation.id || "" },
+            },
+            [
+                el("div", { className: "smart-conversation-card-head" }, [
+                    el("div", null, [
+                        el("h6", { className: "smart-conversation-title" }, text(conversation.title || "未命名对话")),
+                        el(
+                            "div",
+                            { className: "detail-meta" },
+                            text(`更新时间 ${formatStandardDateTime(conversation.updated_at) || conversation.updated_at || "未知"}`),
+                        ),
+                    ]),
+                    el("div", { className: "badge-row" }, [
+                        conversation.has_running_message ? badge("进行中", "warn") : null,
+                        conversation.is_active ? badge("当前", "good") : null,
+                    ]),
+                ]),
+                el("div", { className: "detail-text smart-conversation-preview" }, text(conversation.last_message_preview || "暂无消息")),
+                el("div", { className: "detail-meta" }, text(`共 ${String(conversation.message_count || 0)} 条消息`)),
+            ],
+        )),
+    );
+}
+
+function buildToolTraceSection(trace) {
+    const traceStatus = String(trace.status || "ok").toLowerCase();
+    const traceTone = traceStatus === "running" ? "warn" : (traceStatus === "ok" ? "good" : "bad");
+    const traceLabel = traceStatus === "running" ? "工具运行中" : (traceStatus === "ok" ? "工具成功" : "工具失败");
+    return el(
+        "section",
+        { className: `smart-tool-trace-item ${traceStatus === "running" ? "is-running" : ""}` },
+        [
+            el("div", { className: "smart-tool-trace-head" }, [
+                el("div", { className: "badge-row" }, [
+                    badge(traceLabel, traceTone),
+                    badge(trace.name || "unknown_tool"),
+                ]),
+            ]),
+            el("div", { className: "detail-meta" }, text("参数")),
+            el("pre", { className: "code-block" }, text(formatJson(trace.arguments || {}))),
+            trace.error ? el("div", { className: "detail-text" }, text(trace.error)) : null,
+        ],
+    );
+}
+
+function buildChatMessageArticle(message) {
+    const role = message.role === "assistant" ? "assistant" : "user";
+    const roleLabel = role === "assistant" ? "智能插件" : "用户";
+    const toolTraces = Array.isArray(message.tool_traces) ? message.tool_traces : [];
+    const reasoningContent = String(message.reasoning_content || "").trim();
+    const status = String(message.status || (message.error ? "failed" : "completed")).trim().toLowerCase();
+    const statusTone = message.error || status === "failed"
+        ? "bad"
+        : (status === "running" || status === "stopped")
+            ? "warn"
+            : (role === "assistant" ? "good" : "");
+    const statusLabel = status === "running"
+        ? "处理中"
+        : status === "stopped"
+            ? "已停止"
+            : status === "failed"
+                ? "失败"
+                : (role === "assistant" ? "已完成" : "已发送");
+    const showReasoning = Boolean(reasoningContent);
+    const messageBody = message.content || ((status === "running" || status === "stopped")
+        ? (message.progress_message || (status === "running" ? "正在处理中..." : "本次对话已手动停止。"))
+        : "无内容");
+
+    return el(
+        "article",
+        {
+            className: [
+                "smart-chat-message",
+                role === "assistant" ? "is-assistant" : "is-user",
+                message.error || status === "failed" ? "is-error" : "",
+            ].filter(Boolean).join(" "),
+        },
+        [
+            el("div", { className: "smart-chat-message-head" }, [
+                el("div", { className: "badge-row" }, [
+                    badge(roleLabel, statusTone),
+                    badge(statusLabel, statusTone),
+                    message.provider_label ? badge(message.provider_label) : null,
+                    message.prompt_plugin_name ? badge(message.prompt_plugin_name) : null,
+                    message.model ? badge(message.model) : null,
+                ]),
+                el(
+                    "div",
+                    { className: "detail-meta" },
+                    text(formatStandardDateTime(message.updated_at) || message.updated_at || ""),
+                ),
+            ]),
+            message.progress_message
+                ? el("div", { className: "smart-chat-progress" }, text(message.progress_message))
+                : null,
+            showReasoning
+                ? el("section", { className: "smart-reasoning-block" }, [
+                    el("div", { className: "detail-meta" }, text("思考过程")),
+                    el("pre", { className: "code-block smart-reasoning-content" }, text(reasoningContent)),
+                ])
+                : null,
+            toolTraces.length
+                ? el("div", { className: "smart-tool-trace-list" }, toolTraces.map(buildToolTraceSection))
+                : null,
+            el("div", { className: "detail-text smart-chat-message-body" }, text(messageBody)),
+        ],
+    );
 }
 
 export function renderAiConversation(ctx) {
@@ -45,78 +154,17 @@ export function renderAiConversation(ctx) {
         ? ctx.getCurrentConversation().messages
         : [];
     if (!messages.length) {
-        ctx.elements.aiAssistantConversation.innerHTML = '<div class="empty-state">还没有对话。点击“新建对话”开始新的会话，或直接在当前会话中输入问题。</div>';
+        replaceChildren(
+            ctx.elements.aiAssistantConversation,
+            emptyState("还没有对话。点击“新建对话”开始新的会话，或直接在当前会话中输入问题。"),
+        );
         return;
     }
 
-    ctx.elements.aiAssistantConversation.innerHTML = messages.map((message) => {
-        const role = message.role === "assistant" ? "assistant" : "user";
-        const roleLabel = role === "assistant" ? "智能插件" : "用户";
-        const toolTraces = Array.isArray(message.tool_traces) ? message.tool_traces : [];
-        const reasoningContent = String(message.reasoning_content || "").trim();
-        const status = String(message.status || (message.error ? "failed" : "completed")).trim().toLowerCase();
-        const statusTone = message.error || status === "failed"
-            ? "bad"
-            : (status === "running" || status === "stopped")
-                ? "warn"
-                : (role === "assistant" ? "good" : "");
-        const statusLabel = status === "running"
-            ? "处理中"
-            : status === "stopped"
-                ? "已停止"
-            : status === "failed"
-                ? "失败"
-                : (role === "assistant" ? "已完成" : "已发送");
-        const showReasoning = Boolean(reasoningContent);
-        const messageBody = message.content || ((status === "running" || status === "stopped")
-            ? (message.progress_message || (status === "running" ? "正在处理中..." : "本次对话已手动停止。"))
-            : "无内容");
-        return `
-            <article class="smart-chat-message ${role === "assistant" ? "is-assistant" : "is-user"} ${message.error || status === "failed" ? "is-error" : ""}">
-                <div class="smart-chat-message-head">
-                    <div class="badge-row">
-                        <span class="badge ${statusTone}">${escapeHtml(roleLabel)}</span>
-                        <span class="badge ${statusTone}">${escapeHtml(statusLabel)}</span>
-                        ${message.provider_label ? `<span class="badge">${escapeHtml(message.provider_label)}</span>` : ""}
-                        ${message.prompt_plugin_name ? `<span class="badge">${escapeHtml(message.prompt_plugin_name)}</span>` : ""}
-                        ${message.model ? `<span class="badge">${escapeHtml(message.model)}</span>` : ""}
-                    </div>
-                    <div class="detail-meta">${escapeHtml(formatStandardDateTime(message.updated_at) || message.updated_at || "")}</div>
-                </div>
-                ${message.progress_message ? `<div class="smart-chat-progress">${escapeHtml(message.progress_message)}</div>` : ""}
-                ${showReasoning ? `
-                    <section class="smart-reasoning-block">
-                        <div class="detail-meta">思考过程</div>
-                        <pre class="code-block smart-reasoning-content">${escapeHtml(reasoningContent)}</pre>
-                    </section>
-                ` : ""}
-                ${toolTraces.length ? `
-                    <div class="smart-tool-trace-list">
-                        ${toolTraces.map((trace) => {
-                            const traceStatus = String(trace.status || "ok").toLowerCase();
-                            const traceTone = traceStatus === "running" ? "warn" : (traceStatus === "ok" ? "good" : "bad");
-                            const traceLabel = traceStatus === "running" ? "工具运行中" : (traceStatus === "ok" ? "工具成功" : "工具失败");
-                            return `
-                                <section class="smart-tool-trace-item ${traceStatus === "running" ? "is-running" : ""}">
-                                    <div class="smart-tool-trace-head">
-                                        <div class="badge-row">
-                                            <span class="badge ${traceTone}">${escapeHtml(traceLabel)}</span>
-                                            <span class="badge">${escapeHtml(trace.name || "unknown_tool")}</span>
-                                        </div>
-                                    </div>
-                                    <div class="detail-meta">参数</div>
-                                    <pre class="code-block">${escapeHtml(formatJson(trace.arguments || {}))}</pre>
-                                    ${trace.error ? `<div class="detail-text">${escapeHtml(trace.error)}</div>` : ""}
-                                </section>
-                            `;
-                        }).join("")}
-                    </div>
-                ` : ""}
-                <div class="detail-text smart-chat-message-body">${escapeHtml(messageBody)}</div>
-            </article>
-        `;
-    }).join("");
-
+    replaceChildren(
+        ctx.elements.aiAssistantConversation,
+        ...messages.map((message) => buildChatMessageArticle(message)),
+    );
     ctx.elements.aiAssistantConversation.scrollTop = ctx.elements.aiAssistantConversation.scrollHeight;
 }
 

@@ -72,7 +72,7 @@ export function createTabLoaders(getState, deps) {
                 .catch((error) => {
                     deps.setStatus(`插件日志关键词筛选失败：${error.message}`, "bad");
                 });
-        }, 250);
+        }, 250));
     }
 
     async function loadSettings() {

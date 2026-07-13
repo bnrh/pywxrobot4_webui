@@ -16,6 +16,10 @@ logs/
 uploads/
 tmp/
 
+# Frontend build
+node_modules/
+static/dist/
+
 # Editor settings
 .vscode/*
 !.vscode/settings.json

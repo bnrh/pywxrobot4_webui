@@ -1,6 +1,6 @@
 /** 仪表盘概览网格渲染。 */
 
-import { escapeHtml } from "./dom-utils.js";
+import { el, replaceChildren, text } from "./dom-utils.js";
 import { buildOverviewCards } from "./overview-cards.js";
 
 export function renderOverviewGrid(elements, overview, overviewFetchedAt) {
@@ -9,12 +9,17 @@ export function renderOverviewGrid(elements, overview, overviewFetchedAt) {
     }
 
     const cards = buildOverviewCards(overview, overviewFetchedAt);
-    elements.overviewGrid.innerHTML = cards.map((item) => `
-        <article class="overview-card tone-${escapeHtml(item.tone)}">
-            <div class="overview-label">${escapeHtml(item.label)}</div>
-            <div class="overview-value${item.valueClass ? ` ${item.valueClass}` : ""}">${escapeHtml(item.value)}</div>
-            <div class="overview-hint">${escapeHtml(item.hint)}</div>
-            ${item.body || ""}
-        </article>
-    `).join("");
+    replaceChildren(
+        elements.overviewGrid,
+        ...cards.map((item) => el("article", { className: `overview-card tone-${item.tone || ""}` }, [
+            el("div", { className: "overview-label" }, text(item.label)),
+            el(
+                "div",
+                { className: `overview-value${item.valueClass ? ` ${item.valueClass}` : ""}` },
+                text(item.value),
+            ),
+            el("div", { className: "overview-hint" }, text(item.hint)),
+            item.body || null,
+        ])),
+    );
 }

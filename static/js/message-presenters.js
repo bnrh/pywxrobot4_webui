@@ -1,6 +1,6 @@
 /** 消息列表与详情展示辅助函数。 */
 
-import { escapeHtml, normalizeInlineText } from "./dom-utils.js";
+import { el, normalizeInlineText, text } from "./dom-utils.js";
 import { formatUnixTimestamp } from "./format-utils.js";
 import { getMessageTypeLabel, getPayloadValue } from "./message-labels.js";
 
@@ -39,9 +39,9 @@ export function getMessageSummary(message) {
     ];
 
     for (const candidate of candidates) {
-        const text = normalizeInlineText(candidate);
-        if (text) {
-            return text;
+        const content = normalizeInlineText(candidate);
+        if (content) {
+            return content;
         }
     }
 
@@ -91,9 +91,15 @@ export function getAvatarUrl(message) {
 export function renderAvatar(message) {
     const title = getMessageTitle(message);
     const avatarUrl = getAvatarUrl(message);
-    const fallback = escapeHtml((title || "?").slice(0, 1).toUpperCase());
+    const fallback = (title || "?").slice(0, 1).toUpperCase();
     if (avatarUrl) {
-        return `<div class="message-avatar"><img class="message-avatar-img" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(title)}"></div>`;
+        return el("div", { className: "message-avatar" }, [
+            el("img", {
+                className: "message-avatar-img",
+                src: avatarUrl,
+                alt: title,
+            }),
+        ]);
     }
-    return `<div class="message-avatar message-avatar-fallback">${fallback}</div>`;
+    return el("div", { className: "message-avatar message-avatar-fallback" }, text(fallback));
 }

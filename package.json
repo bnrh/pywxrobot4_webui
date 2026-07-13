@@ -1,0 +1,14 @@
+{
+  "name": "wxrobot-webui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build && python scripts/stamp_frontend_assets.py",
+    "stamp": "python scripts/stamp_frontend_assets.py --source",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.10.6",
+    "vite": "^6.3.5"
+  }
+}
