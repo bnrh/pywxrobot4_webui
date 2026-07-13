@@ -25,8 +25,8 @@ from plugins._global_blacklist import (
     BLACKLIST_PLUGIN_NAME,
     resolve_blacklist_subject_wxid,
 )
-from utils.normalize import normalize_text as _shared_normalize_text
-from utils.normalize import normalize_wxpid as _shared_normalize_wxpid
+from utils.normalize import normalize_text as _normalize_text
+from utils.normalize import normalize_wxpid as _normalize_wxpid
 
 from .constants import (
     FRIEND_LABEL_CACHE_TTL_SECONDS,
@@ -102,14 +102,6 @@ def _normalize_scope_mode(value: Any, *, allow_selected: bool = True, default: s
 def _is_biz_conversation_wxid(wxid: str) -> bool:
     normalized = str(wxid or "").strip().lower()
     return bool(normalized) and normalized.startswith("gh_")
-
-
-def _normalize_text(value: Any) -> str:
-    return _shared_normalize_text(value)
-
-
-def _normalize_wxpid(value: Any) -> int | None:
-    return _shared_normalize_wxpid(value)
 
 
 def _resolve_login_account_wxid(accounts: list[dict[str, Any]] | None, wxpid: int | None) -> str:

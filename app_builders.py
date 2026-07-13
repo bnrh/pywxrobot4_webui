@@ -23,20 +23,12 @@ from manager import PluginManager
 from plugin_config_payload import normalize_plugin_config_for_payload
 from runtime import PLUGIN_LOG_LIMIT, PluginRuntime
 from security import is_api_auth_enabled, is_callback_auth_enabled
+from utils.normalize import normalize_wxpid
 
 
 class AppBuilders:
     def __init__(self, runtime: PluginRuntime):
         self.runtime = runtime
-
-    @staticmethod
-    def normalize_wxpid(value: Any) -> int | None:
-        if value in (None, ""):
-            return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
 
     @staticmethod
     def sort_option_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

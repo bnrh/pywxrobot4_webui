@@ -9,7 +9,7 @@ try:
 except ImportError:
     winreg = None
 
-from ._plugin_sdk import format_date_time, normalize_text, resolve_wxpid_targets, to_string_list
+from ._plugin_sdk import format_date_time, normalize_text, resolve_wxpid_targets, to_string_list, is_truthy
 
 
 name = "room_members_deduplication"
@@ -43,12 +43,6 @@ CSV_FIELDS = [
 ]
 
 
-def is_truthy(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return normalize_text(value).lower() in {"1", "true", "yes", "on", "y", "是"}
 
 
 def get_default_export_dir():

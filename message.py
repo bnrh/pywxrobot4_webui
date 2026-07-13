@@ -4,18 +4,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from utils.normalize import is_truthy as _is_truthy
+
 
 class MessageType(IntEnum):
     IMAGE = 0x3
-
-
-def _is_truthy(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    normalized = str(value or "").strip().lower()
-    return normalized in {"1", "true", "yes", "on", "y", "是"}
 
 
 class MessageEvent(BaseModel):

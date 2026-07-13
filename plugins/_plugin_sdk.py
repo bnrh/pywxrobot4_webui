@@ -8,6 +8,11 @@ from html import unescape
 from typing import Any
 from urllib import error, request
 
+from utils.normalize import collapse_whitespace, is_truthy, normalize_wxpid
+
+# 插件侧沿用 collapse_whitespace 语义，对外仍导出 normalize_text / is_truthy。
+normalize_text = collapse_whitespace
+
 
 class MESSAGE_TYPES(IntEnum):
     TEXT = 0x1
@@ -24,20 +29,13 @@ WXPID_OPTION_DEFAULT = "__default_first__"
 WXPID_OPTION_ALL = "__all__"
 
 
-def normalize_text(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip()
-
-
 def normalize_wxpid_selection(value: Any) -> int | str | None:
     normalized = normalize_text(value)
     if value in (None, "", 0, "0") or normalized == WXPID_OPTION_DEFAULT:
         return None
     if normalized == WXPID_OPTION_ALL:
         return WXPID_OPTION_ALL
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+    return normalize_wxpid(value)
 
 
 async def resolve_wxpid_targets(api: Any, value: Any) -> list[int | None]:

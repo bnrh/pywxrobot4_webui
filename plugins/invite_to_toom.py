@@ -1,6 +1,6 @@
 from time import time
 
-from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text, parse_xml_attributes, random_between, sleep
+from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text, parse_xml_attributes, random_between, sleep, is_truthy
 
 
 INVITE_DELAY_MIN_SECONDS = 3
@@ -30,12 +30,6 @@ config_schema = [
 ]
 
 
-def is_truthy(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return normalize_text(value).lower() in {"1", "true", "yes", "on", "y", "是"}
 
 
 def append_keyword_room_rule(rules, seen_rules, roomid, keyword, full_match=False):

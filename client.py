@@ -5,6 +5,8 @@ from typing import Any
 
 import httpx
 
+from utils.normalize import normalize_wxpid
+
 
 class WxRobotApiError(RuntimeError):
     pass
@@ -61,12 +63,7 @@ class WxRobotApiClient:
 
     @staticmethod
     def _normalize_wxpid_value(value: Any) -> int | None:
-        if value in (None, ""):
-            return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
+        return normalize_wxpid(value)
 
     @staticmethod
     def _normalize_unix_seconds(value: Any) -> int:

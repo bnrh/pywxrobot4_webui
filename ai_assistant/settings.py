@@ -19,7 +19,7 @@ from .providers import (
     _normalize_provider_request_timeout,
 )
 from .tool_registry import get_tool_registry
-from .tools_local import _coerce_bool
+from utils.normalize import is_truthy
 
 def get_default_ai_assistant_settings() -> dict[str, Any]:
     defaults = deepcopy(DEFAULT_AI_ASSISTANT_SETTINGS)
@@ -136,7 +136,7 @@ def normalize_ai_assistant_settings(value: Any) -> dict[str, Any]:
         "system_prompt": str(selected_prompt_plugin.get("prompt") or defaults["system_prompt"]).strip() or defaults["system_prompt"],
         "temperature": _clamp_float(selected_prompt_plugin.get("temperature"), defaults["temperature"], 0.0, 1.5),
         "max_tool_rounds": _clamp_int(selected_prompt_plugin.get("max_tool_rounds"), defaults["max_tool_rounds"], 1, 500),
-        "allow_write_tools": _coerce_bool(raw_settings.get("allow_write_tools"), bool(defaults.get("allow_write_tools", False))),
+        "allow_write_tools": is_truthy(raw_settings.get("allow_write_tools"), bool(defaults.get("allow_write_tools", False))),
         "prompt_plugins": prompt_plugins,
         "providers": providers,
     }

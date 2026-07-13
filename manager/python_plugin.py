@@ -25,8 +25,6 @@ from plugins._global_blacklist import (
     BLACKLIST_PLUGIN_NAME,
     resolve_blacklist_subject_wxid,
 )
-from utils.normalize import normalize_text as _shared_normalize_text
-from utils.normalize import normalize_wxpid as _shared_normalize_wxpid
 
 from .constants import (
     FRIEND_LABEL_CACHE_TTL_SECONDS,

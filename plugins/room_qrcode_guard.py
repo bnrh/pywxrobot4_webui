@@ -2,7 +2,7 @@ from pathlib import Path
 from time import time
 
 from config import PROJECT_ROOT
-from ._plugin_sdk import normalize_text, random_between, sleep, unique_strings
+from ._plugin_sdk import normalize_text, random_between, sleep, unique_strings, is_truthy
 
 try:
     import numpy as np
@@ -58,12 +58,6 @@ config_schema = [
 ]
 
 
-def is_truthy(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return normalize_text(value).lower() in {"1", "true", "yes", "on", "y", "是"}
 
 
 def normalize_room_ids(config):

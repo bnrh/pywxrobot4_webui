@@ -1,6 +1,6 @@
 from time import time
 
-from ._plugin_sdk import MESSAGE_TYPES, find_xml_tag_text, get_message_type, normalize_text, random_between, sleep, unique_strings
+from ._plugin_sdk import MESSAGE_TYPES, find_xml_tag_text, get_message_type, normalize_text, random_between, sleep, unique_strings, is_truthy
 
 
 name = "room_message_guard"
@@ -141,12 +141,6 @@ config_schema = [
 ]
 
 
-def is_truthy(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return normalize_text(value).lower() in {"1", "true", "yes", "on", "y", "是"}
 
 
 def normalize_rule_mode(value):

@@ -1,7 +1,7 @@
 import re
 from time import time
 
-from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text, parse_xml_attributes, random_between, sleep, unique_strings
+from ._plugin_sdk import MESSAGE_TYPES, get_message_type, normalize_text, parse_xml_attributes, random_between, sleep, unique_strings, is_truthy
 
 
 SNS_PERMISSION_MAP = {
@@ -50,17 +50,6 @@ config_schema = [
 ]
 
 
-def is_truthy(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    text = normalize_text(value).lower()
-    if text in {"1", "true", "yes", "on", "y", "是"}:
-        return True
-    if text in {"", "0", "false", "no", "off", "n", "否"}:
-        return False
-    return bool(value)
 
 
 def resolve_sns_permission(config):

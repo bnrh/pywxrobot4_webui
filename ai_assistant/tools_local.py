@@ -8,8 +8,11 @@ from typing import Any
 
 from client import WxRobotApiClient
 
+from utils.normalize import normalize_text
+
 from .constants import MAX_TOOL_RESULT_ITEMS, MAX_TOOL_RESULT_STRING_LENGTH
 from .tool_registry import LOCAL_TOOL_REGISTRY
+
 
 def _coerce_optional_int(value: Any) -> int | None:
     if value in (None, ""):
@@ -20,17 +23,8 @@ def _coerce_optional_int(value: Any) -> int | None:
         return None
 
 
-def _coerce_bool(value: Any, default: bool = False) -> bool:
-    if value in (None, ""):
-        return default
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _coerce_text(value: Any) -> str:
-    return str(value or "").strip()
-
+    return normalize_text(value)
 
 def _coerce_string_sequence(value: Any) -> list[str] | str:
     if isinstance(value, (list, tuple, set)):

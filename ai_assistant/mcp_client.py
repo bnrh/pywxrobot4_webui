@@ -9,7 +9,7 @@ from urllib import error, request
 
 from client import WxRobotApiClient
 
-from .tools_local import _coerce_bool
+from utils.normalize import is_truthy
 
 MCP_PROTOCOL_VERSION = "2025-03-26"
 MCP_CLIENT_INFO = {
@@ -175,7 +175,7 @@ class _McpHttpToolExecutor:
 
     def _resolve_tool_timeout(self, arguments: dict[str, Any]) -> float:
         request_timeout = self._base_timeout
-        if not _coerce_bool(arguments.get("wait"), False):
+        if not is_truthy(arguments.get("wait"), False):
             return request_timeout
         try:
             operation_timeout = float(arguments.get("timeout"))

@@ -4,7 +4,7 @@ import re
 from time import time
 from urllib import error, parse, request
 
-from ._plugin_sdk import format_unix_time, get_message_type, normalize_text
+from ._plugin_sdk import format_unix_time, get_message_type, normalize_text, is_truthy
 
 
 name = "vmq_monitor"
@@ -60,12 +60,6 @@ config_schema = [
 ]
 
 
-def is_truthy(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return normalize_text(value).lower() in {"1", "true", "yes", "on", "y", "是"}
 
 
 def normalize_host(value):
