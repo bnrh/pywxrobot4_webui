@@ -14,6 +14,7 @@ def _clear_connection_cache(db_path: Path) -> None:
     connections = getattr(db_connection._thread_state, "connections", None)
     if isinstance(connections, dict):
         connections.pop(cache_key, None)
+    db_connection.reset_sqlite_write_state_for_tests()
 
 
 def test_runtime_limits() -> None:

@@ -9,7 +9,13 @@ from loguru import logger
 
 from client import WxRobotApiClient
 from config import SETTINGS_DB_PATH, PluginServiceSettings
-from db_connection import get_sqlite_connection
+from db_connection import (
+    DEFAULT_WRITE_FLUSH_EVERY,
+    FLUSH_NOW,
+    get_sqlite_connection,
+    sqlite_execute_read,
+    sqlite_execute_write,
+)
 
 
 PLUGIN_STATE_SCHEMA_SQL = """
@@ -46,10 +52,16 @@ class PluginStateStore:
         plugin_id: str,
         namespace: str = "default",
         storage_path: Path = SETTINGS_DB_PATH,
+        *,
+        write_flush_every: int | None = None,
     ):
         self.plugin_id = str(plugin_id)
         self.namespace_name = _normalize_namespace(namespace)
         self.storage_path = Path(storage_path)
+        self.write_flush_every = max(
+            1,
+            int(write_flush_every) if write_flush_every is not None else DEFAULT_WRITE_FLUSH_EVERY,
+        )
         self._ensure_initialized(self.storage_path)
 
     @classmethod
@@ -61,9 +73,12 @@ class PluginStateStore:
             if resolved_path in cls._initialized_paths:
                 return
             _ensure_parent_directory(resolved_path)
-            connection = get_sqlite_connection(resolved_path)
-            connection.executescript(PLUGIN_STATE_SCHEMA_SQL)
-            connection.commit()
+
+            def writer(connection: sqlite3.Connection) -> object:
+                connection.executescript(PLUGIN_STATE_SCHEMA_SQL)
+                return FLUSH_NOW
+
+            sqlite_execute_write(resolved_path, writer, immediate=True)
             cls._initialized_paths.add(resolved_path)
 
     def _connect(self) -> sqlite3.Connection:
@@ -82,17 +97,19 @@ class PluginStateStore:
             return default
 
     def get(self, key: str, default: Any = None) -> Any:
-        with self._connect() as connection:
+        def reader(connection: sqlite3.Connection) -> Any:
             row = connection.execute(
                 "SELECT value_json FROM plugin_state WHERE plugin_id = ? AND namespace = ? AND key = ?",
                 (self.plugin_id, self.namespace_name, str(key)),
             ).fetchone()
-        if row is None:
-            return default
-        return self._deserialize(str(row["value_json"]), default)
+            if row is None:
+                return default
+            return self._deserialize(str(row["value_json"]), default)
+
+        return sqlite_execute_read(self.storage_path, reader)
 
     def set(self, key: str, value: Any) -> Any:
-        with self._connect() as connection:
+        def writer(connection: sqlite3.Connection) -> None:
             connection.execute(
                 """
                 INSERT OR REPLACE INTO plugin_state(plugin_id, namespace, key, value_json, updated_at)
@@ -100,61 +117,72 @@ class PluginStateStore:
                 """,
                 (self.plugin_id, self.namespace_name, str(key), self._serialize(value)),
             )
-            connection.commit()
+
+        sqlite_execute_write(self.storage_path, writer, flush_every=self.write_flush_every)
         return value
 
     def delete(self, key: str) -> bool:
-        with self._connect() as connection:
+        def writer(connection: sqlite3.Connection) -> bool:
             cursor = connection.execute(
                 "DELETE FROM plugin_state WHERE plugin_id = ? AND namespace = ? AND key = ?",
                 (self.plugin_id, self.namespace_name, str(key)),
             )
-            connection.commit()
             return cursor.rowcount > 0
 
+        return bool(sqlite_execute_write(self.storage_path, writer, flush_every=self.write_flush_every))
+
     def has(self, key: str) -> bool:
-        with self._connect() as connection:
+        def reader(connection: sqlite3.Connection) -> bool:
             row = connection.execute(
                 "SELECT 1 FROM plugin_state WHERE plugin_id = ? AND namespace = ? AND key = ? LIMIT 1",
                 (self.plugin_id, self.namespace_name, str(key)),
             ).fetchone()
-        return row is not None
+            return row is not None
+
+        return sqlite_execute_read(self.storage_path, reader)
 
     def keys(self) -> list[str]:
-        with self._connect() as connection:
+        def reader(connection: sqlite3.Connection) -> list[str]:
             rows = connection.execute(
                 "SELECT key FROM plugin_state WHERE plugin_id = ? AND namespace = ? ORDER BY key",
                 (self.plugin_id, self.namespace_name),
             ).fetchall()
-        return [str(row["key"]) for row in rows]
+            return [str(row["key"]) for row in rows]
+
+        return sqlite_execute_read(self.storage_path, reader)
 
     def values(self) -> list[Any]:
-        with self._connect() as connection:
+        def reader(connection: sqlite3.Connection) -> list[Any]:
             rows = connection.execute(
                 "SELECT value_json FROM plugin_state WHERE plugin_id = ? AND namespace = ? ORDER BY key",
                 (self.plugin_id, self.namespace_name),
             ).fetchall()
-        return [self._deserialize(str(row["value_json"])) for row in rows]
+            return [self._deserialize(str(row["value_json"])) for row in rows]
+
+        return sqlite_execute_read(self.storage_path, reader)
 
     def entries(self) -> list[tuple[str, Any]]:
-        with self._connect() as connection:
+        def reader(connection: sqlite3.Connection) -> list[tuple[str, Any]]:
             rows = connection.execute(
                 "SELECT key, value_json FROM plugin_state WHERE plugin_id = ? AND namespace = ? ORDER BY key",
                 (self.plugin_id, self.namespace_name),
             ).fetchall()
-        return [(str(row["key"]), self._deserialize(str(row["value_json"]))) for row in rows]
+            return [(str(row["key"]), self._deserialize(str(row["value_json"]))) for row in rows]
+
+        return sqlite_execute_read(self.storage_path, reader)
 
     def get_all(self) -> dict[str, Any]:
         return dict(self.entries())
 
     def clear(self) -> int:
-        with self._connect() as connection:
+        def writer(connection: sqlite3.Connection) -> int:
             cursor = connection.execute(
                 "DELETE FROM plugin_state WHERE plugin_id = ? AND namespace = ?",
                 (self.plugin_id, self.namespace_name),
             )
-            connection.commit()
             return int(cursor.rowcount or 0)
+
+        return int(sqlite_execute_write(self.storage_path, writer, flush_every=self.write_flush_every))
 
     def increment(self, key: str, amount: int | float = 1) -> int | float:
         current_value = self.get(key, 0)
@@ -168,7 +196,12 @@ class PluginStateStore:
         return self.set(key, next_value)
 
     def namespace(self, namespace: str) -> "PluginStateStore":
-        return PluginStateStore(self.plugin_id, namespace=namespace, storage_path=self.storage_path)
+        return PluginStateStore(
+            self.plugin_id,
+            namespace=namespace,
+            storage_path=self.storage_path,
+            write_flush_every=self.write_flush_every,
+        )
 
 
 class PluginLogger:
