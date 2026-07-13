@@ -39,10 +39,28 @@ CREATE TABLE IF NOT EXISTS queue_rejections (
 
 
 class RecentMessageStore:
-    def __init__(self, db_path: str | Path | None = None, *, limit: int = 200):
+    """高频写入时延迟清理：允许短暂超额，按批量阈值再裁剪到 limit。"""
+
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        *,
+        limit: int = 200,
+        trim_overflow: int | None = None,
+        trim_every_writes: int | None = None,
+    ):
         self.db_path = Path(db_path) if db_path else SETTINGS_DB_PATH
         self.limit = max(1, int(limit))
+        # 允许超出 limit 的软缓冲，避免每条消息都 DELETE。
+        self.trim_overflow = max(1, int(trim_overflow) if trim_overflow is not None else max(self.limit // 2, 32))
+        self.trim_every_writes = max(
+            1,
+            int(trim_every_writes) if trim_every_writes is not None else max(self.limit // 4, 25),
+        )
+        self._writes_since_trim = 0
+        self._approx_count = 0
         self._ensure_schema()
+        self._approx_count = self._count_rows()
 
     def _ensure_schema(self) -> None:
         connection = get_sqlite_connection(self.db_path)
@@ -51,6 +69,35 @@ class RecentMessageStore:
 
     def _connect(self) -> sqlite3.Connection:
         return get_sqlite_connection(self.db_path)
+
+    def _count_rows(self) -> int:
+        row = self._connect().execute("SELECT COUNT(*) AS total FROM recent_messages").fetchone()
+        return int(row["total"] or 0) if row else 0
+
+    def _trim_to_limit(self, connection: sqlite3.Connection, *, commit: bool = True) -> None:
+        connection.execute(
+            """
+            DELETE FROM recent_messages
+            WHERE internal_id NOT IN (
+                SELECT internal_id FROM recent_messages
+                ORDER BY internal_id DESC
+                LIMIT ?
+            )
+            """,
+            (self.limit,),
+        )
+        if commit:
+            connection.commit()
+        self._approx_count = self._count_rows()
+        self._writes_since_trim = 0
+
+    def _maybe_trim(self, connection: sqlite3.Connection) -> None:
+        soft_limit = self.limit + self.trim_overflow
+        should_trim = self._approx_count > soft_limit or (
+            self._writes_since_trim >= self.trim_every_writes and self._approx_count > self.limit
+        )
+        if should_trim:
+            self._trim_to_limit(connection, commit=True)
 
     @staticmethod
     def _serialize_json(value: Any, default: Any) -> str:
@@ -129,18 +176,17 @@ class RecentMessageStore:
                 self._serialize_json(message.get("payload"), {}),
             ),
         )
-        connection.execute(
-            """
-            DELETE FROM recent_messages
-            WHERE internal_id NOT IN (
-                SELECT internal_id FROM recent_messages
-                ORDER BY internal_id DESC
-                LIMIT ?
-            )
-            """,
-            (self.limit,),
-        )
+        # 新消息占绝大多数；偶发 REPLACE 导致计数略高无接受，裁剪时会纠正。
+        self._approx_count += 1
+        self._writes_since_trim += 1
         connection.commit()
+        self._maybe_trim(connection)
+
+    def trim_now(self) -> None:
+        """立即裁剪到 limit（测试或停机前可调用）。"""
+        connection = self._connect()
+        self._trim_to_limit(connection, commit=True)
+        self._approx_count = self._count_rows()
 
     def record_queue_rejection(self, internal_id: int, reason: str) -> None:
         connection = self._connect()
