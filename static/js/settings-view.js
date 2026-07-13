@@ -1,7 +1,10 @@
 /** 系统设置页渲染。 */
 
 export function readSettingsForm(elements) {
-    const form = elements.settingsForm;
+    const form = elements?.settingsForm;
+    if (!form) {
+        return {};
+    }
     return {
         host: form.host.value.trim(),
         port: Number(form.port.value),
@@ -22,9 +25,14 @@ export function renderSettingsView(elements, settings, getStoredApiToken) {
         return;
     }
 
+    const form = elements?.settingsForm;
+    // 设置页为懒加载；插件启停等操作可能带回 settings，但表单尚未挂载。
+    if (!form) {
+        return;
+    }
+
     const configSettings = settings.config;
     const runtimeSettings = settings.runtime;
-    const form = elements.settingsForm;
 
     for (const [key, value] of Object.entries(configSettings)) {
         const field = form.elements.namedItem(key);
@@ -36,6 +44,10 @@ export function renderSettingsView(elements, settings, getStoredApiToken) {
         } else {
             field.value = value;
         }
+    }
+
+    if (!elements.settingsAlert) {
+        return;
     }
 
     if (settings.restart_required) {
