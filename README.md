@@ -10,6 +10,7 @@ wxrobot_webui 是面向 wxrobot_api 的 Web 控制台与插件运行时。它提
 - [插件系统](docs/plugins.md)
 - [智能插件](docs/ai-assistant.md)
 - [开发指南](docs/development.md)
+- [架构与性能优化](docs/optimizations.md)
 
 ## 基础说明
 

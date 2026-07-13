@@ -66,6 +66,22 @@ async def handle_message(event, context):
 
 周期插件的调度描述，例如指定间隔配置字段与默认周期。
 
+### `category` / `message_dependent`
+
+- `category = "functional"`（或 `"utility"`）通常表示非消息依赖插件。
+- 也可显式设置 `message_dependent = False`。
+
+### `direct_execute` / `message_summary`
+
+控制台行为由插件**自行声明**，无需修改核心白名单：
+
+```python
+direct_execute = True    # 功能插件页一键执行，跳过执行弹窗，直接用已保存配置
+message_summary = True   # 消息汇总类插件的配置渲染特判
+```
+
+`manager.describe_modules` 会把这两个布尔字段带给 `/api/plugins`；详见 [架构与性能优化](optimizations.md#5-插件生态)。
+
 ## 4. 可用钩子
 
 当前插件系统支持以下入口：
@@ -137,6 +153,18 @@ async def handle_message(event, context):
 
 ## 7. 编写插件时的几个约定
 
+### 优先复用 `_plugin_sdk`
+
+公共逻辑放在 [plugins/_plugin_sdk.py](../plugins/_plugin_sdk.py)，而不是在大插件里复制：
+
+- 归一化：`normalize_text`、`to_string_list`、`resolve_wxpid_targets`、`get_room_scope`
+- 解析：`parse_int`、`parse_datetime_value`、`extract_sql_rows`、`get_mapping_value`
+- API 结果：`is_success_ret`、`extract_api_error`
+- 路径：`resolve_local_path`、`resolve_downloaded_file_path`
+- HTTP：`async_http_get` / `async_http_post` / `async_http_get_bytes` / `async_http_request`
+
+外部 HTTP **不要**再直接使用同步 `urllib.request`；需要完整响应头时用 `async_http_request`。
+
 ### 未命中路径尽量静默
 
 如果消息不属于当前插件处理范围，返回：
@@ -163,6 +191,12 @@ async def handle_message(event, context):
 python -m py_compile plugins/你的插件.py
 ```
 
+涉及 SDK / 元数据时，可再跑：
+
+```powershell
+python -m pytest tests/test_plugin_sdk.py tests/test_app_builders.py -q
+```
+
 再配合：
 
 - 控制台“消息中心”确认消息是否触发。
@@ -179,11 +213,21 @@ python -m py_compile plugins/你的插件.py
 4. 看“插件日志”中的结构化数据。
 5. 必要时用 `context.state` 保存最近一次中间结果，便于复盘。
 
-## 10. 一个更完整的插件样例参考
+## 10. 前端工程化（改控制台时）
+
+- 源码与片段：`frontend/`、`static/js/`、`static/js/partials/`
+- 构建：`npm run build`（Vite + git hash 资源戳）
+- 首屏只加载当前 Tab；其它面板按需动态加载
+
+完整说明见 [架构与性能优化](optimizations.md#4-前端刷新与首屏)。
+
+## 11. 一个更完整的插件样例参考
 
 可以优先参考这些现成插件：
 
 - [plugins/accept_user_request.py](../plugins/accept_user_request.py)：消息匹配、规则配置、好友操作。
 - [plugins/room_message_guard.py](../plugins/room_message_guard.py)：复杂规则配置、群成员读取、状态去重。
 - [plugins/export_room_members.py](../plugins/export_room_members.py)：功能插件、导出文件、热重载执行。
-- [plugins/vmq_monitor.py](../plugins/vmq_monitor.py)：消息解析、外部服务推送、周期心跳。
+- [plugins/vmq_monitor.py](../plugins/vmq_monitor.py)：消息解析、外部服务推送、周期心跳、SDK HTTP。
+- [plugins/download_recent_user_images.py](../plugins/download_recent_user_images.py)：功能插件、`direct_execute`、SDK SQL/API 辅助。
+- [plugins/room_ai_reply.py](../plugins/room_ai_reply.py)：复杂消息流、图片下载、SDK HTTP。

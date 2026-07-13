@@ -2,14 +2,14 @@
 
 ## 1. 插件运行模型
 
-当前插件系统由 [manager.py](../manager.py)、[plugin_base.py](../plugin_base.py) 和 [plugins](../plugins) 目录共同组成。
+当前插件系统由 [manager](../manager)、[plugin_base.py](../plugin_base.py)、[plugins/_plugin_sdk.py](../plugins/_plugin_sdk.py) 和 [plugins](../plugins) 目录共同组成。
 
 核心链路如下：
 
 1. wxrobot_api 将消息回调到 `/messages`。
 2. [server.py](../server.py) 将消息写入异步队列。
 3. Worker 协程从队列中取出消息。
-4. [manager.py](../manager.py) 依次调度已启用插件。
+4. [manager](../manager) 依次调度已启用插件。
 5. 插件通过 `context.api` 调用 wxrobot_api，通过 `context.logger` 记录结构化日志，通过 `context.state` 持久化状态。
 
 ## 2. 插件类型
@@ -142,7 +142,8 @@
 | `room_members_deduplication` | 功能插件 | 统计多个群聊组的重复成员并导出 CSV |
 | `room_msg_summary` | 功能插件 | 导出指定群聊在时间窗口内的聊天记录 |
 | `user_msg_summary` | 功能插件 | 导出指定好友在时间窗口内的聊天记录 |
-| `download_recent_user_images` | 周期插件 | 根据 ChatName2Id 中的最近活跃用户，批量下载时间窗口内的图片消息 |
+| `download_recent_user_images` | 功能插件 | 根据 ChatName2Id 中的最近活跃用户，批量下载时间窗口内的图片消息；声明 `direct_execute` |
+| `dont_revoke` | 功能插件 | 为指定微信进程开启或关闭防撤回；声明 `direct_execute` |
 | `classify_labels` | 功能插件 | 将群成员批量归类到好友标签 |
 | `watch_wechat_processes` | 周期插件 | 巡检微信进程与登录账号缓存变化并自动重新 hook |
 
@@ -156,6 +157,11 @@
 4. AI 助手会优先通过聚合工具处理大群、大好友集场景，减少把全量列表交给模型。
 5. 消息插件在未命中路径上已尽量静默，不再输出大量无效“忽略消息”日志。
 6. `watch_wechat_processes` 现在会在启动、手动执行和周期巡检时立即读取当前登录账号，与系统缓存账号信息比对；只要发现账号切换或缓存不一致，就会直接重新 hook 并同步账号缓存。
+7. 公共逻辑集中到 `_plugin_sdk`（解析、SQL 行、API ret、统一异步 HTTP）；大插件应优先复用而不是复制。
+8. `direct_execute` / `message_summary` 由插件模块自声明，控制台据此决定一键执行与汇总配置渲染，不再维护 `app_config` 硬编码白名单。
+9. `invite_to_toom` 已正名为 `invite_to_room`，遗留配置会自动迁移。
+
+更完整的运行时 / 数据库 / 前端优化说明见 [架构与性能优化](optimizations.md)。
 
 ## 9. 特别说明：群聊禁言插件
 

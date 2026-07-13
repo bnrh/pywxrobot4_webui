@@ -2,9 +2,16 @@
 
 This repository loads Python plugins directly from plugins/*.py and manages configuration from webui.sqlite3.
 
+## Metadata
+
+- Required: name, description
+- Optional: category, message_dependent, event_filters, scope_targets, schedule, config_schema, sdk_version
+- UI flags (self-declared on the module, no core allowlist edits):
+  - direct_execute = True  → one-click run with saved config
+  - message_summary = True → special config hydration for summary exporters
+
 ## Core Runtime Shape
 
-- Metadata: name, description
 - Common hook: async def handle_message(event, context)
 - Optional hooks: startup, shutdown, execute, tick, on_hot_reload
 - Message result pattern: return a dict like {"handled": bool, "detail": "...", "data": {...}}
@@ -13,15 +20,16 @@ This repository loads Python plugins directly from plugins/*.py and manages conf
 
 - context.api: wrapped wxrobot_api client for send_text, send_image, room members, downloads, and other platform calls
 - context.logger: structured logger with debug, info, warning, error, and scope(name)
-- context.state: SQLite-backed persistent store for counters, caches, and deduplication
+- context.state: SQLite-backed persistent store for counters, caches, and deduplication (batched commits via db_connection)
 - context.hot_reload: metadata about file reload status
 
 ## Common Design Rules
 
 1. Normalize inbound values early.
-   - Prefer helpers from plugins/_plugin_sdk.py such as normalize_text, get_message_type, to_string_list, unique_strings, and XML helpers.
+   - Prefer helpers from plugins/_plugin_sdk.py such as normalize_text, get_message_type, to_string_list, unique_strings, parse_int, extract_sql_rows, XML helpers.
 2. Keep plugin logic asynchronous.
    - Await context.api calls and SDK helpers like sleep.
+   - Use async_http_get / async_http_post / async_http_get_bytes / async_http_request instead of urllib or ad-hoc httpx clients.
 3. Preserve stored config.
    - If a plugin already has live users, keep aliases, legacy keys, or normalization shims instead of hard-cutting old shapes.
 4. Keep operator UX in config_schema whenever possible.
@@ -29,6 +37,7 @@ This repository loads Python plugins directly from plugins/*.py and manages conf
    - Common fields already supported in this repo include text, textarea, number, boolean, select, and object-list with display_mode="table".
 5. Avoid unnecessary frontend edits.
    - Only change static/js/plugin-config-form.js or static/css/app.css when the schema language truly cannot express the requirement.
+6. Extract shared helpers into _plugin_sdk.py when a plugin grows large or duplicates SQL/API/path/HTTP logic.
 
 ## Config Schema Patterns Worth Reusing
 

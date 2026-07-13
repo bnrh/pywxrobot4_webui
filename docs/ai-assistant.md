@@ -2,7 +2,7 @@
 
 ## 1. 能力定位
 
-“智能插件”页面对应的核心实现位于 [ai_assistant.py](../ai_assistant.py) 和 [server.py](../server.py)。
+“智能插件”页面对应的核心实现位于 [ai_assistant](../ai_assistant) 与 [server.py](../server.py)。
 
 它的目标不是单纯聊天，而是让模型在当前微信上下文里调用 wxrobot_api 工具完成实际操作，例如：
 
