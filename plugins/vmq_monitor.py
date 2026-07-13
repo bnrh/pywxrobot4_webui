@@ -1,11 +1,8 @@
 import hashlib
 import re
 from time import time
-from urllib import parse
 
-from utils.http_client import get_text
-
-from ._plugin_sdk import format_unix_time, get_message_type, normalize_text, is_truthy
+from ._plugin_sdk import async_http_get, format_unix_time, get_message_type, normalize_text, is_truthy
 
 
 name = "vmq_monitor"
@@ -166,9 +163,7 @@ def build_signed_params(request_type, amount_text, key):
 
 
 async def send_get_request(url, params):
-    query_string = parse.urlencode(params)
-    request_url = f"{url}?{query_string}" if query_string else url
-    return await get_text(request_url, headers=VMQ_REQUEST_HEADERS, timeout=HTTP_TIMEOUT_SECONDS)
+    return await async_http_get(url, params=params, headers=VMQ_REQUEST_HEADERS, timeout=HTTP_TIMEOUT_SECONDS)
 
 
 async def send_heartbeat(context, service_settings, reason):

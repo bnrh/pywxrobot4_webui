@@ -4,13 +4,18 @@ import re
 from datetime import datetime
 from enum import IntEnum
 from html import unescape
-from typing import Any
+from pathlib import Path
+from typing import Any, Mapping
 
-from utils.http_client import post_json
+from config import PROJECT_ROOT
+from utils.http_client import get_bytes, get_text, post_json, request as http_request
 from utils.normalize import collapse_whitespace, is_truthy, normalize_wxpid
 
 # 插件侧沿用 collapse_whitespace 语义，对外仍导出 normalize_text / is_truthy。
 normalize_text = collapse_whitespace
+
+# 需要完整 Response（headers / cookies）时可直接使用。
+async_http_request = http_request
 
 
 class MESSAGE_TYPES(IntEnum):
@@ -263,10 +268,263 @@ def build_event_payload(event: Any) -> dict[str, Any]:
     return payload
 
 
+async def async_http_get(
+    url: str,
+    *,
+    headers: Mapping[str, str] | None = None,
+    params: Mapping[str, Any] | None = None,
+    timeout: float = 10.0,
+    raise_for_status: bool = True,
+    client: Any = None,
+) -> tuple[int, str]:
+    """统一插件 GET（httpx），返回 (status_code, text)。"""
+    return await get_text(
+        url,
+        headers=headers,
+        params=params,
+        timeout=timeout,
+        raise_for_status=raise_for_status,
+        client=client,
+    )
+
+
+async def async_http_post(
+    url: str,
+    *,
+    json_payload: Any = None,
+    data: Any = None,
+    content: bytes | None = None,
+    headers: Mapping[str, str] | None = None,
+    params: Mapping[str, Any] | None = None,
+    files: Any = None,
+    timeout: float = 10.0,
+    raise_for_status: bool = True,
+    client: Any = None,
+) -> tuple[int, str]:
+    """统一插件 POST（httpx）。
+
+    - 传 json_payload 时按 JSON 发送；
+    - 否则可传 data / content / files。
+    """
+    if json_payload is not None:
+        return await post_json(
+            url,
+            json_payload,
+            headers=dict(headers or {}),
+            timeout=timeout,
+            raise_for_status=raise_for_status,
+            client=client,
+        )
+    response = await http_request(
+        "POST",
+        url,
+        headers=headers,
+        content=content,
+        data=data,
+        params=params,
+        files=files,
+        timeout=timeout,
+        client=client,
+    )
+    if raise_for_status and response.status_code >= 400:
+        raise RuntimeError(response.text or f"HTTP {response.status_code}")
+    return int(response.status_code), response.text
+
+
+async def async_http_get_bytes(
+    url: str,
+    *,
+    headers: Mapping[str, str] | None = None,
+    timeout: float = 30.0,
+    client: Any = None,
+) -> tuple[int, bytes, str]:
+    """统一插件二进制 GET，返回 (status_code, content, content_type)。"""
+    return await get_bytes(url, headers=headers, timeout=timeout, client=client)
+
+
 async def post_json_request(
     url: str,
     payload: Any,
     headers: dict[str, str] | None = None,
     timeout: float = 10.0,
 ) -> tuple[int, str]:
-    return await post_json(url, payload, headers=headers, timeout=timeout)
+    return await async_http_post(url, json_payload=payload, headers=headers, timeout=timeout)
+
+
+def parse_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    text = normalize_text(value)
+    if not text:
+        return None
+    try:
+        return int(text, 16) if text.lower().startswith("0x") else int(float(text))
+    except ValueError:
+        return None
+
+
+def parse_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def parse_datetime_value(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    text = normalize_text(value)
+    if not text:
+        return None
+    if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
+        timestamp = int(text)
+        if abs(timestamp) >= 1_000_000_000_000:
+            timestamp //= 1000
+        return datetime.fromtimestamp(timestamp)
+
+    normalized_text = text.replace("T", " ")
+    for format_string in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(normalized_text, format_string)
+        except ValueError:
+            continue
+
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(f"无法解析时间: {value}") from exc
+
+
+def normalize_mapping_key(value: Any) -> str:
+    return normalize_text(value).lower()
+
+
+def get_mapping_value(item: Any, *keys: str) -> Any:
+    if not isinstance(item, dict):
+        return None
+    normalized_map = {normalize_mapping_key(key): value for key, value in item.items()}
+    for key in keys:
+        normalized_key = normalize_mapping_key(key)
+        if normalized_key in normalized_map:
+            return normalized_map[normalized_key]
+    return None
+
+
+def normalize_row_list(rows: Any, column_names: list[Any] | None = None) -> list[dict[str, Any]]:
+    normalized_rows: list[dict[str, Any]] = []
+    if not isinstance(rows, list):
+        return normalized_rows
+    normalized_columns = [normalize_text(column_name) or f"col_{index}" for index, column_name in enumerate(column_names or [])]
+    for row in rows:
+        if isinstance(row, dict):
+            normalized_rows.append(dict(row))
+            continue
+        if isinstance(row, (list, tuple)) and normalized_columns:
+            normalized_rows.append(
+                {
+                    normalized_columns[index]: row[index] if index < len(row) else None
+                    for index in range(len(normalized_columns))
+                }
+            )
+    return normalized_rows
+
+
+def extract_rows_from_payload(payload: Any) -> list[dict[str, Any]] | None:
+    if isinstance(payload, list):
+        return normalize_row_list(payload)
+    if not isinstance(payload, dict):
+        return None
+
+    columns = payload.get("columns") or payload.get("header") or payload.get("headers") or payload.get("fields")
+    if isinstance(columns, list):
+        for key in ("rows", "items", "data", "list", "result", "results"):
+            candidate = payload.get(key)
+            if isinstance(candidate, list):
+                return normalize_row_list(candidate, columns)
+
+    for key in ("data", "rows", "items", "list", "result", "results"):
+        candidate = payload.get(key)
+        if isinstance(candidate, list):
+            return normalize_row_list(candidate)
+        if isinstance(candidate, dict):
+            extracted = extract_rows_from_payload(candidate)
+            if extracted is not None:
+                return extracted
+    return None
+
+
+def extract_sql_rows(payload: Any) -> list[dict[str, Any]]:
+    extracted = extract_rows_from_payload(payload)
+    return extracted if extracted is not None else []
+
+
+def is_success_ret(value: Any) -> bool:
+    # 避免 `1 in (True,)` 因 True==1 误判成功。
+    if value is True or value is None:
+        return True
+    return value in ("", 0, "0")
+
+
+def extract_api_error(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return normalize_text(payload)
+    if is_success_ret(payload.get("ret")):
+        return ""
+    for key in ("error", "errmsg", "err_msg", "message", "msg", "detail"):
+        text = normalize_text(payload.get(key))
+        if text:
+            return text
+    return f"ret={payload.get('ret')}"
+
+
+def resolve_response_status_code(payload: Any) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    return parse_int(payload.get("status_code"))
+
+
+def resolve_local_path(raw_path: Any, *, base_dir: Path | None = None) -> Path | None:
+    path_text = normalize_text(raw_path)
+    if not path_text:
+        return None
+    candidate = Path(path_text)
+    if not candidate.is_absolute():
+        candidate = (base_dir or PROJECT_ROOT) / candidate
+    if candidate.exists():
+        return candidate
+    return None
+
+
+def resolve_downloaded_file_path(response: Any, *, base_dir: Path | None = None) -> Path | None:
+    if not isinstance(response, dict):
+        return None
+
+    candidates: list[Any] = []
+    for key in ("path", "save_path", "file_path", "download_path"):
+        value = response.get(key)
+        if value not in (None, ""):
+            candidates.append(value)
+
+    payload = response.get("data")
+    if isinstance(payload, dict):
+        for key in ("path", "save_path", "file_path", "download_path"):
+            value = payload.get(key)
+            if value not in (None, ""):
+                candidates.append(value)
+
+    for raw_path in candidates:
+        candidate = resolve_local_path(raw_path, base_dir=base_dir)
+        if candidate is not None:
+            return candidate
+    return None
+
+
+# 兼容旧命名
+resolve_local_image_path = resolve_local_path
+resolve_downloaded_image_path = resolve_downloaded_file_path

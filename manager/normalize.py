@@ -150,6 +150,19 @@ def _resolve_schedule(module: ModuleType, capabilities: dict[str, Any]) -> dict[
     }
 
 
+def _resolve_bool_flag(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return default
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def _describe_python_module(module: ModuleType, spec: PluginSpec) -> dict[str, Any]:
     declared_category = str(_resolve_module_attr(module, "category", default="") or "").strip().lower()
     raw_message_dependent = _resolve_module_attr(module, "message_dependent", "messageDependent", default=None)
@@ -186,6 +199,14 @@ def _describe_python_module(module: ModuleType, spec: PluginSpec) -> dict[str, A
         "config_schema": config_schema,
         "scope_targets": list(scope_targets),
         "schedule": _resolve_schedule(module, capabilities),
+        "direct_execute": _resolve_bool_flag(
+            _resolve_module_attr(module, "direct_execute", "directExecute", default=False),
+            default=False,
+        ),
+        "message_summary": _resolve_bool_flag(
+            _resolve_module_attr(module, "message_summary", "messageSummary", default=False),
+            default=False,
+        ),
     }
 
 

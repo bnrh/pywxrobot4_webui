@@ -152,6 +152,8 @@ class PluginManager:
                         "capabilities": metadata.get("capabilities") if isinstance(metadata.get("capabilities"), dict) else {},
                         "config_schema": metadata.get("config_schema") if isinstance(metadata.get("config_schema"), list) else [],
                         "scope_targets": metadata.get("scope_targets") if isinstance(metadata.get("scope_targets"), list) else [],
+                        "direct_execute": bool(metadata.get("direct_execute", False)),
+                        "message_summary": bool(metadata.get("message_summary", False)),
                         "loadable": True,
                         "error": "",
                     }
@@ -170,6 +172,8 @@ class PluginManager:
                         "capabilities": {},
                         "config_schema": [],
                         "scope_targets": [],
+                        "direct_execute": False,
+                        "message_summary": False,
                         "loadable": False,
                         "error": str(exc),
                     }

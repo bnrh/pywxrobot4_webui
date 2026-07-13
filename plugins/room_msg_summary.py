@@ -15,6 +15,8 @@ name = "room_msg_summary"
 description = "按配置导出指定群聊在给定时间窗口内的消息记录"
 category = "functional"
 message_dependent = False
+direct_execute = True
+message_summary = True
 scope_targets = ["rooms"]
 
 

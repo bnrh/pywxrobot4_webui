@@ -2,13 +2,27 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import Any
 
-from ._plugin_sdk import MESSAGE_TYPES, format_date_time, normalize_text, resolve_wxpid_targets, sleep
+from ._plugin_sdk import (
+    MESSAGE_TYPES,
+    extract_api_error,
+    extract_sql_rows,
+    format_date_time,
+    get_mapping_value,
+    normalize_text,
+    parse_datetime_value,
+    parse_float,
+    parse_int,
+    resolve_response_status_code,
+    resolve_wxpid_targets,
+    sleep,
+)
 
 
 name = "download_recent_user_images"
 description = "手动扫描 ChatName2Id 中最近活跃用户，并下载时间窗口内的图片消息"
 category = "functional"
 message_dependent = False
+direct_execute = True
 
 
 DEFAULT_LOOKBACK_HOURS = 24
@@ -84,56 +98,6 @@ config_schema = [
 ]
 
 
-def parse_int(value: Any) -> int | None:
-    if value in (None, ""):
-        return None
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    text = normalize_text(value)
-    if not text:
-        return None
-    try:
-        return int(text, 16) if text.lower().startswith("0x") else int(float(text))
-    except ValueError:
-        return None
-
-
-def parse_float(value: Any, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def parse_datetime_value(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    text = normalize_text(value)
-    if not text:
-        return None
-    if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
-        timestamp = int(text)
-        if abs(timestamp) >= 1_000_000_000_000:
-            timestamp //= 1000
-        return datetime.fromtimestamp(timestamp)
-
-    normalized_text = text.replace("T", " ")
-    for format_string in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(normalized_text, format_string)
-        except ValueError:
-            continue
-
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError as exc:
-        raise ValueError(f"无法解析起始时间: {value}") from exc
-
-
 def resolve_time_window(config: dict[str, Any]) -> tuple[datetime, datetime]:
     now = datetime.now()
     explicit_start = parse_datetime_value(config.get("start_time"))
@@ -159,88 +123,6 @@ def resolve_download_flag(config: dict[str, Any], context: Any) -> int:
     if configured is not None:
         return max(1, min(3, configured))
     return int(getattr(context.settings, "image_download_flag", 3) or 3)
-
-
-def normalize_mapping_key(value: Any) -> str:
-    return normalize_text(value).lower()
-
-
-def get_mapping_value(item: Any, *keys: str) -> Any:
-    if not isinstance(item, dict):
-        return None
-    normalized_map = {
-        normalize_mapping_key(key): value
-        for key, value in item.items()
-    }
-    for key in keys:
-        normalized_key = normalize_mapping_key(key)
-        if normalized_key in normalized_map:
-            return normalized_map[normalized_key]
-    return None
-
-
-def normalize_row_list(rows: Any, column_names: list[Any] | None = None) -> list[dict[str, Any]]:
-    normalized_rows: list[dict[str, Any]] = []
-    if not isinstance(rows, list):
-        return normalized_rows
-    normalized_columns = [normalize_text(column_name) or f"col_{index}" for index, column_name in enumerate(column_names or [])]
-    for row in rows:
-        if isinstance(row, dict):
-            normalized_rows.append(dict(row))
-            continue
-        if isinstance(row, (list, tuple)) and normalized_columns:
-            normalized_rows.append(
-                {
-                    normalized_columns[index]: row[index] if index < len(row) else None
-                    for index in range(len(normalized_columns))
-                }
-            )
-    return normalized_rows
-
-
-def extract_rows_from_payload(payload: Any) -> list[dict[str, Any]] | None:
-    if isinstance(payload, list):
-        return normalize_row_list(payload)
-    if not isinstance(payload, dict):
-        return None
-
-    columns = payload.get("columns") or payload.get("header") or payload.get("headers") or payload.get("fields")
-    if isinstance(columns, list):
-        for key in ("rows", "items", "data", "list", "result", "results"):
-            candidate = payload.get(key)
-            if isinstance(candidate, list):
-                return normalize_row_list(candidate, columns)
-
-    for key in ("data", "rows", "items", "list", "result", "results"):
-        candidate = payload.get(key)
-        if isinstance(candidate, list):
-            return normalize_row_list(candidate)
-        if isinstance(candidate, dict):
-            extracted = extract_rows_from_payload(candidate)
-            if extracted is not None:
-                return extracted
-    return None
-
-
-def extract_sql_rows(payload: Any) -> list[dict[str, Any]]:
-    extracted = extract_rows_from_payload(payload)
-    return extracted if extracted is not None else []
-
-
-def is_success_ret(value: Any) -> bool:
-    return value in (None, "", 0, "0", True)
-
-
-def extract_api_error(payload: Any) -> str:
-    if not isinstance(payload, dict):
-        return ""
-    if is_success_ret(payload.get("ret")):
-        return ""
-    for key in ("error", "errmsg", "err_msg", "message", "msg", "detail"):
-        text = normalize_text(payload.get(key))
-        if text:
-            return text
-    return f"ret={payload.get('ret')}"
 
 
 def describe_update_time_scale(scale: int) -> str:
@@ -326,12 +208,6 @@ def prune_download_history(records: list[dict[str, Any]], min_timestamp: int) ->
 def append_limited(items: list[dict[str, Any]], item: dict[str, Any]) -> None:
     if len(items) < MAX_REPORT_ITEMS:
         items.append(item)
-
-
-def resolve_response_status_code(payload: Any) -> int | None:
-    if not isinstance(payload, dict):
-        return None
-    return parse_int(payload.get("status_code"))
 
 
 def build_message_table_name(wxid: str) -> str:

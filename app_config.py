@@ -53,19 +53,6 @@ LEGACY_PLUGIN_MODULE_ALIASES = {
     INVITE_TO_TOOM_LEGACY_MODULE: INVITE_TO_ROOM_PLUGIN_MODULE,
 }
 LEGACY_PLUGIN_ALIAS_MODULES = frozenset(LEGACY_PLUGIN_MODULE_ALIASES)
-DOWNLOAD_RECENT_USER_IMAGES_PLUGIN_MODULE = normalize_plugin_module_name("plugins.download_recent_user_images")
-DONT_REVOKE_PLUGIN_MODULE = normalize_plugin_module_name("plugins.dont_revoke")
-DIRECT_EXECUTE_PLUGIN_MODULES = {
-    normalize_plugin_module_name("plugins.room_msg_summary"),
-    normalize_plugin_module_name("plugins.user_msg_summary"),
-    normalize_plugin_module_name("plugins.export_contacts"),
-    DOWNLOAD_RECENT_USER_IMAGES_PLUGIN_MODULE,
-    DONT_REVOKE_PLUGIN_MODULE,
-}
-MESSAGE_SUMMARY_PLUGIN_MODULES = {
-    normalize_plugin_module_name("plugins.room_msg_summary"),
-    normalize_plugin_module_name("plugins.user_msg_summary"),
-}
 
 
 def resolve_canonical_plugin_module(module_name: str) -> str:

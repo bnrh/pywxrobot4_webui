@@ -5,17 +5,27 @@ import mimetypes
 import re
 from pathlib import Path
 from time import time
-from urllib import parse
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 import uuid
 
 import httpx
 
 from ai_assistant import run_openai_compatible_chat_completion
 from config import PROJECT_ROOT
-from utils.http_client import get_bytes, request as http_request
 
-from ._plugin_sdk import MESSAGE_TYPES, find_xml_tag_text, get_message_type, normalize_text, random_between, sleep, unique_strings
+from ._plugin_sdk import (
+    MESSAGE_TYPES,
+    async_http_get_bytes,
+    async_http_request,
+    find_xml_tag_text,
+    get_message_type,
+    normalize_text,
+    random_between,
+    resolve_downloaded_image_path,
+    resolve_local_image_path,
+    sleep,
+    unique_strings,
+)
 
 
 name = "room_ai_reply"
@@ -316,42 +326,6 @@ def get_active_pending_room_image(pending_state, pending_key, now_ms):
     return pending
 
 
-def resolve_local_image_path(raw_path):
-    path_text = normalize_text(raw_path)
-    if not path_text:
-        return None
-    candidate = Path(path_text)
-    if not candidate.is_absolute():
-        candidate = PROJECT_ROOT / candidate
-    if candidate.exists():
-        return candidate
-    return None
-
-
-def resolve_downloaded_image_path(response):
-    if not isinstance(response, dict):
-        return None
-
-    candidates = []
-    for key in ("path", "save_path", "file_path", "download_path"):
-        value = response.get(key)
-        if value not in (None, ""):
-            candidates.append(value)
-
-    payload = response.get("data")
-    if isinstance(payload, dict):
-        for key in ("path", "save_path", "file_path", "download_path"):
-            value = payload.get(key)
-            if value not in (None, ""):
-                candidates.append(value)
-
-    for raw_path in candidates:
-        candidate = resolve_local_image_path(raw_path)
-        if candidate is not None:
-            return candidate
-    return None
-
-
 async def download_room_message_image(context, roomid, msgid, wxpid):
     timeout_seconds = int(getattr(getattr(context, "settings", None), "image_download_timeout", 15) or 15)
     response = await context.api.download_cdn_image(
@@ -604,7 +578,7 @@ def guess_ai_image_suffix(image_item, response_content_type=""):
 
     source_url = str((image_item or {}).get("url") or "").strip()
     if source_url.startswith(("http://", "https://")):
-        url_path = parse.urlparse(source_url).path
+        url_path = urlparse(source_url).path
         path_suffix = Path(url_path).suffix.lower()
         if path_suffix:
             return path_suffix
@@ -637,7 +611,7 @@ async def materialize_ai_image(image_item):
         raise RuntimeError(f"AI 返回了当前无法处理的图片地址: {image_source}")
 
     try:
-        _, image_bytes, response_content_type = await get_bytes(
+        _, image_bytes, response_content_type = await async_http_get_bytes(
             image_source,
             headers={"User-Agent": "wxrobot_webui/room_ai_reply"},
             timeout=AI_REPLY_IMAGE_DOWNLOAD_TIMEOUT_SECONDS,
@@ -666,7 +640,7 @@ async def upload_image_to_hedgedoc(client: httpx.AsyncClient, hedgedoc_url, imag
     content_type = mimetypes.guess_type(str(image_file_path))[0] or "application/octet-stream"
     image_bytes = image_file_path.read_bytes()
     try:
-        response = await http_request(
+        response = await async_http_request(
             "POST",
             urljoin(f"{hedgedoc_url}/", "uploadimage"),
             headers={
@@ -776,7 +750,7 @@ def build_markdown_article_payload(markdown_text, publish_link, roomid, event, m
 
 async def open_with_redirect_capture(client: httpx.AsyncClient, method: str, url: str, **kwargs):
     try:
-        response = await http_request(
+        response = await async_http_request(
             method,
             url,
             follow_redirects=False,
@@ -799,7 +773,7 @@ async def login_hedgedoc(hedgedoc_url, email, password):
     client = httpx.AsyncClient(follow_redirects=True, timeout=HEDGEDOC_REQUEST_TIMEOUT_SECONDS)
     login_url = urljoin(f"{hedgedoc_url}/", "login")
     try:
-        response = await http_request(
+        response = await async_http_request(
             "POST",
             login_url,
             data={"email": email, "password": password},
@@ -810,7 +784,7 @@ async def login_hedgedoc(hedgedoc_url, email, password):
         if response.status_code >= 400:
             raise RuntimeError(f"HedgeDoc 登录失败，HTTP {response.status_code}: {response.text[:500]}")
 
-        me_response = await http_request(
+        me_response = await async_http_request(
             "GET",
             urljoin(f"{hedgedoc_url}/", "me"),
             timeout=HEDGEDOC_REQUEST_TIMEOUT_SECONDS,

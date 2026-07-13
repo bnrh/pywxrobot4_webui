@@ -1,12 +1,13 @@
 from typing import Any
 
-from ._plugin_sdk import normalize_text, resolve_wxpid_targets
+from ._plugin_sdk import extract_api_error, is_success_ret, normalize_text, resolve_wxpid_targets
 
 
 name = "dont_revoke"
 description = "手动为指定微信进程开启或关闭防撤回"
 category = "functional"
 message_dependent = False
+direct_execute = True
 
 
 config_schema = [
@@ -27,22 +28,6 @@ config_schema = [
         "description": "勾选后点击“执行插件”会开启防撤回；取消勾选后点击“执行插件”会关闭防撤回。",
     },
 ]
-
-
-def is_success_ret(value: Any) -> bool:
-    return value in (None, "", 0, "0", True)
-
-
-def extract_api_error(payload: Any) -> str:
-    if not isinstance(payload, dict):
-        return normalize_text(payload)
-    if is_success_ret(payload.get("ret")):
-        return ""
-    for key in ("error", "errmsg", "err_msg", "message", "msg", "detail"):
-        text = normalize_text(payload.get(key))
-        if text:
-            return text
-    return f"ret={payload.get('ret')}"
 
 
 def resolve_revoke_enabled(config: Any) -> bool:

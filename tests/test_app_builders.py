@@ -61,6 +61,14 @@ def test_message_summary_flag_only_for_summary_plugins() -> None:
     if room_summary is not None:
         assert room_summary["message_summary"] is True
         assert room_summary["direct_execute"] is True
+    export_contacts = payload.get("plugins.export_contacts")
+    if export_contacts is not None:
+        assert export_contacts["direct_execute"] is True
+        assert export_contacts["message_summary"] is False
+    auto_download = payload.get("plugins.auto_download_image")
+    if auto_download is not None:
+        assert auto_download["direct_execute"] is False
+        assert auto_download["message_summary"] is False
 
 
 def test_sort_option_items_orders_by_label() -> None:

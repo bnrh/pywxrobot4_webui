@@ -15,6 +15,8 @@ name = "user_msg_summary"
 description = "按配置导出指定微信好友在给定时间窗口内的聊天记录"
 category = "functional"
 message_dependent = False
+direct_execute = True
+message_summary = True
 
 
 WINDOWS_DOWNLOADS_FOLDER_GUID = "{374DE290-123F-4565-9164-39C4925E467B}"

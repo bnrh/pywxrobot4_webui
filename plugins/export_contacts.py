@@ -17,6 +17,7 @@ name = "export_contacts"
 description = "导出当前微信好友列表信息到 CSV 表格"
 category = "functional"
 message_dependent = False
+direct_execute = True
 
 
 WINDOWS_DOWNLOADS_FOLDER_GUID = "{374DE290-123F-4565-9164-39C4925E467B}"
