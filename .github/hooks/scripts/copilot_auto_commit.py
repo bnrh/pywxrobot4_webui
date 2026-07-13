@@ -33,7 +33,7 @@ PATH_LIKE_KEYS = {
 PROMPT_SCOPE_RULES = [
     (("智能插件", "ai assistant", "mcp", "ai"), "智能插件"),
     (("enter_room_tip", "入群欢迎", "欢迎语", "群欢迎"), "enter_room_tip"),
-    (("invite_to_toom", "关键词进群", "进群规则"), "invite_to_toom"),
+    (("invite_to_room", "invite_to_toom", "关键词进群", "进群规则"), "invite_to_room"),
     (("watch_wechat_processes", "getwxpids", "微信进程"), "watch_wechat_processes"),
     (("用户管理", "昵称", "微信号", "用户1"), "用户管理"),
     (("copilot", "hook", "钩子", "commit", "提交消息", "提交标题", "审批", "自动接受编辑", ".vscode"), "工作流"),
@@ -44,7 +44,7 @@ FILE_SCOPE_RULES = [
     ((".vscode/settings.json",), "工作区"),
     ((".github/hooks/", ".github/copilot-instructions.md", ".gitignore"), "仓库"),
     (("plugins/enter_room_tip.py",), "enter_room_tip"),
-    (("plugins/invite_to_toom.py",), "invite_to_toom"),
+    (("plugins/invite_to_room.py", "plugins/invite_to_toom.py"), "invite_to_room"),
     (("plugins/watch_wechat_processes.py",), "watch_wechat_processes"),
     (("ai_assistant.py",), "智能插件"),
     (("server.py",), "服务端"),
@@ -342,7 +342,7 @@ def build_summary_from_prompt(prompt: str, files: list[str]) -> str:
 
     if contains_any(prompt_text, ("enter_room_tip", "入群欢迎", "欢迎语", "群欢迎")):
         summary_parts.append("调整入群欢迎配置")
-    if contains_any(prompt_text, ("invite_to_toom", "关键词进群", "进群规则")):
+    if contains_any(prompt_text, ("invite_to_room", "invite_to_toom", "关键词进群", "进群规则")):
         summary_parts.append("调整进群规则配置")
     if contains_any(prompt_text, ("watch_wechat_processes", "getwxpids", "微信进程")):
         summary_parts.append("切换微信进程接口逻辑")

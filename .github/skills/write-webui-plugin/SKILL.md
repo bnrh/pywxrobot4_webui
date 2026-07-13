@@ -1,6 +1,6 @@
 ---
 name: write-webui-plugin
-description: 'Create, scaffold, implement, refactor, or review Python plugins for this wxrobot web UI repository. Use when adding a plugin under plugins/, defining config_schema, handling text/notice/sysmsg events, using context.api/context.state/context.logger, or following existing patterns such as enter_room_tip and invite_to_toom.'
+description: 'Create, scaffold, implement, refactor, or review Python plugins for this wxrobot web UI repository. Use when adding a plugin under plugins/, defining config_schema, handling text/notice/sysmsg events, using context.api/context.state/context.logger, or following existing patterns such as enter_room_tip and invite_to_room.'
 argument-hint: 'What plugin should be created or changed?'
 ---
 

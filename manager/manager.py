@@ -25,6 +25,7 @@ from plugins._global_blacklist import (
     BLACKLIST_PLUGIN_NAME,
     resolve_blacklist_subject_wxid,
 )
+from app_config import LEGACY_PLUGIN_ALIAS_MODULES, resolve_canonical_plugin_module
 
 from .constants import (
     FRIEND_LABEL_CACHE_TTL_SECONDS,
@@ -88,13 +89,20 @@ class PluginManager:
             if not path.is_file() or path.stem == "__init__" or path.stem.startswith("_"):
                 continue
             module_name = f"{PLUGIN_PACKAGE}.{path.stem}"
-            specs[module_name] = PluginSpec(module_name=module_name, path=path, stem=path.stem)
+            normalized_module_name = normalize_plugin_module_name(module_name)
+            if normalized_module_name in LEGACY_PLUGIN_ALIAS_MODULES:
+                continue
+            specs[normalized_module_name] = PluginSpec(
+                module_name=normalized_module_name,
+                path=path,
+                stem=path.stem,
+            )
         return specs
 
     @classmethod
     def _resolve_plugin_spec(cls, module_name: str) -> PluginSpec:
         discovered = cls._discover_plugin_specs()
-        normalized_module_name = normalize_plugin_module_name(module_name)
+        normalized_module_name = resolve_canonical_plugin_module(module_name)
         spec = discovered.get(normalized_module_name)
         if spec is None:
             raise FileNotFoundError(f"未找到 Python 插件文件: {module_name}")

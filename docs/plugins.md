@@ -127,7 +127,7 @@
 | `auto_download_resources` | 视频 / 文件消息 | 按范围自动下载资源 |
 | `accept_user_request` | 好友请求 / 通知 | 自动通过好友并支持标签、欢迎语、免打扰 |
 | `enter_room_tip` | 通知 / 系统消息 | 新成员入群后发送欢迎语或图片 |
-| `invite_to_toom` | 好友请求 / 通知 / 文本 | 根据关键词自动拉群 |
+| `invite_to_room` | 好友请求 / 通知 / 文本 | 根据关键词自动拉群 |
 | `openclaw_channel` | 群文本消息 | 转发消息到外部 Webhook |
 | `room_message_guard` | 群消息 | 按分组消息类型进行群聊禁言治理 |
 | `room_qrcode_guard` | 群图片消息 | 检测群聊图片是否包含二维码，警告后可移出发送成员，依赖 zxing-cpp Python 绑定 |

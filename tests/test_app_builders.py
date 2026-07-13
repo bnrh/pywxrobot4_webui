@@ -1,6 +1,13 @@
 from app_builders import AppBuilders
-from app_config import REMOVED_PLUGIN_MODULES, SECRET_SETTINGS_PLACEHOLDER, sanitize_stored_settings
+from app_config import (
+    INVITE_TO_ROOM_PLUGIN_MODULE,
+    INVITE_TO_TOOM_LEGACY_MODULE,
+    REMOVED_PLUGIN_MODULES,
+    SECRET_SETTINGS_PLACEHOLDER,
+    sanitize_stored_settings,
+)
 from config import PluginServiceSettings
+from manager import PluginManager
 from runtime import PluginRuntime
 
 
@@ -9,6 +16,26 @@ def test_sanitize_stored_settings_removes_legacy_plugin() -> None:
     settings = PluginServiceSettings(plugins=[removed, "plugins.auto_download_image"])
     sanitized = sanitize_stored_settings(settings)
     assert removed not in sanitized.plugins
+
+
+def test_sanitize_stored_settings_migrates_invite_to_toom_alias() -> None:
+    settings = PluginServiceSettings(
+        plugins=[INVITE_TO_TOOM_LEGACY_MODULE, "plugins.auto_download_image"],
+        plugin_settings={
+            INVITE_TO_TOOM_LEGACY_MODULE: {"cooldown_seconds": 120},
+        },
+    )
+    sanitized = sanitize_stored_settings(settings)
+    assert INVITE_TO_TOOM_LEGACY_MODULE not in sanitized.plugins
+    assert INVITE_TO_ROOM_PLUGIN_MODULE in sanitized.plugins
+    assert INVITE_TO_TOOM_LEGACY_MODULE not in sanitized.plugin_settings
+    assert sanitized.plugin_settings[INVITE_TO_ROOM_PLUGIN_MODULE]["cooldown_seconds"] == 120
+
+
+def test_discover_plugin_modules_hides_invite_to_toom_alias() -> None:
+    modules = PluginManager.discover_plugin_modules()
+    assert INVITE_TO_ROOM_PLUGIN_MODULE in modules
+    assert INVITE_TO_TOOM_LEGACY_MODULE not in modules
 
 
 def test_build_plugin_payload_includes_enabled_flag() -> None:

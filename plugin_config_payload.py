@@ -6,8 +6,8 @@ from config import normalize_plugin_module_name
 DOWNLOAD_RECENT_USER_IMAGES_PLUGIN_MODULE = normalize_plugin_module_name("plugins.download_recent_user_images")
 ENTER_ROOM_TIP_PLUGIN_MODULE = normalize_plugin_module_name("plugins.enter_room_tip")
 ROOM_AI_REPLY_PLUGIN_MODULE = normalize_plugin_module_name("plugins.room_ai_reply")
-INVITE_TO_ROOM_PLUGIN_MODULE = normalize_plugin_module_name("plugins.invite_to_toom")
-INVITE_TO_ROOM_ALIAS_MODULE = normalize_plugin_module_name("plugins.invite_to_room")
+INVITE_TO_ROOM_PLUGIN_MODULE = normalize_plugin_module_name("plugins.invite_to_room")
+INVITE_TO_ROOM_ALIAS_MODULE = normalize_plugin_module_name("plugins.invite_to_toom")
 
 def normalize_plugin_config_for_payload(module_name: str, config: Any) -> Any:
     normalized_module_name = normalize_plugin_module_name(module_name)
