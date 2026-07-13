@@ -14,14 +14,34 @@ DIST_DIR = OUT_DIR / f"{APP_NAME}.dist"
 MAIN_DIST = OUT_DIR / "main.dist"
 
 
+def resolve_executable(name: str) -> str:
+    path = shutil.which(name)
+    if path is None:
+        raise FileNotFoundError(name)
+    return path
+
+
 def run(command: list[str], *, cwd: Path | None = None) -> None:
-    print("+", " ".join(command), flush=True)
-    subprocess.run(command, cwd=str(cwd or ROOT), check=True)
+    if not command:
+        raise ValueError("command must not be empty")
+    workdir = str(cwd or ROOT)
+    argv = list(command)
+    # Absolute python/exe paths are used as-is; bare names need PATH resolution.
+    if Path(argv[0]).name == argv[0]:
+        argv[0] = resolve_executable(argv[0])
+    print("+", " ".join(argv), flush=True)
+    # Windows cannot CreateProcess .cmd/.bat without a shell.
+    if sys.platform == "win32" and argv[0].lower().endswith((".cmd", ".bat")):
+        subprocess.run(subprocess.list2cmdline(argv), cwd=workdir, check=True, shell=True)
+        return
+    subprocess.run(argv, cwd=workdir, check=True)
 
 
-def which_or_exit(name: str, hint: str) -> None:
-    if shutil.which(name) is None:
+def which_or_exit(name: str, hint: str) -> str:
+    path = shutil.which(name)
+    if path is None:
         raise SystemExit(f"[ERROR] {name} not found. {hint}")
+    return path
 
 
 def build_frontend() -> None:
