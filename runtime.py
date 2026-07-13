@@ -588,7 +588,7 @@ class PluginRuntime:
         messages = self.message_repository.list_recent(limit)
         if not messages:
             return []
-        return await asyncio.gather(*(self.directory_cache.enrich_message(item) for item in messages))
+        return await self.directory_cache.enrich_messages_batch(messages)
 
     async def invalidate_plugin_targets_cache(self) -> None:
         self._plugin_targets_cache = None

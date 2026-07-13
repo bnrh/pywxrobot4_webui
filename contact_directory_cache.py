@@ -193,25 +193,31 @@ class ContactDirectoryCache:
         normalized_wxid = str(wxid or "").strip()
         if not normalized_wxid:
             return None
-        pid_keys = [self._pid_key(wxpid)]
-        if wxpid not in (None, ""):
-            pid_keys.append(self._pid_key(None))
-
-        for pid_key in pid_keys:
-            profile = self._contacts.get(pid_key, {}).get(normalized_wxid)
-            if profile is not None:
-                return profile
-
+        profile = self._peek_contact(normalized_wxid, wxpid)
+        if profile is not None:
+            return profile
         if self._is_contact_miss_cached(normalized_wxid, wxpid):
             return None
 
         await self.refresh_contacts(wxpid)
+        profile = self._peek_contact(normalized_wxid, wxpid)
+        if profile is not None:
+            return profile
+
+        self._remember_contact_miss(normalized_wxid, wxpid)
+        return None
+
+    def _peek_contact(self, wxid: str, wxpid: int | None) -> ContactProfile | None:
+        normalized_wxid = str(wxid or "").strip()
+        if not normalized_wxid:
+            return None
+        pid_keys = [self._pid_key(wxpid)]
+        if wxpid not in (None, ""):
+            pid_keys.append(self._pid_key(None))
         for pid_key in pid_keys:
             profile = self._contacts.get(pid_key, {}).get(normalized_wxid)
             if profile is not None:
                 return profile
-
-        self._remember_contact_miss(normalized_wxid, wxpid)
         return None
 
     def _is_room_member_cache_valid(self, cache_key: tuple[int, str]) -> bool:
@@ -258,33 +264,67 @@ class ContactDirectoryCache:
         await self.refresh_room_members(roomid, wxpid)
         return self._room_members.get(cache_key, {}).get(wxid)
 
-    async def enrich_message(self, message: dict[str, Any]) -> dict[str, Any]:
+    def _peek_room_member(self, roomid: str, wxid: str, wxpid: int | None) -> RoomMemberProfile | None:
+        normalized_roomid = str(roomid or "").strip()
+        normalized_wxid = str(wxid or "").strip()
+        if not normalized_roomid or not normalized_wxid:
+            return None
+        cache_key = (self._pid_key(wxpid), normalized_roomid)
+        if not self._is_room_member_cache_valid(cache_key):
+            return None
+        return self._room_members.get(cache_key, {}).get(normalized_wxid)
+
+    async def _prefetch_contacts_for_lookups(self, lookups: set[tuple[int | None, str]]) -> None:
+        """按 wxpid 合并缺失联系人，每个进程最多刷新一次。"""
+        missing_by_wxpid: dict[int | None, set[str]] = {}
+        for wxpid, wxid in lookups:
+            if self._peek_contact(wxid, wxpid) is not None:
+                continue
+            if self._is_contact_miss_cached(wxid, wxpid):
+                continue
+            missing_by_wxpid.setdefault(wxpid, set()).add(wxid)
+
+        if not missing_by_wxpid:
+            return
+
+        await asyncio.gather(
+            *(self.refresh_contacts(wxpid) for wxpid in missing_by_wxpid),
+            return_exceptions=True,
+        )
+        for wxpid, wxids in missing_by_wxpid.items():
+            for wxid in wxids:
+                if self._peek_contact(wxid, wxpid) is None:
+                    self._remember_contact_miss(wxid, wxpid)
+
+    async def _prefetch_room_members_for_lookups(self, lookups: set[tuple[int | None, str]]) -> None:
+        """按 (wxpid, roomid) 去重后并行预热群成员缓存。"""
+        rooms_to_refresh: list[tuple[str, int | None]] = []
+        for wxpid, roomid in lookups:
+            cache_key = (self._pid_key(wxpid), roomid)
+            if self._is_room_member_cache_valid(cache_key):
+                continue
+            rooms_to_refresh.append((roomid, wxpid))
+
+        if not rooms_to_refresh:
+            return
+
+        await asyncio.gather(
+            *(self.refresh_room_members(roomid, wxpid) for roomid, wxpid in rooms_to_refresh),
+            return_exceptions=True,
+        )
+
+    def _build_enriched_message(
+        self,
+        message: dict[str, Any],
+        *,
+        conversation_profile: ContactProfile | None,
+        sender_profile: ContactProfile | None,
+        room_member_profile: RoomMemberProfile | None,
+    ) -> dict[str, Any]:
         enriched = dict(message)
-        wxpid = enriched.get("wxpid")
         conversation_wxid = str(enriched.get("conversation_wxid") or "").strip()
         sender_wxid = str(enriched.get("sender_wxid") or "").strip()
         is_group_message = bool(enriched.get("is_group_message"))
-
-        conversation_task = self.get_contact(conversation_wxid, wxpid) if conversation_wxid else None
-        sender_task = (
-            None
-            if is_group_message
-            else (self.get_contact(sender_wxid, wxpid) if sender_wxid else None)
-        )
-        room_member_task = (
-            self.get_room_member(conversation_wxid, sender_wxid, wxpid)
-            if is_group_message and conversation_wxid and sender_wxid
-            else None
-        )
-        pending_tasks = [task for task in (conversation_task, sender_task, room_member_task) if task is not None]
-        if pending_tasks:
-            resolved = await asyncio.gather(*pending_tasks)
-        else:
-            resolved = []
-        resolved_iter = iter(resolved)
-        conversation_profile = next(resolved_iter) if conversation_task is not None else None
-        sender_profile = next(resolved_iter) if sender_task is not None else None
-        room_member_profile = next(resolved_iter) if room_member_task is not None else None
 
         conversation_display_name = (
             conversation_profile.display_name if conversation_profile is not None else conversation_wxid or "未知会话"
@@ -293,7 +333,6 @@ class ContactDirectoryCache:
         room_sender_display_name = (
             room_member_profile.display_name if room_member_profile is not None else sender_wxid or "未知发送者"
         )
-        avatar_url = ""
         if is_group_message:
             avatar_url = conversation_profile.avatar_url if conversation_profile is not None else ""
         else:
@@ -336,3 +375,59 @@ class ContactDirectoryCache:
             }
         )
         return enriched
+
+    async def enrich_messages_batch(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """批量 enrichment：先收集 wxid/room 再预取，避免每条消息各自刷新 API。"""
+        if not messages:
+            return []
+
+        contact_lookups: set[tuple[int | None, str]] = set()
+        room_lookups: set[tuple[int | None, str]] = set()
+        for message in messages:
+            wxpid = message.get("wxpid")
+            conversation_wxid = str(message.get("conversation_wxid") or "").strip()
+            sender_wxid = str(message.get("sender_wxid") or "").strip()
+            is_group_message = bool(message.get("is_group_message"))
+            if conversation_wxid:
+                contact_lookups.add((wxpid, conversation_wxid))
+            if sender_wxid and not is_group_message:
+                contact_lookups.add((wxpid, sender_wxid))
+            if is_group_message and conversation_wxid:
+                room_lookups.add((wxpid, conversation_wxid))
+
+        await asyncio.gather(
+            self._prefetch_contacts_for_lookups(contact_lookups),
+            self._prefetch_room_members_for_lookups(room_lookups),
+        )
+
+        enriched_messages: list[dict[str, Any]] = []
+        for message in messages:
+            wxpid = message.get("wxpid")
+            conversation_wxid = str(message.get("conversation_wxid") or "").strip()
+            sender_wxid = str(message.get("sender_wxid") or "").strip()
+            is_group_message = bool(message.get("is_group_message"))
+
+            conversation_profile = self._peek_contact(conversation_wxid, wxpid) if conversation_wxid else None
+            sender_profile = (
+                None
+                if is_group_message
+                else (self._peek_contact(sender_wxid, wxpid) if sender_wxid else None)
+            )
+            room_member_profile = (
+                self._peek_room_member(conversation_wxid, sender_wxid, wxpid)
+                if is_group_message and conversation_wxid and sender_wxid
+                else None
+            )
+            enriched_messages.append(
+                self._build_enriched_message(
+                    message,
+                    conversation_profile=conversation_profile,
+                    sender_profile=sender_profile,
+                    room_member_profile=room_member_profile,
+                )
+            )
+        return enriched_messages
+
+    async def enrich_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        enriched = await self.enrich_messages_batch([message])
+        return enriched[0]
