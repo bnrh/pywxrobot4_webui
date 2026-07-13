@@ -8,12 +8,13 @@ import {
 } from "./plugin-config-form.js";
 import { isDirectExecutePlugin } from "./plugin-helpers.js";
 import { normalizeInlineText } from "./dom-utils.js";
+import { bindOnce } from "./dom-bind.js";
 
 export function registerPluginsEvents(actions) {
     const { elements } = actions;
     const state = () => actions.getState();
 
-elements.refreshPluginsButton.addEventListener("click", async () => {
+bindOnce(elements.refreshPluginsButton, "plugins.refreshPlugins", "click", async () => {
     try {
         actions.setStatus("正在刷新消息插件...");
         await actions.loadPlugins();
@@ -23,7 +24,7 @@ elements.refreshPluginsButton.addEventListener("click", async () => {
     }
 });
 
-elements.refreshFeaturePluginsButton.addEventListener("click", async () => {
+bindOnce(elements.refreshFeaturePluginsButton, "plugins.refreshFeatures", "click", async () => {
     try {
         actions.setStatus("正在刷新功能插件...");
         await actions.loadPlugins();
@@ -79,15 +80,15 @@ async function handlePluginGridAction(event) {
     }
 }
 
-[elements.pluginGrid, elements.featurePluginGrid].forEach((grid) => {
-    grid.addEventListener("click", (event) => {
+[elements.pluginGrid, elements.featurePluginGrid].forEach((grid, index) => {
+    bindOnce(grid, `plugins.gridClick.${index}`, "click", (event) => {
         handlePluginGridAction(event).catch((error) => {
             actions.setStatus(`插件操作失败：${error.message}`, "bad");
         });
     });
 });
 
-elements.pluginLogList.addEventListener("click", (event) => {
+bindOnce(elements.pluginLogList, "plugins.logList", "click", (event) => {
     const button = event.target.closest("button[data-plugin-log-id]");
     if (!button) {
         return;
@@ -96,7 +97,7 @@ elements.pluginLogList.addEventListener("click", (event) => {
     actions.renderPluginLogs();
 });
 
-elements.pluginLogFilter.addEventListener("change", async () => {
+bindOnce(elements.pluginLogFilter, "plugins.logFilter", "change", async () => {
     try {
         state().selectedPluginLogModule = elements.pluginLogFilter.value;
         state().selectedPluginLogId = null;
@@ -108,7 +109,7 @@ elements.pluginLogFilter.addEventListener("change", async () => {
     }
 });
 
-elements.pluginLogLevelFilter.addEventListener("change", async () => {
+bindOnce(elements.pluginLogLevelFilter, "plugins.logLevel", "change", async () => {
     try {
         state().selectedPluginLogLevel = elements.pluginLogLevelFilter.value;
         state().selectedPluginLogId = null;
@@ -120,19 +121,19 @@ elements.pluginLogLevelFilter.addEventListener("change", async () => {
     }
 });
 
-elements.pluginLogKeywordFilter.addEventListener("input", () => {
+bindOnce(elements.pluginLogKeywordFilter, "plugins.logKeywordInput", "input", () => {
     state().selectedPluginLogKeyword = elements.pluginLogKeywordFilter.value.trim();
     state().selectedPluginLogId = null;
     actions.schedulePluginLogKeywordRefresh();
 });
 
-elements.pluginLogKeywordFilter.addEventListener("search", () => {
+bindOnce(elements.pluginLogKeywordFilter, "plugins.logKeywordSearch", "search", () => {
     state().selectedPluginLogKeyword = elements.pluginLogKeywordFilter.value.trim();
     state().selectedPluginLogId = null;
     actions.schedulePluginLogKeywordRefresh();
 });
 
-elements.refreshPluginLogsButton.addEventListener("click", async () => {
+bindOnce(elements.refreshPluginLogsButton, "plugins.refreshLogs", "click", async () => {
     try {
         actions.setStatus("正在刷新插件日志...");
         await actions.loadPluginLogs(state().selectedPluginLogModule, state().selectedPluginLogLevel, state().selectedPluginLogKeyword);
@@ -142,24 +143,24 @@ elements.refreshPluginLogsButton.addEventListener("click", async () => {
     }
 });
 
-elements.closePluginConfigButton.addEventListener("click", actions.closePluginConfigModal);
-elements.cancelPluginConfigButton.addEventListener("click", actions.closePluginConfigModal);
-elements.closePluginExecuteButton.addEventListener("click", actions.closePluginExecuteModal);
-elements.cancelPluginExecuteButton.addEventListener("click", actions.closePluginExecuteModal);
+bindOnce(elements.closePluginConfigButton, "plugins.closeConfig", "click", actions.closePluginConfigModal);
+bindOnce(elements.cancelPluginConfigButton, "plugins.cancelConfig", "click", actions.closePluginConfigModal);
+bindOnce(elements.closePluginExecuteButton, "plugins.closeExecute", "click", actions.closePluginExecuteModal);
+bindOnce(elements.cancelPluginExecuteButton, "plugins.cancelExecute", "click", actions.closePluginExecuteModal);
 
-elements.pluginConfigModal.addEventListener("click", (event) => {
+bindOnce(elements.pluginConfigModal, "plugins.configBackdrop", "click", (event) => {
     if (event.target === elements.pluginConfigModal) {
         actions.closePluginConfigModal();
     }
 });
 
-elements.pluginExecuteModal.addEventListener("click", (event) => {
+bindOnce(elements.pluginExecuteModal, "plugins.executeBackdrop", "click", (event) => {
     if (event.target === elements.pluginExecuteModal) {
         actions.closePluginExecuteModal();
     }
 });
 
-elements.pluginConfigForm.addEventListener("click", (event) => {
+bindOnce(elements.pluginConfigForm, "plugins.configFormClick", "click", (event) => {
     if (!state().pluginConfigModule) {
         return;
     }
@@ -173,7 +174,7 @@ elements.pluginConfigForm.addEventListener("click", (event) => {
     }
 });
 
-elements.savePluginConfigButton.addEventListener("click", async () => {
+bindOnce(elements.savePluginConfigButton, "plugins.saveConfig", "click", async () => {
     if (!state().pluginConfigModule) {
         return;
     }
@@ -210,7 +211,7 @@ elements.savePluginConfigButton.addEventListener("click", async () => {
     }
 });
 
-elements.executePluginButton.addEventListener("click", async () => {
+bindOnce(elements.executePluginButton, "plugins.execute", "click", async () => {
     if (!state().pluginExecuteModule) {
         return;
     }

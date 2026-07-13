@@ -1,10 +1,12 @@
 /** 智能插件事件绑定。 */
 
+import { bindOnce } from "./dom-bind.js";
+
 export function registerAiAssistantEvents(actions) {
     const { elements } = actions;
     const state = () => actions.getState();
 
-elements.aiAssistantSettingsForm.addEventListener("submit", async (event) => {
+bindOnce(elements.aiAssistantSettingsForm, "ai.settingsSubmit", "submit", async (event) => {
     event.preventDefault();
     if (!elements.aiAssistantSettingsForm.reportValidity()) {
         actions.setStatus("请先修正智能插件配置中的输入项", "bad");
@@ -22,7 +24,7 @@ elements.aiAssistantSettingsForm.addEventListener("submit", async (event) => {
     }
 });
 
-elements.aiAssistantSettingsForm.addEventListener("click", (event) => {
+bindOnce(elements.aiAssistantSettingsForm, "ai.settingsClick", "click", (event) => {
     if (!(event.target instanceof Element)) {
         return;
     }
@@ -56,7 +58,7 @@ elements.aiAssistantSettingsForm.addEventListener("click", (event) => {
     }
 });
 
-elements.aiAssistantSettingsForm.addEventListener("input", (event) => {
+bindOnce(elements.aiAssistantSettingsForm, "ai.settingsInput", "input", (event) => {
     if (!(event.target instanceof Element)) {
         return;
     }
@@ -71,7 +73,7 @@ elements.aiAssistantSettingsForm.addEventListener("input", (event) => {
     }
 });
 
-elements.aiAssistantSettingsForm.addEventListener("change", (event) => {
+bindOnce(elements.aiAssistantSettingsForm, "ai.settingsChange", "change", (event) => {
     if (!(event.target instanceof Element)) {
         return;
     }
@@ -88,7 +90,7 @@ elements.aiAssistantSettingsForm.addEventListener("change", (event) => {
     }
 });
 
-elements.refreshAiAssistantButton.addEventListener("click", async () => {
+bindOnce(elements.refreshAiAssistantButton, "ai.refresh", "click", async () => {
     try {
         actions.setStatus("正在刷新智能插件配置...");
         await actions.loadAiAssistant();
@@ -98,7 +100,7 @@ elements.refreshAiAssistantButton.addEventListener("click", async () => {
     }
 });
 
-elements.newAiAssistantConversationButton?.addEventListener("click", async () => {
+bindOnce(elements.newAiAssistantConversationButton, "ai.newConversation", "click", async () => {
     try {
         actions.setStatus("正在新建对话...");
         await actions.createAiAssistantConversation();
@@ -109,11 +111,11 @@ elements.newAiAssistantConversationButton?.addEventListener("click", async () =>
     }
 });
 
-elements.openAiAssistantConversationSwitcherButton?.addEventListener("click", () => {
+bindOnce(elements.openAiAssistantConversationSwitcherButton, "ai.openSwitcher", "click", () => {
     actions.openAiAssistantConversationModal();
 });
 
-elements.clearAiAssistantConversationButton.addEventListener("click", async () => {
+bindOnce(elements.clearAiAssistantConversationButton, "ai.clearConversation", "click", async () => {
     try {
         actions.setStatus("正在清空当前对话...");
         await actions.clearAiAssistantConversation();
@@ -123,7 +125,7 @@ elements.clearAiAssistantConversationButton.addEventListener("click", async () =
     }
 });
 
-elements.stopAiAssistantChatButton?.addEventListener("click", async () => {
+bindOnce(elements.stopAiAssistantChatButton, "ai.stopChat", "click", async () => {
     try {
         actions.setStatus("正在停止智能插件对话...");
         await actions.stopAiAssistantChatJob();
@@ -135,7 +137,7 @@ elements.stopAiAssistantChatButton?.addEventListener("click", async () => {
     }
 });
 
-elements.aiAssistantProviderSelect?.addEventListener("change", (event) => {
+bindOnce(elements.aiAssistantProviderSelect, "ai.providerChange", "change", (event) => {
     if (!(event.target instanceof HTMLSelectElement)) {
         return;
     }
@@ -143,7 +145,7 @@ elements.aiAssistantProviderSelect?.addEventListener("change", (event) => {
     actions.renderAiAssistant();
 });
 
-elements.aiAssistantModelSelect?.addEventListener("change", (event) => {
+bindOnce(elements.aiAssistantModelSelect, "ai.modelChange", "change", (event) => {
     if (!(event.target instanceof HTMLSelectElement)) {
         return;
     }
@@ -153,7 +155,7 @@ elements.aiAssistantModelSelect?.addEventListener("change", (event) => {
     actions.renderAiAssistant();
 });
 
-elements.aiAssistantPromptPluginSelect?.addEventListener("change", (event) => {
+bindOnce(elements.aiAssistantPromptPluginSelect, "ai.promptChange", "change", (event) => {
     if (!(event.target instanceof HTMLSelectElement)) {
         return;
     }
@@ -161,40 +163,40 @@ elements.aiAssistantPromptPluginSelect?.addEventListener("change", (event) => {
     actions.renderAiAssistant();
 });
 
-elements.toggleAiAssistantConfigButton?.addEventListener("click", () => {
+bindOnce(elements.toggleAiAssistantConfigButton, "ai.toggleConfig", "click", () => {
     actions.openAiAssistantConfigModal();
 });
 
-elements.toggleAiAssistantToolsButton?.addEventListener("click", () => {
+bindOnce(elements.toggleAiAssistantToolsButton, "ai.toggleTools", "click", () => {
     actions.openAiAssistantToolsModal();
 });
 
-elements.closeAiAssistantConfigButton?.addEventListener("click", actions.closeAiAssistantConfigModal);
-elements.cancelAiAssistantConfigButton?.addEventListener("click", actions.closeAiAssistantConfigModal);
-elements.closeAiAssistantToolsButton?.addEventListener("click", actions.closeAiAssistantToolsModal);
-elements.dismissAiAssistantToolsButton?.addEventListener("click", actions.closeAiAssistantToolsModal);
-elements.closeAiAssistantConversationModalButton?.addEventListener("click", actions.closeAiAssistantConversationModal);
-elements.dismissAiAssistantConversationModalButton?.addEventListener("click", actions.closeAiAssistantConversationModal);
+bindOnce(elements.closeAiAssistantConfigButton, "ai.closeConfig", "click", actions.closeAiAssistantConfigModal);
+bindOnce(elements.cancelAiAssistantConfigButton, "ai.cancelConfig", "click", actions.closeAiAssistantConfigModal);
+bindOnce(elements.closeAiAssistantToolsButton, "ai.closeTools", "click", actions.closeAiAssistantToolsModal);
+bindOnce(elements.dismissAiAssistantToolsButton, "ai.dismissTools", "click", actions.closeAiAssistantToolsModal);
+bindOnce(elements.closeAiAssistantConversationModalButton, "ai.closeConversationModal", "click", actions.closeAiAssistantConversationModal);
+bindOnce(elements.dismissAiAssistantConversationModalButton, "ai.dismissConversationModal", "click", actions.closeAiAssistantConversationModal);
 
-elements.aiAssistantConfigModal?.addEventListener("click", (event) => {
+bindOnce(elements.aiAssistantConfigModal, "ai.configBackdrop", "click", (event) => {
     if (event.target === elements.aiAssistantConfigModal) {
         actions.closeAiAssistantConfigModal();
     }
 });
 
-elements.aiAssistantToolsModal?.addEventListener("click", (event) => {
+bindOnce(elements.aiAssistantToolsModal, "ai.toolsBackdrop", "click", (event) => {
     if (event.target === elements.aiAssistantToolsModal) {
         actions.closeAiAssistantToolsModal();
     }
 });
 
-elements.aiAssistantConversationModal?.addEventListener("click", (event) => {
+bindOnce(elements.aiAssistantConversationModal, "ai.conversationBackdrop", "click", (event) => {
     if (event.target === elements.aiAssistantConversationModal) {
         actions.closeAiAssistantConversationModal();
     }
 });
 
-elements.aiAssistantConversationList?.addEventListener("click", async (event) => {
+bindOnce(elements.aiAssistantConversationList, "ai.conversationList", "click", async (event) => {
     const target = event.target.closest("[data-ai-conversation-id]");
     if (!target) {
         return;
@@ -209,7 +211,7 @@ elements.aiAssistantConversationList?.addEventListener("click", async (event) =>
     }
 });
 
-elements.aiAssistantPromptForm.addEventListener("submit", async (event) => {
+bindOnce(elements.aiAssistantPromptForm, "ai.promptSubmit", "submit", async (event) => {
     event.preventDefault();
     if (state().aiRequestInFlight) {
         return;

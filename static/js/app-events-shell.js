@@ -1,15 +1,18 @@
 /** Shell：导航、刷新、全局 Escape / 搜索下拉关闭。 */
 
 import { closeSearchableSelect } from "./config-search.js";
+import { bindOnce } from "./dom-bind.js";
 
 export function registerShellEvents(actions) {
     const { elements } = actions;
 
 elements.navTabs.forEach((button) => {
-    button.addEventListener("click", () => actions.switchTab(button.dataset.tab));
+    bindOnce(button, `shell.nav.${button.dataset.tab || ""}`, "click", () => {
+        actions.switchTab(button.dataset.tab);
+    });
 });
 
-elements.tabRefreshButton.addEventListener("click", async () => {
+bindOnce(elements.tabRefreshButton, "shell.refresh", "click", async () => {
     try {
         actions.setStatus("正在刷新当前视图...");
         await actions.loadOverview();
@@ -20,7 +23,7 @@ elements.tabRefreshButton.addEventListener("click", async () => {
     }
 });
 
-elements.reloadConfigButton.addEventListener("click", async () => {
+bindOnce(elements.reloadConfigButton, "shell.reload", "click", async () => {
     try {
         await actions.reloadFromConfig();
     } catch (error) {
@@ -29,7 +32,7 @@ elements.reloadConfigButton.addEventListener("click", async () => {
 });
 
 
-document.addEventListener("keydown", (event) => {
+bindOnce(document, "shell.escape", "keydown", (event) => {
     if (event.key !== "Escape") {
         return;
     }
@@ -38,7 +41,7 @@ document.addEventListener("keydown", (event) => {
         closeSearchableSelect(openSearchableSelect, true);
         return;
     }
-    if (elements.pluginExecuteModal.classList.contains("is-visible")) {
+    if (elements.pluginExecuteModal?.classList.contains("is-visible")) {
         actions.closePluginExecuteModal();
         return;
     }
@@ -54,12 +57,12 @@ document.addEventListener("keydown", (event) => {
         actions.closeAiAssistantConfigModal();
         return;
     }
-    if (elements.pluginConfigModal.classList.contains("is-visible")) {
+    if (elements.pluginConfigModal?.classList.contains("is-visible")) {
         actions.closePluginConfigModal();
     }
 });
 
-document.addEventListener("click", (event) => {
+bindOnce(document, "shell.searchableOutside", "click", (event) => {
     document.querySelectorAll(".config-searchable-select.is-open").forEach((container) => {
         if (container.contains(event.target)) {
             return;

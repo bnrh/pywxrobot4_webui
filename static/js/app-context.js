@@ -48,6 +48,8 @@ import {
     normalizeAiAssistantJobStatus,
 } from "./ai-assistant-data.js";
 import { createAppState, queryAppElements } from "./app-state.js";
+import { registerAppEvents } from "./app-events.js";
+import { ensurePanelLoaded } from "./panel-loader.js";
 
 export function createAppContext() {
     const state = createAppState();
@@ -63,8 +65,12 @@ export function createAppContext() {
     let aiAssistantUi;
     let tabLoaders;
     let pluginModals;
+    let appActions;
 
     function setStatus(text, type = "") {
+        if (!elements.statusPill) {
+            return;
+        }
         elements.statusPill.textContent = text;
         elements.statusPill.className = `status-pill ${type}`.trim();
     }
@@ -263,10 +269,15 @@ export function createAppContext() {
 
     function switchTab(tabName) {
         state.activeTab = tabName;
-        updateHeaderForTab(tabName);
-        tabLoaders.refreshCurrentTab().catch((error) => {
-            setStatus(`加载失败：${error.message}`, "bad");
-        });
+        ensurePanelLoaded(tabName, elements)
+            .then(() => {
+                registerAppEvents(appActions);
+                updateHeaderForTab(tabName);
+                return tabLoaders.refreshCurrentTab();
+            })
+            .catch((error) => {
+                setStatus(`加载失败：${error.message}`, "bad");
+            });
     }
 
     aiAssistantCtrl = createAiAssistantController(() => state, {
@@ -317,7 +328,7 @@ export function createAppContext() {
         isDirectExecutePlugin,
     });
 
-    const appActions = {
+    appActions = {
         getState: () => state,
         elements,
         api,

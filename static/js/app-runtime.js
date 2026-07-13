@@ -1,5 +1,7 @@
 /** 应用启动、定时刷新与运行时事件订阅。 */
 
+import { registerAppEvents } from "./app-events.js";
+import { ensurePanelLoaded, ensureShellFragments } from "./panel-loader.js";
 import {
     connectRuntimeEventStream,
     isRuntimeStreamConnected,
@@ -29,6 +31,8 @@ export async function bootstrapApp(actions) {
         actions.setStatus("正在初始化控制台...");
         const activeTab = actions.getState().activeTab;
         actions.updateHeaderForTab(activeTab);
+        await ensureShellFragments(actions.elements, activeTab);
+        registerAppEvents(actions);
         // 消息类型标签体积小，且消息 Tab 懒加载时需要；与概览并行即可。
         await Promise.all([
             actions.syncMessageTypeLabels(),
@@ -142,3 +146,5 @@ export function startAppRuntime(actions) {
         refreshSecondaryTabs(actions);
     });
 }
+
+export { ensurePanelLoaded };
