@@ -37,6 +37,7 @@ jobs:
           node tests/js/test_dom_utils_normalize.mjs
           node tests/js/test_runtime_polling.mjs
           node tests/js/test_dom_builder.mjs
+          node tests/js/test_bootstrap_lazy_load.mjs
 
   docker:
     runs-on: ubuntu-latest

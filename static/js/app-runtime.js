@@ -13,21 +13,30 @@ function isPageVisible() {
     return document.visibilityState === "visible";
 }
 
+/** 首屏只需概览；非仪表盘时再懒加载当前 Tab。 */
+export function shouldLoadActiveTabOnBootstrap(activeTab) {
+    const tab = String(activeTab || "").trim();
+    return Boolean(tab) && tab !== "dashboard";
+}
+
+function shouldRefreshMessages(actions) {
+    const state = actions.getState();
+    return state.activeTab === "messages" || (Array.isArray(state.messages) && state.messages.length > 0);
+}
+
 export async function bootstrapApp(actions) {
     try {
         actions.setStatus("正在初始化控制台...");
-        actions.updateHeaderForTab(actions.getState().activeTab);
-        await actions.syncMessageTypeLabels();
-        await actions.loadOverview();
+        const activeTab = actions.getState().activeTab;
+        actions.updateHeaderForTab(activeTab);
+        // 消息类型标签体积小，且消息 Tab 懒加载时需要；与概览并行即可。
         await Promise.all([
-            actions.loadMessages(),
-            actions.loadUsers(),
-            actions.loadPlugins(),
-            actions.loadPluginLogs(),
-            actions.loadSettings(),
-            actions.loadAiAssistant(),
-            actions.loadLogs(),
+            actions.syncMessageTypeLabels(),
+            actions.loadOverview(),
         ]);
+        if (shouldLoadActiveTabOnBootstrap(activeTab)) {
+            await actions.refreshCurrentTab();
+        }
         actions.setStatus("控制台已就绪", "good");
     } catch (error) {
         actions.setStatus(`初始化失败：${error.message}`, "bad");
@@ -61,7 +70,9 @@ export function startAppRuntime(actions) {
                 if (!isPageVisible()) {
                     return;
                 }
-                actions.refreshMessagesByPoll().catch(() => {});
+                if (shouldRefreshMessages(actions)) {
+                    actions.refreshMessagesByPoll().catch(() => {});
+                }
                 actions.loadOverview().catch(() => {});
                 return;
             }
@@ -73,7 +84,9 @@ export function startAppRuntime(actions) {
                 refreshOverviewFromRuntimeEvent(actions, payload);
                 return;
             }
-            actions.refreshMessagesByPoll().catch(() => {});
+            if (shouldRefreshMessages(actions)) {
+                actions.refreshMessagesByPoll().catch(() => {});
+            }
             refreshOverviewFromRuntimeEvent(actions, payload);
         },
     });
@@ -106,6 +119,9 @@ export function startAppRuntime(actions) {
             // SSE 正常时消息列表只靠事件刷新，跳过轮询。
             return;
         }
+        if (!shouldRefreshMessages(actions)) {
+            return;
+        }
         if (!shouldPollMessages()) {
             return;
         }
@@ -120,7 +136,9 @@ export function startAppRuntime(actions) {
         actions.loadOverview().catch((error) => {
             actions.setStatus(`概览刷新失败：${error.message}`, "bad");
         });
-        actions.refreshMessagesByPoll();
+        if (shouldRefreshMessages(actions)) {
+            actions.refreshMessagesByPoll();
+        }
         refreshSecondaryTabs(actions);
     });
 }
