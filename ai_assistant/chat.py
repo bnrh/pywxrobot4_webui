@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-import time
 from typing import Any
-from urllib import error, request
 
 from client import WxRobotApiClient
 
@@ -298,8 +295,7 @@ async def run_ai_assistant(
 
             headers = _build_provider_request_headers(selected_provider, str(selected_provider_config["api_key"]))
 
-            response_payload = await asyncio.to_thread(
-                _request_provider_json,
+            response_payload = await _request_provider_json(
                 _build_provider_url(
                     _get_provider_runtime_base_url(selected_provider, selected_provider_config),
                     provider_meta["chat_path"],

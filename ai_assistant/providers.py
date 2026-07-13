@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from typing import Any
-from urllib import error, request
+
+from utils.http_client import encode_json_body, request as http_request
 
 from .openai_messages import (
     _normalize_message_content,
@@ -166,7 +166,7 @@ def _build_provider_url(base_url: str, chat_path: str) -> str:
     return f"{base_url.rstrip('/')}{normalized_path}"
 
 
-def _request_provider_json(
+async def _request_provider_json(
     url: str,
     payload: dict[str, Any],
     headers: dict[str, str],
@@ -177,34 +177,39 @@ def _request_provider_json(
     request_timeout = _normalize_provider_request_timeout(timeout)
     max_retries = _clamp_int(retry_count, DEFAULT_PROVIDER_RETRY_COUNT, 0, 3)
     retry_delay = _clamp_float(retry_delay_seconds, DEFAULT_PROVIDER_RETRY_DELAY_SECONDS, 0.0, 10.0)
-    request_body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request_body = encode_json_body(payload)
+    response_text = ""
     for attempt in range(max_retries + 1):
-        req = request.Request(url, data=request_body, headers=headers, method="POST")
         try:
-            with request.urlopen(req, timeout=request_timeout) as response:
-                response_text = response.read().decode("utf-8")
-            break
-        except error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="ignore")
-            if exc.code in RETRYABLE_PROVIDER_STATUS_CODES and attempt < max_retries:
-                if retry_delay > 0:
-                    time.sleep(retry_delay)
-                continue
-            raise RuntimeError(f"AI 接口调用失败，HTTP {exc.code}: {detail}") from exc
-        except error.URLError as exc:
-            if _is_timeout_reason(exc.reason):
-                if attempt < max_retries:
+            response = await http_request(
+                "POST",
+                url,
+                headers=headers,
+                content=request_body,
+                timeout=request_timeout,
+            )
+            response_text = response.text
+            if response.status_code >= 400:
+                if response.status_code in RETRYABLE_PROVIDER_STATUS_CODES and attempt < max_retries:
                     if retry_delay > 0:
-                        time.sleep(retry_delay)
+                        await asyncio.sleep(retry_delay)
                     continue
-                raise RuntimeError(f"AI 接口调用超时({request_timeout:.1f}s)") from exc
-            raise RuntimeError(f"AI 接口调用失败: {exc.reason}") from exc
+                raise RuntimeError(f"AI 接口调用失败，HTTP {response.status_code}: {response_text}")
+            break
         except TimeoutError as exc:
             if attempt < max_retries:
                 if retry_delay > 0:
-                    time.sleep(retry_delay)
+                    await asyncio.sleep(retry_delay)
                 continue
             raise RuntimeError(f"AI 接口调用超时({request_timeout:.1f}s)") from exc
+        except RuntimeError as exc:
+            if _is_timeout_reason(exc) and attempt < max_retries:
+                if retry_delay > 0:
+                    await asyncio.sleep(retry_delay)
+                continue
+            if _is_timeout_reason(exc):
+                raise RuntimeError(f"AI 接口调用超时({request_timeout:.1f}s)") from exc
+            raise
 
     try:
         payload_json = json.loads(response_text)
@@ -248,7 +253,7 @@ def _parse_provider_model_names(payload: Any) -> list[str]:
     return model_names
 
 
-def _request_provider_models(
+async def _request_provider_models(
     base_url: str,
     api_key: str,
     headers: dict[str, str] | None = None,
@@ -256,14 +261,16 @@ def _request_provider_models(
     timeout: float = 30.0,
 ) -> list[str]:
     url = _build_provider_url(base_url, models_path)
-    req = request.Request(
-        url,
-        headers=dict(headers or _build_provider_request_headers("openai", api_key)),
-        method="GET",
-    )
     try:
-        with request.urlopen(req, timeout=timeout) as response:
-            response_text = response.read().decode("utf-8")
+        response = await http_request(
+            "GET",
+            url,
+            headers=dict(headers or _build_provider_request_headers("openai", api_key)),
+            timeout=timeout,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
+        response_text = response.text
     except Exception as exc:
         raise RuntimeError(f"读取模型列表失败: {exc}") from exc
     try:
@@ -283,8 +290,7 @@ async def _load_provider_config_model_options(provider_key: str, provider_config
     error_message = ""
     if provider_config.get("api_key"):
         try:
-            model_names = await asyncio.to_thread(
-                _request_provider_models,
+            model_names = await _request_provider_models(
                 _get_provider_runtime_base_url(provider_key, provider_config),
                 str(provider_config.get("api_key") or ""),
                 _build_provider_request_headers(provider_key, str(provider_config.get("api_key") or "")),
@@ -362,8 +368,7 @@ async def load_openai_compatible_model_options(
     error_message = ""
     if normalized_api_key:
         try:
-            loaded_model_names = await asyncio.to_thread(
-                _request_provider_models,
+            loaded_model_names = await _request_provider_models(
                 normalized_base_url,
                 normalized_api_key,
                 _build_provider_request_headers("openai", normalized_api_key),
@@ -413,8 +418,7 @@ async def run_openai_compatible_chat_completion(
     if temperature is not None:
         request_payload["temperature"] = _clamp_float(temperature, 0.2, 0.0, 1.5)
 
-    response_payload = await asyncio.to_thread(
-        _request_provider_json,
+    response_payload = await _request_provider_json(
         _build_provider_url(normalized_base_url, PROVIDER_CATALOG["openai"]["chat_path"]),
         request_payload,
         _build_provider_request_headers("openai", normalized_api_key),

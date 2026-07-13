@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
-from urllib import error, request
 
 from client import WxRobotApiClient
 
+from utils.http_client import encode_json_body, request as http_request
 from utils.normalize import is_truthy
 
 MCP_PROTOCOL_VERSION = "2025-03-26"
@@ -185,7 +184,7 @@ class _McpHttpToolExecutor:
             return request_timeout
         return max(request_timeout, operation_timeout + 2.0)
 
-    def _request_sync(
+    async def _request(
         self,
         method: str,
         payload: dict[str, Any] | None = None,
@@ -202,25 +201,29 @@ class _McpHttpToolExecutor:
         request_body = None
         if payload is not None:
             headers["Content-Type"] = "application/json"
-            request_body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = request.Request(self._endpoint, data=request_body, headers=headers, method=method)
+            request_body = encode_json_body(payload)
         try:
-            with request.urlopen(req, timeout=effective_timeout) as response:
-                response_text = response.read().decode("utf-8")
-                response_content_type = response.headers.get("Content-Type", "")
-                response_session_id = response.headers.get("Mcp-Session-Id") or response.headers.get("mcp-session-id")
+            response = await http_request(
+                method,
+                self._endpoint,
+                headers=headers,
+                content=request_body,
+                timeout=effective_timeout,
+            )
         except TimeoutError as exc:
             raise RuntimeError(f"调用 MCP {self._endpoint} 超时({effective_timeout:.1f}s)") from exc
-        except error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="ignore")
-            if exc.code == 404 and session_id:
-                raise _McpSessionExpiredError() from exc
-            raise RuntimeError(f"调用 MCP {self._endpoint} 失败，HTTP {exc.code}: {detail}") from exc
-        except error.URLError as exc:
-            raise RuntimeError(f"调用 MCP {self._endpoint} 失败: {exc.reason}") from exc
+        except RuntimeError as exc:
+            raise RuntimeError(f"调用 MCP {self._endpoint} 失败: {exc}") from exc
 
+        if response.status_code == 404 and session_id:
+            raise _McpSessionExpiredError()
+        if response.status_code >= 400:
+            raise RuntimeError(f"调用 MCP {self._endpoint} 失败，HTTP {response.status_code}: {response.text}")
+
+        response_content_type = response.headers.get("Content-Type", "")
+        response_session_id = response.headers.get("Mcp-Session-Id") or response.headers.get("mcp-session-id")
         return {
-            "messages": _parse_mcp_http_messages(response_text, response_content_type),
+            "messages": _parse_mcp_http_messages(response.text, response_content_type),
             "session_id": response_session_id,
         }
 
@@ -232,8 +235,7 @@ class _McpHttpToolExecutor:
         if self._initialized:
             return
         request_id = self._next_request_id()
-        response = await asyncio.to_thread(
-            self._request_sync,
+        response = await self._request(
             "POST",
             {
                 "jsonrpc": "2.0",
@@ -253,8 +255,7 @@ class _McpHttpToolExecutor:
         initialize_result = _extract_mcp_jsonrpc_result(response["messages"], request_id, "MCP initialize")
         if not isinstance(initialize_result, dict):
             raise RuntimeError("MCP initialize 返回格式异常")
-        await asyncio.to_thread(
-            self._request_sync,
+        await self._request(
             "POST",
             {
                 "jsonrpc": "2.0",
@@ -271,8 +272,7 @@ class _McpHttpToolExecutor:
 
         async def do_call() -> Any:
             request_id = self._next_request_id()
-            response = await asyncio.to_thread(
-                self._request_sync,
+            response = await self._request(
                 "POST",
                 {
                     "jsonrpc": "2.0",
@@ -306,8 +306,7 @@ class _McpHttpToolExecutor:
         session_id = self._session_id
         self._reset_session()
         try:
-            await asyncio.to_thread(
-                self._request_sync,
+            await self._request(
                 "DELETE",
                 None,
                 session_id=session_id,

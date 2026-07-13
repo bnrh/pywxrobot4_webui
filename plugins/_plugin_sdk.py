@@ -1,13 +1,12 @@
 import asyncio
-import json
 import random
 import re
 from datetime import datetime
 from enum import IntEnum
 from html import unescape
 from typing import Any
-from urllib import error, request
 
+from utils.http_client import post_json
 from utils.normalize import collapse_whitespace, is_truthy, normalize_wxpid
 
 # 插件侧沿用 collapse_whitespace 语义，对外仍导出 normalize_text / is_truthy。
@@ -264,20 +263,10 @@ def build_event_payload(event: Any) -> dict[str, Any]:
     return payload
 
 
-def post_json_request(
+async def post_json_request(
     url: str,
     payload: Any,
     headers: dict[str, str] | None = None,
     timeout: float = 10.0,
 ) -> tuple[int, str]:
-    request_body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request_headers = {"Content-Type": "application/json", **(headers or {})}
-    req = request.Request(url, data=request_body, headers=request_headers, method="POST")
-    try:
-        with request.urlopen(req, timeout=timeout) as response:
-            return response.status, response.read().decode("utf-8")
-    except error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(body or f"HTTP {exc.code}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(str(exc.reason)) from exc
+    return await post_json(url, payload, headers=headers, timeout=timeout)

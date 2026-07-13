@@ -67,7 +67,7 @@ async def handle_message(event, context):
             "normalized_content": strip_room_sender_prefix(event.normalized_content or getattr(event, "content", ""), room_sender),
         }
     )
-    response_status, response_text = post_json_request(webhook_url, payload)
+    response_status, response_text = await post_json_request(webhook_url, payload)
 
     context.logger.info(
         "已将群消息转发到 Webhook",

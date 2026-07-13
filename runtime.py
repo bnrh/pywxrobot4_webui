@@ -19,6 +19,7 @@ from message_repository import MessageRepository
 from plugin_base import PluginContext, PluginLogger
 from plugin_log_repository import PluginLogRepository
 from runtime_events import RuntimeEventHub
+from utils.http_client import aclose_shared_http_client
 
 RECENT_MESSAGE_LIMIT = 200
 PLUGIN_LOG_LIMIT = 1000
@@ -496,6 +497,7 @@ class PluginRuntime:
             await asyncio.gather(*self._workers, return_exceptions=True)
         await self.manager.shutdown()
         await self.api_client.aclose()
+        await aclose_shared_http_client()
 
     async def enqueue(self, event: MessageEvent) -> int:
         internal_id = self._remember_message(event)

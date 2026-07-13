@@ -1,18 +1,19 @@
-import asyncio
 import base64
 import binascii
 import json
 import mimetypes
 import re
-from http.cookiejar import CookieJar
 from pathlib import Path
 from time import time
-from urllib import error, parse, request
+from urllib import parse
 from urllib.parse import urljoin
 import uuid
 
+import httpx
+
 from ai_assistant import run_openai_compatible_chat_completion
 from config import PROJECT_ROOT
+from utils.http_client import get_bytes, request as http_request
 
 from ._plugin_sdk import MESSAGE_TYPES, find_xml_tag_text, get_message_type, normalize_text, random_between, sleep, unique_strings
 
@@ -171,11 +172,6 @@ config_schema = [
         "full_width": False,
     },
 ]
-
-
-class _NoRedirectHandler(request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
 
 
 def strip_room_sender_prefix(content, room_sender):
@@ -615,7 +611,7 @@ def guess_ai_image_suffix(image_item, response_content_type=""):
     return ".png"
 
 
-def materialize_ai_image(image_item):
+async def materialize_ai_image(image_item):
     normalized_item = image_item if isinstance(image_item, dict) else {}
     image_source = str(normalized_item.get("url") or "").strip()
     if not image_source:
@@ -640,18 +636,19 @@ def materialize_ai_image(image_item):
     if not image_source.startswith(("http://", "https://")):
         raise RuntimeError(f"AI 返回了当前无法处理的图片地址: {image_source}")
 
-    download_request = request.Request(image_source, headers={"User-Agent": "wxrobot_webui/room_ai_reply"}, method="GET")
     try:
-        with request.urlopen(download_request, timeout=AI_REPLY_IMAGE_DOWNLOAD_TIMEOUT_SECONDS) as response:
-            image_bytes = response.read()
-            response_content_type = str(response.headers.get("Content-Type") or "").strip()
-    except error.HTTPError as exc:
-        response_text = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"下载 AI 图片失败，HTTP {exc.code}: {response_text[:300]}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"下载 AI 图片失败: {exc.reason}") from exc
+        _, image_bytes, response_content_type = await get_bytes(
+            image_source,
+            headers={"User-Agent": "wxrobot_webui/room_ai_reply"},
+            timeout=AI_REPLY_IMAGE_DOWNLOAD_TIMEOUT_SECONDS,
+        )
     except TimeoutError as exc:
         raise RuntimeError("下载 AI 图片超时") from exc
+    except RuntimeError as exc:
+        detail = str(exc)
+        if detail.startswith("HTTP "):
+            raise RuntimeError(f"下载 AI 图片失败，{detail[:300]}") from exc
+        raise RuntimeError(f"下载 AI 图片失败: {exc}") from exc
 
     if not image_bytes:
         raise RuntimeError("下载 AI 图片失败：响应内容为空")
@@ -661,45 +658,34 @@ def materialize_ai_image(image_item):
     return str(output_path)
 
 
-def upload_image_to_hedgedoc(opener, hedgedoc_url, image_path):
+async def upload_image_to_hedgedoc(client: httpx.AsyncClient, hedgedoc_url, image_path):
     image_file_path = Path(image_path)
     if not image_file_path.is_file():
         raise RuntimeError(f"待上传的图片不存在: {image_path}")
 
-    boundary = f"----CopilotBoundary{uuid.uuid4().hex}"
     content_type = mimetypes.guess_type(str(image_file_path))[0] or "application/octet-stream"
     image_bytes = image_file_path.read_bytes()
-    request_body = b"".join(
-        [
-            f"--{boundary}\r\n".encode("utf-8"),
-            f"Content-Disposition: form-data; name=\"image\"; filename=\"{image_file_path.name}\"\r\n".encode("utf-8"),
-            f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
-            image_bytes,
-            b"\r\n",
-            f"--{boundary}--\r\n".encode("utf-8"),
-        ]
-    )
-    upload_request = request.Request(
-        urljoin(f"{hedgedoc_url}/", "uploadimage"),
-        data=request_body,
-        headers={
-            "Accept": "*/*",
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "Origin": hedgedoc_url,
-            "Referer": f"{hedgedoc_url}/",
-        },
-        method="POST",
-    )
     try:
-        with opener.open(upload_request, timeout=HEDGEDOC_IMAGE_UPLOAD_TIMEOUT_SECONDS) as response:
-            response_text = response.read().decode("utf-8", errors="ignore")
-    except error.HTTPError as exc:
-        response_text = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"HedgeDoc 上传图片失败，HTTP {exc.code}: {response_text[:500]}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"HedgeDoc 上传图片失败: {exc.reason}") from exc
+        response = await http_request(
+            "POST",
+            urljoin(f"{hedgedoc_url}/", "uploadimage"),
+            headers={
+                "Accept": "*/*",
+                "Origin": hedgedoc_url,
+                "Referer": f"{hedgedoc_url}/",
+            },
+            files={"image": (image_file_path.name, image_bytes, content_type)},
+            timeout=HEDGEDOC_IMAGE_UPLOAD_TIMEOUT_SECONDS,
+            client=client,
+        )
     except TimeoutError as exc:
         raise RuntimeError("HedgeDoc 上传图片超时") from exc
+    except RuntimeError as exc:
+        raise RuntimeError(f"HedgeDoc 上传图片失败: {exc}") from exc
+
+    response_text = response.text
+    if response.status_code >= 400:
+        raise RuntimeError(f"HedgeDoc 上传图片失败，HTTP {response.status_code}: {response_text[:500]}")
 
     try:
         payload = json.loads(response_text)
@@ -712,54 +698,61 @@ def upload_image_to_hedgedoc(opener, hedgedoc_url, image_path):
     return uploaded_link
 
 
-def prepare_markdown_reply_for_hedgedoc(markdown_text, image_items, markdown_config):
+async def prepare_markdown_reply_for_hedgedoc(markdown_text, image_items, markdown_config):
     normalized_markdown = str(markdown_text or "").strip()
-    hedgedoc_opener = login_hedgedoc(
+    hedgedoc_client = await login_hedgedoc(
         markdown_config["hedgedoc_url"],
         markdown_config["hedgedoc_email"],
         markdown_config["hedgedoc_password"],
     )
 
-    uploaded_link_map = {}
-    embedded_image_items = extract_markdown_image_items(normalized_markdown)
-    for image_item in embedded_image_items:
-        image_source = str(image_item.get("url") or "").strip()
-        if not image_source or image_source in uploaded_link_map:
-            continue
-        local_image_path = materialize_ai_image(image_item)
-        uploaded_link_map[image_source] = upload_image_to_hedgedoc(hedgedoc_opener, markdown_config["hedgedoc_url"], local_image_path)
+    try:
+        uploaded_link_map = {}
+        embedded_image_items = extract_markdown_image_items(normalized_markdown)
+        for image_item in embedded_image_items:
+            image_source = str(image_item.get("url") or "").strip()
+            if not image_source or image_source in uploaded_link_map:
+                continue
+            local_image_path = await materialize_ai_image(image_item)
+            uploaded_link_map[image_source] = await upload_image_to_hedgedoc(
+                hedgedoc_client, markdown_config["hedgedoc_url"], local_image_path
+            )
 
-    final_markdown = replace_markdown_image_urls(normalized_markdown, uploaded_link_map)
-    handled_sources = set(uploaded_link_map.keys())
-    appended_sections = []
-    for index, image_item in enumerate(image_items or [], start=1):
-        image_source = str((image_item or {}).get("url") or "").strip()
-        if not image_source or image_source in handled_sources:
-            continue
-        local_image_path = materialize_ai_image(image_item)
-        uploaded_link = upload_image_to_hedgedoc(hedgedoc_opener, markdown_config["hedgedoc_url"], local_image_path)
-        alt_text = trim_text(
-            strip_markdown_to_text((image_item or {}).get("alt_text") or f"图片 {index}"),
-            80,
-            f"图片 {index}",
-        )
-        appended_sections.append(f"![{alt_text}]({uploaded_link})")
-        handled_sources.add(image_source)
+        final_markdown = replace_markdown_image_urls(normalized_markdown, uploaded_link_map)
+        handled_sources = set(uploaded_link_map.keys())
+        appended_sections = []
+        for index, image_item in enumerate(image_items or [], start=1):
+            image_source = str((image_item or {}).get("url") or "").strip()
+            if not image_source or image_source in handled_sources:
+                continue
+            local_image_path = await materialize_ai_image(image_item)
+            uploaded_link = await upload_image_to_hedgedoc(
+                hedgedoc_client, markdown_config["hedgedoc_url"], local_image_path
+            )
+            alt_text = trim_text(
+                strip_markdown_to_text((image_item or {}).get("alt_text") or f"图片 {index}"),
+                80,
+                f"图片 {index}",
+            )
+            appended_sections.append(f"![{alt_text}]({uploaded_link})")
+            handled_sources.add(image_source)
 
-    if appended_sections:
-        appended_markdown = "\n\n".join(appended_sections)
-        final_markdown = f"{final_markdown}\n\n".strip() if final_markdown else ""
-        final_markdown = f"{final_markdown}{appended_markdown}".strip()
+        if appended_sections:
+            appended_markdown = "\n\n".join(appended_sections)
+            final_markdown = f"{final_markdown}\n\n".strip() if final_markdown else ""
+            final_markdown = f"{final_markdown}{appended_markdown}".strip()
 
-    note_id, _ = create_hedgedoc_note(hedgedoc_opener, markdown_config["hedgedoc_url"], final_markdown)
-    publish_link = get_hedgedoc_publish_link(hedgedoc_opener, markdown_config["hedgedoc_url"], note_id)
-    return final_markdown, publish_link
+        note_id, _ = await create_hedgedoc_note(hedgedoc_client, markdown_config["hedgedoc_url"], final_markdown)
+        publish_link = await get_hedgedoc_publish_link(hedgedoc_client, markdown_config["hedgedoc_url"], note_id)
+        return final_markdown, publish_link
+    finally:
+        await hedgedoc_client.aclose()
 
 
 async def send_ai_image_reply(context, roomid, wxpid, image_items):
     sent_paths = []
     for image_item in image_items or []:
-        image_path = await asyncio.to_thread(materialize_ai_image, image_item)
+        image_path = await materialize_ai_image(image_item)
         await context.api.send_image(wxid=roomid, path=image_path, wxpid=wxpid)
         sent_paths.append(image_path)
     return sent_paths
@@ -781,72 +774,72 @@ def build_markdown_article_payload(markdown_text, publish_link, roomid, event, m
     }
 
 
-def build_hedgedoc_openers():
-    cookie_jar = CookieJar()
-    redirect_opener = request.build_opener(request.HTTPCookieProcessor(cookie_jar))
-    no_redirect_opener = request.build_opener(request.HTTPCookieProcessor(cookie_jar), _NoRedirectHandler())
-    return redirect_opener, no_redirect_opener
-
-
-def open_with_redirect_capture(opener, req, timeout):
+async def open_with_redirect_capture(client: httpx.AsyncClient, method: str, url: str, **kwargs):
     try:
-        with opener.open(req, timeout=timeout) as response:
-            return response.getcode(), response.headers, response.read().decode("utf-8", errors="ignore")
-    except error.HTTPError as exc:
-        response_text = exc.read().decode("utf-8", errors="ignore")
-        if exc.code in REDIRECT_STATUS_CODES:
-            return exc.code, exc.headers, response_text
-        raise RuntimeError(f"HedgeDoc 请求失败，HTTP {exc.code}: {response_text[:500]}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"HedgeDoc 请求失败: {exc.reason}") from exc
+        response = await http_request(
+            method,
+            url,
+            follow_redirects=False,
+            client=client,
+            **kwargs,
+        )
     except TimeoutError as exc:
         raise RuntimeError("HedgeDoc 请求超时") from exc
+    except RuntimeError as exc:
+        raise RuntimeError(f"HedgeDoc 请求失败: {exc}") from exc
+
+    status_code = int(response.status_code)
+    response_text = response.text
+    if status_code >= 400 and status_code not in REDIRECT_STATUS_CODES:
+        raise RuntimeError(f"HedgeDoc 请求失败，HTTP {status_code}: {response_text[:500]}")
+    return status_code, response.headers, response_text
 
 
-def login_hedgedoc(hedgedoc_url, email, password):
-    redirect_opener, no_redirect_opener = build_hedgedoc_openers()
+async def login_hedgedoc(hedgedoc_url, email, password):
+    client = httpx.AsyncClient(follow_redirects=True, timeout=HEDGEDOC_REQUEST_TIMEOUT_SECONDS)
     login_url = urljoin(f"{hedgedoc_url}/", "login")
-    login_request = request.Request(
-        login_url,
-        data=parse.urlencode({"email": email, "password": password}).encode("utf-8"),
-        headers={"Content-Type": "application/x-www-form-urlencoded; charset=utf-8"},
-        method="POST",
-    )
     try:
-        with redirect_opener.open(login_request, timeout=HEDGEDOC_REQUEST_TIMEOUT_SECONDS) as response:
-            response.read()
-    except error.HTTPError as exc:
-        response_text = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"HedgeDoc 登录失败，HTTP {exc.code}: {response_text[:500]}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"HedgeDoc 登录失败: {exc.reason}") from exc
+        response = await http_request(
+            "POST",
+            login_url,
+            data={"email": email, "password": password},
+            headers={"Content-Type": "application/x-www-form-urlencoded; charset=utf-8"},
+            timeout=HEDGEDOC_REQUEST_TIMEOUT_SECONDS,
+            client=client,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(f"HedgeDoc 登录失败，HTTP {response.status_code}: {response.text[:500]}")
+
+        me_response = await http_request(
+            "GET",
+            urljoin(f"{hedgedoc_url}/", "me"),
+            timeout=HEDGEDOC_REQUEST_TIMEOUT_SECONDS,
+            client=client,
+        )
+        if me_response.status_code != 200:
+            raise RuntimeError(f"HedgeDoc 登录校验失败：/me 返回 {me_response.status_code}")
+        json.loads(me_response.text or "{}")
     except TimeoutError as exc:
+        await client.aclose()
         raise RuntimeError("HedgeDoc 登录超时") from exc
-
-    me_request = request.Request(urljoin(f"{hedgedoc_url}/", "me"), method="GET")
-    try:
-        with redirect_opener.open(me_request, timeout=HEDGEDOC_REQUEST_TIMEOUT_SECONDS) as response:
-            response_text = response.read().decode("utf-8", errors="ignore")
-            if response.getcode() != 200:
-                raise RuntimeError(f"HedgeDoc 登录校验失败：/me 返回 {response.getcode()}")
-            json.loads(response_text or "{}")
-    except error.HTTPError as exc:
-        response_text = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"HedgeDoc 登录校验失败，HTTP {exc.code}: {response_text[:500]}") from exc
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        await client.aclose()
         raise RuntimeError("HedgeDoc 登录成功，但 /me 返回了异常响应") from exc
+    except Exception:
+        await client.aclose()
+        raise
+    return client
 
-    return no_redirect_opener
 
-
-def create_hedgedoc_note(opener, hedgedoc_url, markdown_text):
-    create_request = request.Request(
+async def create_hedgedoc_note(client: httpx.AsyncClient, hedgedoc_url, markdown_text):
+    status_code, headers, response_text = await open_with_redirect_capture(
+        client,
+        "POST",
         urljoin(f"{hedgedoc_url}/", "new"),
-        data=str(markdown_text or "").encode("utf-8"),
+        content=str(markdown_text or "").encode("utf-8"),
         headers={"Content-Type": "text/markdown; charset=utf-8"},
-        method="POST",
+        timeout=HEDGEDOC_REQUEST_TIMEOUT_SECONDS,
     )
-    status_code, headers, response_text = open_with_redirect_capture(opener, create_request, HEDGEDOC_REQUEST_TIMEOUT_SECONDS)
     if status_code not in REDIRECT_STATUS_CODES:
         raise RuntimeError(f"HedgeDoc 创建文档失败，HTTP {status_code}: {response_text[:500]}")
 
@@ -861,9 +854,13 @@ def create_hedgedoc_note(opener, hedgedoc_url, markdown_text):
     return note_id, note_url
 
 
-def get_hedgedoc_publish_link(opener, hedgedoc_url, note_id):
-    publish_request = request.Request(urljoin(f"{hedgedoc_url}/", f"{note_id}/publish"), method="GET")
-    status_code, headers, response_text = open_with_redirect_capture(opener, publish_request, HEDGEDOC_REQUEST_TIMEOUT_SECONDS)
+async def get_hedgedoc_publish_link(client: httpx.AsyncClient, hedgedoc_url, note_id):
+    status_code, headers, response_text = await open_with_redirect_capture(
+        client,
+        "GET",
+        urljoin(f"{hedgedoc_url}/", f"{note_id}/publish"),
+        timeout=HEDGEDOC_REQUEST_TIMEOUT_SECONDS,
+    )
     if status_code == 200:
         return urljoin(f"{hedgedoc_url}/", f"{note_id}/publish")
     if status_code in REDIRECT_STATUS_CODES:
@@ -873,14 +870,17 @@ def get_hedgedoc_publish_link(opener, hedgedoc_url, note_id):
     raise RuntimeError(f"HedgeDoc 获取发布链接失败，HTTP {status_code}: {response_text[:500]}")
 
 
-def upload_markdown_to_hedgedoc(markdown_text, markdown_config):
-    hedgedoc_opener = login_hedgedoc(
+async def upload_markdown_to_hedgedoc(markdown_text, markdown_config):
+    hedgedoc_client = await login_hedgedoc(
         markdown_config["hedgedoc_url"],
         markdown_config["hedgedoc_email"],
         markdown_config["hedgedoc_password"],
     )
-    note_id, _ = create_hedgedoc_note(hedgedoc_opener, markdown_config["hedgedoc_url"], markdown_text)
-    return get_hedgedoc_publish_link(hedgedoc_opener, markdown_config["hedgedoc_url"], note_id)
+    try:
+        note_id, _ = await create_hedgedoc_note(hedgedoc_client, markdown_config["hedgedoc_url"], markdown_text)
+        return await get_hedgedoc_publish_link(hedgedoc_client, markdown_config["hedgedoc_url"], note_id)
+    finally:
+        await hedgedoc_client.aclose()
 
 
 def normalize_room_ai_entry(item):
@@ -1077,8 +1077,7 @@ async def handle_message(event, context):
             )
         else:
             try:
-                prepared_markdown_text, publish_link = await asyncio.to_thread(
-                    prepare_markdown_reply_for_hedgedoc,
+                prepared_markdown_text, publish_link = await prepare_markdown_reply_for_hedgedoc(
                     markdown_reply_source,
                     reply_images,
                     markdown_config,

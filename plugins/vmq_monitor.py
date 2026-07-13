@@ -1,8 +1,9 @@
-import asyncio
 import hashlib
 import re
 from time import time
-from urllib import error, parse, request
+from urllib import parse
+
+from utils.http_client import get_text
 
 from ._plugin_sdk import format_unix_time, get_message_type, normalize_text, is_truthy
 
@@ -164,18 +165,10 @@ def build_signed_params(request_type, amount_text, key):
     return params
 
 
-def send_get_request(url, params):
+async def send_get_request(url, params):
     query_string = parse.urlencode(params)
     request_url = f"{url}?{query_string}" if query_string else url
-    req = request.Request(request_url, headers=VMQ_REQUEST_HEADERS, method="GET")
-    try:
-        with request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as response:
-            return response.status, response.read().decode("utf-8", errors="ignore")
-    except error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(body or f"HTTP {exc.code}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(str(exc.reason)) from exc
+    return await get_text(request_url, headers=VMQ_REQUEST_HEADERS, timeout=HTTP_TIMEOUT_SECONDS)
 
 
 async def send_heartbeat(context, service_settings, reason):
@@ -183,7 +176,7 @@ async def send_heartbeat(context, service_settings, reason):
         return False
 
     params = build_signed_params("heartbeat", "", service_settings["key"])
-    status, response_text = await asyncio.to_thread(send_get_request, f"{service_settings['host']}/appHeart", params)
+    status, response_text = await send_get_request(f"{service_settings['host']}/appHeart", params)
     context.state.namespace(name).set(
         "last_heartbeat",
         {
@@ -198,7 +191,7 @@ async def send_heartbeat(context, service_settings, reason):
 
 async def push_payment(context, service_settings, payment_info, sender_wxid):
     params = build_signed_params("push", payment_info["amount_text"], service_settings["key"])
-    status, response_text = await asyncio.to_thread(send_get_request, f"{service_settings['host']}/appPush", params)
+    status, response_text = await send_get_request(f"{service_settings['host']}/appPush", params)
     context.state.namespace(name).set(
         "last_push",
         {
