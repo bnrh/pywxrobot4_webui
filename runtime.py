@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 from copy import deepcopy
 from datetime import datetime
-from itertools import count
 from typing import Any
 
 from fastapi import HTTPException
@@ -17,9 +15,9 @@ from config import PluginServiceSettings, normalize_plugin_module_name
 from contact_directory_cache import ContactDirectoryCache
 from manager import PluginManager
 from message import MessageEvent
-from message_store import RecentMessageStore
+from message_repository import MessageRepository
 from plugin_base import PluginContext, PluginLogger
-from plugin_log_store import PluginLogStore
+from plugin_log_repository import PluginLogRepository
 from runtime_events import RuntimeEventHub
 
 RECENT_MESSAGE_LIMIT = 200
@@ -52,10 +50,13 @@ class PluginRuntime:
         )
         self.queue: asyncio.Queue[tuple[int, MessageEvent] | None] = asyncio.Queue(maxsize=settings.queue_size)
         self._workers: list[asyncio.Task] = []
-        self._message_sequence = count(1)
-        self._plugin_log_sequence = count(1)
-        self.recent_messages: deque[dict[str, Any]] = deque(maxlen=RECENT_MESSAGE_LIMIT)
-        self.recent_plugin_logs: deque[dict[str, Any]] = deque(maxlen=PLUGIN_LOG_LIMIT)
+        self.message_repository = MessageRepository(limit=RECENT_MESSAGE_LIMIT)
+        self.plugin_log_repository = PluginLogRepository(limit=PLUGIN_LOG_LIMIT)
+        # 兼容旧读路径：recent_* 指向仓储缓存；message_store/plugin_log_store 指向底层 SQLite。
+        self.recent_messages = self.message_repository.cached_messages
+        self.recent_plugin_logs = self.plugin_log_repository.cached_logs
+        self.message_store = self.message_repository.store
+        self.plugin_log_store = self.plugin_log_repository.store
         self.started_at: datetime | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._manual_plugin_execution_lock = asyncio.Lock()
@@ -67,29 +68,8 @@ class PluginRuntime:
         self.heartbeat_healthy: bool | None = None
         self._plugin_targets_cache_at = 0.0
         self._plugin_targets_cache: dict[str, Any] | None = None
-        self.message_store = RecentMessageStore(limit=RECENT_MESSAGE_LIMIT)
-        self.plugin_log_store = PluginLogStore(limit=PLUGIN_LOG_LIMIT)
         self.event_hub = RuntimeEventHub()
         self.wxrobot_api_reachable: bool | None = None
-        self._restore_recent_messages()
-        self._restore_plugin_logs()
-
-    def _restore_recent_messages(self) -> None:
-        stored_messages = self.message_store.load_recent(RECENT_MESSAGE_LIMIT)
-        if not stored_messages:
-            return
-        self.recent_messages.extend(reversed(stored_messages))
-        max_internal_id = max(int(item.get("internal_id") or 0) for item in stored_messages)
-        self._message_sequence = count(max_internal_id + 1)
-
-    def _restore_plugin_logs(self) -> None:
-        stored_logs, _ = self.plugin_log_store.load_recent(PLUGIN_LOG_LIMIT)
-        if not stored_logs:
-            return
-        for item in reversed(stored_logs):
-            self.recent_plugin_logs.appendleft(item)
-        max_internal_id = max(int(item.get("internal_id") or 0) for item in stored_logs)
-        self._plugin_log_sequence = count(max_internal_id + 1)
 
     async def publish_runtime_event(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
         await self.event_hub.publish(event_type, payload)
@@ -543,7 +523,7 @@ class PluginRuntime:
         return internal_id
 
     def _remember_message(self, event: MessageEvent) -> int:
-        internal_id = next(self._message_sequence)
+        internal_id = self.message_repository.next_internal_id()
         record = {
             "internal_id": internal_id,
             "received_at": self._now_iso(),
@@ -561,16 +541,11 @@ class PluginRuntime:
             "plugin_results": [],
             "payload": event.raw_payload,
         }
-        self.recent_messages.appendleft(record)
-        self.message_store.upsert_message(record)
+        self.message_repository.upsert(record)
         return internal_id
 
     def _patch_message(self, internal_id: int, **updates: Any) -> None:
-        for item in self.recent_messages:
-            if item["internal_id"] == internal_id:
-                item.update(updates)
-                self.message_store.patch_message(internal_id, **updates)
-                return
+        self.message_repository.patch(internal_id, **updates)
 
     def _now_iso(self) -> str:
         return now_iso()
@@ -582,7 +557,7 @@ class PluginRuntime:
             processed_at=self._now_iso(),
             error=rejection_error,
         )
-        self.message_store.record_queue_rejection(internal_id, rejection_error)
+        self.message_repository.record_queue_rejection(internal_id, rejection_error)
         await self.publish_runtime_event(
             "message_failed",
             {"internal_id": internal_id, "error": rejection_error, "reason": "queue_full"},
@@ -590,7 +565,7 @@ class PluginRuntime:
 
     def _remember_plugin_log(self, entry: dict[str, Any]) -> None:
         record = {
-            "internal_id": next(self._plugin_log_sequence),
+            "internal_id": self.plugin_log_repository.next_internal_id(),
             "recorded_at": self._now_iso(),
             "module": str(entry.get("module") or ""),
             "plugin": str(entry.get("plugin") or entry.get("module") or ""),
@@ -599,11 +574,10 @@ class PluginRuntime:
             "message": str(entry.get("message") or ""),
             "data": entry.get("data"),
         }
-        self.recent_plugin_logs.appendleft(record)
-        self.plugin_log_store.append_log(record)
+        self.plugin_log_repository.append(record)
 
     def get_plugin_logs(self, limit: int, module_name: str | None = None, level: str | None = None, keyword: str | None = None) -> tuple[list[dict[str, Any]], int]:
-        return self.plugin_log_store.load_recent(
+        return self.plugin_log_repository.load_recent(
             limit,
             module_name=module_name,
             level=level,
@@ -611,7 +585,7 @@ class PluginRuntime:
         )
 
     async def get_message_views(self, limit: int) -> list[dict[str, Any]]:
-        messages = [dict(item) for item in list(self.recent_messages)[:limit]]
+        messages = self.message_repository.list_recent(limit)
         if not messages:
             return []
         return await asyncio.gather(*(self.directory_cache.enrich_message(item) for item in messages))
