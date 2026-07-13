@@ -1,3 +1,5 @@
+import asyncio
+
 from app_builders import AppBuilders
 from app_config import (
     INVITE_TO_ROOM_PLUGIN_MODULE,
@@ -7,6 +9,7 @@ from app_config import (
     sanitize_stored_settings,
 )
 from config import PluginServiceSettings
+from contact_directory_cache import PLUGIN_TARGETS_CACHE_TTL_SECONDS
 from manager import PluginManager
 from runtime import PluginRuntime
 
@@ -105,3 +108,70 @@ def test_build_room_member_options_deduplicates_and_sorts() -> None:
     assert [item["wxid"] for item in members] == ["wxid_a", "wxid_b"]
     assert members[0]["label"] == "Alpha"
     assert members[1]["label"] == "Beta"
+
+
+def test_build_plugin_target_payload_fetches_wxpids_in_parallel() -> None:
+    runtime = PluginRuntime(PluginServiceSettings())
+    builders = AppBuilders(runtime)
+
+    active = 0
+    max_active = 0
+
+    async def get_logged_in_users():
+        return [
+            {"wxpid": 101, "wxid": "wxid_a", "nickname": "Alice"},
+            {"wxpid": 202, "wxid": "wxid_b", "nickname": "Bob"},
+        ]
+
+    async def get_room_list(*, wxpid=None):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.05)
+        active -= 1
+        return [{"wxid": f"room_{wxpid}", "nickname": f"Room {wxpid}"}]
+
+    async def get_labels(*, wxpid=None):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.05)
+        active -= 1
+        return {f"label_{wxpid}": True}
+
+    runtime.api_client.get_logged_in_users = get_logged_in_users
+    runtime.api_client.get_room_list = get_room_list
+    runtime.api_client.get_labels = get_labels
+
+    payload = asyncio.run(builders.build_plugin_target_payload())
+    assert payload["default_wxpid"] == 101
+    assert {item["value"] for item in payload["room_options"]} == {"room_101", "room_202"}
+    assert {item["value"] for item in payload["label_options"]} == {"label_101", "label_202"}
+    # 串行时同一时刻最多 2 个请求；并行后应同时覆盖多个 wxpid。
+    assert max_active >= 3
+
+
+def test_build_plugin_target_payload_uses_cache() -> None:
+    runtime = PluginRuntime(PluginServiceSettings())
+    builders = AppBuilders(runtime)
+    calls = {"users": 0}
+
+    async def get_logged_in_users():
+        calls["users"] += 1
+        return [{"wxpid": 1, "wxid": "wxid_a", "nickname": "Alice"}]
+
+    async def get_room_list(*, wxpid=None):
+        return []
+
+    async def get_labels(*, wxpid=None):
+        return {}
+
+    runtime.api_client.get_logged_in_users = get_logged_in_users
+    runtime.api_client.get_room_list = get_room_list
+    runtime.api_client.get_labels = get_labels
+
+    first = asyncio.run(builders.build_plugin_target_payload())
+    second = asyncio.run(builders.build_plugin_target_payload())
+    assert first == second
+    assert calls["users"] == 1
+    assert PLUGIN_TARGETS_CACHE_TTL_SECONDS >= 180

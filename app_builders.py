@@ -181,13 +181,16 @@ class AppBuilders:
         label_options: list[dict[str, Any]] = []
         seen_rooms: set[str] = set()
         seen_labels: set[str] = set()
-        for wxpid in wxpids:
-            room_payload, label_payload = await asyncio.gather(
+
+        async def _fetch_rooms_and_labels(wxpid: int) -> tuple[Any, Any]:
+            return await asyncio.gather(
                 self.runtime.api_client.get_room_list(wxpid=wxpid),
                 self.runtime.api_client.get_labels(wxpid=wxpid),
                 return_exceptions=True,
             )
 
+        per_wxpid_payloads = await asyncio.gather(*(_fetch_rooms_and_labels(wxpid) for wxpid in wxpids))
+        for wxpid, (room_payload, label_payload) in zip(wxpids, per_wxpid_payloads):
             if not isinstance(room_payload, Exception) and isinstance(room_payload, list):
                 for room in room_payload:
                     roomid = str(room.get("wxid") or room.get("roomid") or "").strip()
