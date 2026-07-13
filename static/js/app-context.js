@@ -12,6 +12,7 @@ import { syncMessageTypeLabels } from "./message-labels.js";
 import { tabMeta } from "./tab-meta.js";
 import { copyTextToClipboard } from "./clipboard-utils.js";
 import { getMessagePollErrorText } from "./message-poll.js";
+import { mergeOverviewMetrics } from "./overview-metrics.js";
 import {
     getPluginByModule as findPluginInList,
     getPluginDisplayName as resolvePluginDisplayName,
@@ -71,6 +72,14 @@ export function createAppContext() {
     function setOverviewData(payload) {
         state.overview = payload;
         state.overviewFetchedAt = Date.now();
+    }
+
+    function applyOverviewMetrics(metrics) {
+        if (!state.overview) {
+            return;
+        }
+        state.overview = mergeOverviewMetrics(state.overview, metrics);
+        renderOverview();
     }
 
     function scheduleManualPluginExecutionPoll() {
@@ -314,6 +323,7 @@ export function createAppContext() {
         api,
         setStatus,
         setOverviewData,
+        applyOverviewMetrics,
         setStoredApiToken,
         switchTab,
         reloadFromConfig,

@@ -27,6 +27,7 @@ jobs:
           node tests/js/test_ai_assistant_ui_syntax.mjs
           node tests/js/test_app_events_modules.mjs
           node tests/js/test_dom_utils_normalize.mjs
+          node tests/js/test_runtime_polling.mjs
 
   docker:
     runs-on: ubuntu-latest

@@ -73,7 +73,26 @@ class PluginRuntime:
         self.wxrobot_api_reachable: bool | None = None
 
     async def publish_runtime_event(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
-        await self.event_hub.publish(event_type, payload)
+        event_payload = dict(payload or {})
+        normalized_type = str(event_type or "").strip()
+        if normalized_type.startswith("message_"):
+            event_payload.setdefault("metrics", self.build_runtime_event_metrics())
+        await self.event_hub.publish(normalized_type or "event", event_payload)
+
+    def build_runtime_event_metrics(self) -> dict[str, Any]:
+        active_workers = sum(1 for task in self._workers if not task.done())
+        return {
+            "queued_messages": self.queue.qsize(),
+            "workers_active": active_workers,
+            "workers_configured": self.settings.worker_count,
+            "queue_rejections": self.message_store.count_queue_rejections(),
+            "recent_messages": len(self.recent_messages),
+            "recent_plugin_logs": len(self.recent_plugin_logs),
+            "queue_capacity": self.settings.queue_size,
+            "queue_enqueue_wait_seconds": self.settings.queue_enqueue_wait_seconds,
+            "wxrobot_api_reachable": self.wxrobot_api_reachable,
+            "heartbeat_healthy": self.heartbeat_healthy,
+        }
 
     async def apply_light_settings(self, configured_settings: PluginServiceSettings, fields: list[str]) -> None:
         if not fields:
@@ -501,14 +520,6 @@ class PluginRuntime:
 
     async def enqueue(self, event: MessageEvent) -> int:
         internal_id = self._remember_message(event)
-        await self.publish_runtime_event(
-            "message_queued",
-            {
-                "internal_id": internal_id,
-                "msgid": event.normalized_msgid,
-                "conversation_wxid": event.conversation_wxid,
-            },
-        )
         try:
             self.queue.put_nowait((internal_id, event))
         except asyncio.QueueFull:
@@ -522,6 +533,14 @@ class PluginRuntime:
             except asyncio.TimeoutError as exc:
                 await self._reject_queue_enqueue(internal_id, rejection_error)
                 raise HTTPException(status_code=503, detail=rejection_error) from exc
+        await self.publish_runtime_event(
+            "message_queued",
+            {
+                "internal_id": internal_id,
+                "msgid": event.normalized_msgid,
+                "conversation_wxid": event.conversation_wxid,
+            },
+        )
         return internal_id
 
     def _remember_message(self, event: MessageEvent) -> int:

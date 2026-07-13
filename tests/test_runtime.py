@@ -38,6 +38,18 @@ def test_plugin_runtime_initial_state() -> None:
     assert runtime.recent_plugin_logs is runtime.plugin_log_repository.cached_logs
 
 
+def test_build_runtime_event_metrics_shape() -> None:
+    from config import PluginServiceSettings
+
+    runtime = PluginRuntime(PluginServiceSettings())
+    metrics = runtime.build_runtime_event_metrics()
+    assert "queued_messages" in metrics
+    assert "workers_active" in metrics
+    assert "queue_rejections" in metrics
+    assert "recent_messages" in metrics
+    assert metrics["queue_capacity"] == runtime.settings.queue_size
+
+
 def test_message_repository_upsert_patch_and_order() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "messages.sqlite3"

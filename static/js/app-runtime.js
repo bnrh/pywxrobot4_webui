@@ -1,6 +1,17 @@
 /** 应用启动、定时刷新与运行时事件订阅。 */
 
-import { connectRuntimeEventStream, shouldPollMessages } from "./runtime-events.js";
+import {
+    connectRuntimeEventStream,
+    isRuntimeStreamConnected,
+    shouldPollMessages,
+    shouldPollOverview,
+} from "./runtime-events.js";
+
+const MESSAGE_RUNTIME_EVENT_TYPES = new Set(["message_queued", "message_processed", "message_failed"]);
+
+function isPageVisible() {
+    return document.visibilityState === "visible";
+}
 
 export async function bootstrapApp(actions) {
     try {
@@ -23,41 +34,76 @@ export async function bootstrapApp(actions) {
     }
 }
 
+function refreshOverviewFromRuntimeEvent(actions, payload) {
+    const metrics = payload?.payload?.metrics;
+    if (metrics && typeof metrics === "object") {
+        actions.applyOverviewMetrics(metrics);
+        return;
+    }
+    actions.loadOverview().catch(() => {});
+}
+
+function refreshSecondaryTabs(actions) {
+    const activeTab = actions.getState().activeTab;
+    if (activeTab === "messages" || activeTab === "ai-assistant" || activeTab === "dashboard") {
+        return;
+    }
+    actions.refreshCurrentTab().catch((error) => {
+        actions.setStatus(`自动刷新失败：${error.message}`, "bad");
+    });
+}
+
 export function startAppRuntime(actions) {
     connectRuntimeEventStream({
         onRuntimeEvent(payload) {
             const eventType = String(payload?.type || "");
-            if (eventType === "message_queued" || eventType === "message_processed" || eventType === "message_failed") {
+            if (eventType === "connected") {
+                if (!isPageVisible()) {
+                    return;
+                }
                 actions.refreshMessagesByPoll().catch(() => {});
                 actions.loadOverview().catch(() => {});
+                return;
             }
+            if (!MESSAGE_RUNTIME_EVENT_TYPES.has(eventType)) {
+                return;
+            }
+            if (!isPageVisible()) {
+                // 不可见时仍增量更新概览指标，回到前台时消息再补拉。
+                refreshOverviewFromRuntimeEvent(actions, payload);
+                return;
+            }
+            actions.refreshMessagesByPoll().catch(() => {});
+            refreshOverviewFromRuntimeEvent(actions, payload);
         },
     });
 
     window.setInterval(() => {
-        if (document.visibilityState === "hidden" || !actions.getState().overview) {
+        if (!isPageVisible() || !actions.getState().overview) {
             return;
         }
         actions.renderOverview();
     }, actions.overviewRenderTickMs);
 
     window.setInterval(() => {
-        if (document.visibilityState === "hidden") {
+        if (!isPageVisible()) {
+            return;
+        }
+        if (!shouldPollOverview()) {
             return;
         }
         actions.loadOverview().catch((error) => {
             actions.setStatus(`概览自动刷新失败：${error.message}`, "bad");
         });
-        const activeTab = actions.getState().activeTab;
-        if (activeTab !== "messages" && activeTab !== "ai-assistant") {
-            actions.refreshCurrentTab().catch((error) => {
-                actions.setStatus(`自动刷新失败：${error.message}`, "bad");
-            });
-        }
-    }, actions.overviewPollIntervalMs);
+        refreshSecondaryTabs(actions);
+    }, 1000);
 
     window.setInterval(() => {
-        if (document.visibilityState === "hidden") {
+        if (!isPageVisible()) {
+            return;
+        }
+        if (isRuntimeStreamConnected()) {
+            // SSE 正常时消息列表只靠事件刷新，跳过轮询。
             return;
         }
         if (!shouldPollMessages()) {
@@ -67,7 +113,7 @@ export function startAppRuntime(actions) {
     }, 1000);
 
     document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState !== "visible") {
+        if (!isPageVisible()) {
             return;
         }
 
@@ -75,11 +121,6 @@ export function startAppRuntime(actions) {
             actions.setStatus(`概览刷新失败：${error.message}`, "bad");
         });
         actions.refreshMessagesByPoll();
-        const activeTab = actions.getState().activeTab;
-        if (activeTab !== "messages" && activeTab !== "ai-assistant") {
-            actions.refreshCurrentTab().catch((error) => {
-                actions.setStatus(`自动刷新失败：${error.message}`, "bad");
-            });
-        }
+        refreshSecondaryTabs(actions);
     });
 }
