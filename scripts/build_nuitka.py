@@ -1,7 +1,9 @@
 """Nuitka Windows standalone build for wxrobot_webui.
 
-Uses an isolated venv so unused site-packages (PySide6, IPython, ...)
-are not available for Nuitka to follow via optional imports in numpy/PIL.
+Nuitka already follows static imports. This script only adds what
+auto-analysis cannot see: dynamically loaded plugins, and non-Python
+frontend/static assets. Builds inside an isolated venv so optional
+imports in numpy/PIL cannot pull in unrelated global packages.
 """
 
 from __future__ import annotations
@@ -19,31 +21,7 @@ DIST_DIR = OUT_DIR / f"{APP_NAME}.dist"
 MAIN_DIST = OUT_DIR / "main.dist"
 BUILD_VENV = ROOT / ".venv-build"
 
-# Optional imports that bloated standalone dist when present in the global env.
-NOFOLLOW_IMPORTS = (
-    "PySide2",
-    "PySide6",
-    "PyQt5",
-    "PyQt6",
-    "shiboken2",
-    "shiboken6",
-    "qtpy",
-    "qtconsole",
-    "IPython",
-    "ipykernel",
-    "ipywidgets",
-    "jupyter",
-    "jupyter_client",
-    "jupyter_core",
-    "matplotlib",
-    "matplotlib_inline",
-    "tkinter",
-    "PySide6-Addons",
-    "PySide6_Addons",
-    "PySide6-Essentials",
-    "PySide6_Essentials",
-)
-
+# Runtime-only deps (pytest is deliberately omitted from the build env).
 RUNTIME_REQUIREMENTS = (
     "fastapi>=0.115.0,<1.0",
     "uvicorn>=0.30.0,<1.0",
@@ -67,7 +45,7 @@ def resolve_executable(name: str) -> str:
     return path
 
 
-def run(command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
+def run(command: list[str], *, cwd: Path | None = None) -> None:
     if not command:
         raise ValueError("command must not be empty")
     workdir = str(cwd or ROOT)
@@ -76,9 +54,9 @@ def run(command: list[str], *, cwd: Path | None = None, env: dict[str, str] | No
         argv[0] = resolve_executable(argv[0])
     print("+", " ".join(argv), flush=True)
     if sys.platform == "win32" and argv[0].lower().endswith((".cmd", ".bat")):
-        subprocess.run(subprocess.list2cmdline(argv), cwd=workdir, check=True, shell=True, env=env)
+        subprocess.run(subprocess.list2cmdline(argv), cwd=workdir, check=True, shell=True)
         return
-    subprocess.run(argv, cwd=workdir, check=True, env=env)
+    subprocess.run(argv, cwd=workdir, check=True)
 
 
 def which_or_exit(name: str, hint: str) -> str:
@@ -95,12 +73,11 @@ def venv_python() -> Path:
 
 
 def ensure_build_venv() -> Path:
-    """Create/use an isolated env so global GUI/jupyter packages are not followed."""
+    """Isolated env: only declared runtime deps, no global GUI/jupyter bloat."""
     py = venv_python()
     if not py.is_file():
         print(f"Creating isolated build venv: {BUILD_VENV}", flush=True)
-        builder = venv.EnvBuilder(with_pip=True, clear=False)
-        builder.create(BUILD_VENV)
+        venv.EnvBuilder(with_pip=True, clear=False).create(BUILD_VENV)
     return py
 
 
@@ -126,6 +103,8 @@ def compile_with_nuitka(py: Path) -> None:
         if path.exists():
             shutil.rmtree(path)
 
+    # Rely on Nuitka's import graph for FastAPI/uvicorn/PIL/numpy/etc.
+    # Only force what static analysis cannot see.
     command = [
         str(py),
         "-m",
@@ -137,40 +116,13 @@ def compile_with_nuitka(py: Path) -> None:
         f"--output-dir={OUT_DIR}",
         f"--output-filename={APP_NAME}.exe",
         "--windows-console-mode=force",
-        "--include-package=core",
-        "--include-package=server",
-        "--include-package=runtime",
-        "--include-package=messaging",
-        "--include-package=manager",
-        "--include-package=routes",
-        "--include-package=ai_assistant",
+        # plugins.* are loaded via importlib / filesystem discovery
         "--include-package=plugins",
-        "--include-package=utils",
-        "--include-package=uvicorn",
-        "--include-package=fastapi",
-        "--include-package=starlette",
-        "--include-package=pydantic",
-        "--include-package=pydantic_core",
-        "--include-package=anyio",
-        "--include-package=httpx",
-        "--include-package=httpcore",
-        "--include-package=multipart",
-        "--include-package=loguru",
-        "--include-package=PIL",
-        "--include-package=numpy",
-        "--include-module=zxingcpp",
-        "--include-package-data=PIL",
+        # non-Python assets (not on the import graph)
         "--include-data-dir=frontend=frontend",
         "--include-data-dir=static=static",
-        "--nofollow-import-to=pytest",
-        "--nofollow-import-to=tests",
-        "--nofollow-import-to=_pytest",
-        "--nofollow-import-to=py",
-        "--nofollow-import-to=node_modules",
+        "main.py",
     ]
-    for name in NOFOLLOW_IMPORTS:
-        command.append(f"--nofollow-import-to={name}")
-    command.append("main.py")
     run(command)
 
     if MAIN_DIST.exists():
