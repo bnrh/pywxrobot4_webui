@@ -25,6 +25,7 @@ dist/
 *.build/
 *.dist/
 *.onefile-build/
+.venv-build/
 
 # Editor settings
 .vscode/*

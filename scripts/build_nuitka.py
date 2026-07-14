@@ -1,10 +1,15 @@
-"""Nuitka Windows standalone build for wxrobot_webui."""
+"""Nuitka Windows standalone build for wxrobot_webui.
+
+Uses an isolated venv so unused site-packages (PySide6, IPython, ...)
+are not available for Nuitka to follow via optional imports in numpy/PIL.
+"""
 
 from __future__ import annotations
 
 import shutil
 import subprocess
 import sys
+import venv
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +17,47 @@ APP_NAME = "wxrobot_webui"
 OUT_DIR = ROOT / "dist"
 DIST_DIR = OUT_DIR / f"{APP_NAME}.dist"
 MAIN_DIST = OUT_DIR / "main.dist"
+BUILD_VENV = ROOT / ".venv-build"
+
+# Optional imports that bloated standalone dist when present in the global env.
+NOFOLLOW_IMPORTS = (
+    "PySide2",
+    "PySide6",
+    "PyQt5",
+    "PyQt6",
+    "shiboken2",
+    "shiboken6",
+    "qtpy",
+    "qtconsole",
+    "IPython",
+    "ipykernel",
+    "ipywidgets",
+    "jupyter",
+    "jupyter_client",
+    "jupyter_core",
+    "matplotlib",
+    "matplotlib_inline",
+    "tkinter",
+    "PySide6-Addons",
+    "PySide6_Addons",
+    "PySide6-Essentials",
+    "PySide6_Essentials",
+)
+
+RUNTIME_REQUIREMENTS = (
+    "fastapi>=0.115.0,<1.0",
+    "uvicorn>=0.30.0,<1.0",
+    "loguru>=0.7.0,<1.0",
+    "pydantic>=2.7.0,<3.0",
+    "python-multipart>=0.0.9,<1.0",
+    "httpx>=0.27.0,<1.0",
+    "numpy>=1.26.0,<3.0",
+    "Pillow>=10.0.0,<12.0",
+    "zxing-cpp>=2.2.0,<3.0",
+    "nuitka",
+    "ordered-set",
+    "zstandard",
+)
 
 
 def resolve_executable(name: str) -> str:
@@ -21,20 +67,18 @@ def resolve_executable(name: str) -> str:
     return path
 
 
-def run(command: list[str], *, cwd: Path | None = None) -> None:
+def run(command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
     if not command:
         raise ValueError("command must not be empty")
     workdir = str(cwd or ROOT)
     argv = list(command)
-    # Absolute python/exe paths are used as-is; bare names need PATH resolution.
     if Path(argv[0]).name == argv[0]:
         argv[0] = resolve_executable(argv[0])
     print("+", " ".join(argv), flush=True)
-    # Windows cannot CreateProcess .cmd/.bat without a shell.
     if sys.platform == "win32" and argv[0].lower().endswith((".cmd", ".bat")):
-        subprocess.run(subprocess.list2cmdline(argv), cwd=workdir, check=True, shell=True)
+        subprocess.run(subprocess.list2cmdline(argv), cwd=workdir, check=True, shell=True, env=env)
         return
-    subprocess.run(argv, cwd=workdir, check=True)
+    subprocess.run(argv, cwd=workdir, check=True, env=env)
 
 
 def which_or_exit(name: str, hint: str) -> str:
@@ -42,6 +86,22 @@ def which_or_exit(name: str, hint: str) -> str:
     if path is None:
         raise SystemExit(f"[ERROR] {name} not found. {hint}")
     return path
+
+
+def venv_python() -> Path:
+    if sys.platform == "win32":
+        return BUILD_VENV / "Scripts" / "python.exe"
+    return BUILD_VENV / "bin" / "python"
+
+
+def ensure_build_venv() -> Path:
+    """Create/use an isolated env so global GUI/jupyter packages are not followed."""
+    py = venv_python()
+    if not py.is_file():
+        print(f"Creating isolated build venv: {BUILD_VENV}", flush=True)
+        builder = venv.EnvBuilder(with_pip=True, clear=False)
+        builder.create(BUILD_VENV)
+    return py
 
 
 def build_frontend() -> None:
@@ -54,27 +114,26 @@ def build_frontend() -> None:
         raise SystemExit("[ERROR] static/dist missing after Vite build.")
 
 
-def install_python_deps() -> None:
-    print("\n===== [2/4] Install Python deps and Nuitka =====", flush=True)
-    py = sys.executable
-    run([py, "-m", "pip", "install", "-U", "pip", "setuptools", "wheel"])
-    run([py, "-m", "pip", "install", "-r", "requirements.txt"])
-    run([py, "-m", "pip", "install", "-U", "nuitka", "ordered-set", "zstandard"])
+def install_python_deps(py: Path) -> None:
+    print("\n===== [2/4] Install runtime deps into build venv =====", flush=True)
+    run([str(py), "-m", "pip", "install", "-U", "pip", "setuptools", "wheel"])
+    run([str(py), "-m", "pip", "install", "-U", *RUNTIME_REQUIREMENTS])
 
 
-def compile_with_nuitka() -> None:
-    print("\n===== [3/4] Nuitka compile (standalone) =====", flush=True)
+def compile_with_nuitka(py: Path) -> None:
+    print("\n===== [3/4] Nuitka compile (standalone, isolated venv) =====", flush=True)
     for path in (OUT_DIR / f"{APP_NAME}.build", DIST_DIR, MAIN_DIST):
         if path.exists():
             shutil.rmtree(path)
 
     command = [
-        sys.executable,
+        str(py),
         "-m",
         "nuitka",
         "--standalone",
         "--assume-yes-for-downloads",
         "--remove-output",
+        "--enable-plugin=anti-bloat",
         f"--output-dir={OUT_DIR}",
         f"--output-filename={APP_NAME}.exe",
         "--windows-console-mode=force",
@@ -108,8 +167,10 @@ def compile_with_nuitka() -> None:
         "--nofollow-import-to=_pytest",
         "--nofollow-import-to=py",
         "--nofollow-import-to=node_modules",
-        "main.py",
     ]
+    for name in NOFOLLOW_IMPORTS:
+        command.append(f"--nofollow-import-to={name}")
+    command.append("main.py")
     run(command)
 
     if MAIN_DIST.exists():
@@ -130,8 +191,9 @@ def main() -> int:
 
     try:
         build_frontend()
-        install_python_deps()
-        compile_with_nuitka()
+        py = ensure_build_venv()
+        install_python_deps(py)
+        compile_with_nuitka(py)
     except subprocess.CalledProcessError as exc:
         raise SystemExit(f"[ERROR] Command failed with exit code {exc.returncode}") from exc
 
