@@ -104,7 +104,7 @@ message_summary = True   # 消息汇总类插件的配置渲染特判
 
 ### `context.api`
 
-统一调用 wxrobot_api，例如：
+统一调用 pywxrobot4，例如：
 
 - 发送消息
 - 获取联系人

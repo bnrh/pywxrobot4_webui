@@ -18,7 +18,7 @@ This repository loads Python plugins directly from plugins/*.py and manages conf
 
 ## Repository-Native Capabilities
 
-- context.api: wrapped wxrobot_api client for send_text, send_image, room members, downloads, and other platform calls
+- context.api: wrapped pywxrobot4 client for send_text, send_image, room members, downloads, and other platform calls
 - context.logger: structured logger with debug, info, warning, error, and scope(name)
 - context.state: SQLite-backed persistent store for counters, caches, and deduplication (batched commits via db_connection)
 - context.hot_reload: metadata about file reload status

@@ -4,7 +4,7 @@
 
 “智能插件”页面对应的核心实现位于 [ai_assistant](../ai_assistant) 与 [server](../server) / [routes](../routes)。
 
-它的目标不是单纯聊天，而是让模型在当前微信上下文里调用 wxrobot_api 工具完成实际操作，例如：
+它的目标不是单纯聊天，而是让模型在当前微信上下文里调用 pywxrobot4 工具完成实际操作，例如：
 
 - 查询登录账号、群聊、好友、群成员。
 - 发送文本、图片、文件、视频、GIF。
@@ -52,7 +52,7 @@
 当前智能插件不是简单拼装 HTTP 接口列表，而是两层工具面合并：
 
 1. 本地增强工具：例如 `count_shared_room_members`、`list_shared_room_members`、`count_room_friend_members`、`list_room_friend_members`。
-2. wxrobot_api MCP 工具：从 `wxrobot_api/api/mcp_server.py` 提取工具定义，并通过 `/mcp` 能力执行。
+2. pywxrobot4 MCP 工具：从 pywxrobot4 的 MCP 服务提取工具定义，并通过 `/mcp` 能力执行。
 
 这意味着模型能直接看到一份更稳定、更适合工具调用的 schema，而不是依赖页面层自己拼接接口说明。
 
@@ -143,7 +143,7 @@
 
 ### 为什么有的工具看起来不是页面里手写定义的
 
-因为工具定义会从 wxrobot_api MCP 服务中提取并合并进来，这也是当前智能插件和旧文档里“HTTP 接口拼装”思路最大的区别之一。
+因为工具定义会从 pywxrobot4 MCP 服务中提取并合并进来，这也是当前智能插件和旧文档里“HTTP 接口拼装”思路最大的区别之一。
 
 ### 对话能不能中断
 

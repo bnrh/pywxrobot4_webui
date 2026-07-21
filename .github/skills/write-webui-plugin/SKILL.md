@@ -26,7 +26,7 @@ argument-hint: 'What plugin should be created or changed?'
    - Prefer config_schema field types already used in this repo instead of inventing new frontend controls.
    - For one-click functional plugins declare direct_execute = True; for summary exporters also declare message_summary = True.
 4. Implement with repository-native primitives.
-   - Use context.api for wxrobot_api calls.
+   - Use context.api for pywxrobot4 calls.
    - Use context.state or context.state.namespace(...) for persistent counters, caches, and deduplication.
    - Use context.logger for structured logs instead of print.
    - Normalize text, message types, XML, room scopes, SQL rows, and HTTP with helpers from plugins/_plugin_sdk.py when possible (async_http_get/post, extract_sql_rows, parse_int, etc.).

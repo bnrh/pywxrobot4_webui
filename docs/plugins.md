@@ -6,11 +6,11 @@
 
 核心链路如下：
 
-1. wxrobot_api 将消息回调到 `/messages`。
+1. pywxrobot4 将消息回调到 `/messages`。
 2. [runtime](../runtime) 将消息写入异步队列。
 3. Worker 协程从队列中取出消息。
 4. [manager](../manager) 依次调度已启用插件。
-5. 插件通过 `context.api` 调用 wxrobot_api，通过 `context.logger` 记录结构化日志，通过 `context.state` 持久化状态。
+5. 插件通过 `context.api` 调用 pywxrobot4，通过 `context.logger` 记录结构化日志，通过 `context.state` 持久化状态。
 
 ## 2. 插件类型
 
@@ -62,7 +62,7 @@
 
 `context` 提供的核心能力：
 
-- `context.api`：统一访问 wxrobot_api。
+- `context.api`：统一访问 pywxrobot4。
 - `context.logger`：输出结构化日志。
 - `context.state`：使用 SQLite 持久化插件状态。
 - `context.hot_reload`：当前调度前的热重载状态信息。
