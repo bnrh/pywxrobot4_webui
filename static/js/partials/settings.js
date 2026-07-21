@@ -50,7 +50,7 @@ export const html = `                <section class="panel-shell shell-card tab-
                         </label>
                         <label class="field-group field-span-2">
                             <span class="field-label">消息回调密钥 callback_secret</span>
-                            <input name="callback_secret" type="password" autocomplete="new-password" placeholder="留空表示不校验；wxrobot_api 需在请求头携带 X-Callback-Secret">
+                            <input name="callback_secret" type="password" autocomplete="new-password" placeholder="留空表示不校验；pywxrobot4 需在请求头携带 X-Callback-Secret">
                         </label>
                         <div class="field-actions field-span-2">
                             <button class="button primary" type="submit">保存系统设置</button>

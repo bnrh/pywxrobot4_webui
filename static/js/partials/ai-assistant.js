@@ -33,7 +33,7 @@ export const html = `                <section class="panel-shell shell-card tab-
                             </div>
                             <div class="settings-alert" id="aiAssistantAlert"></div>
                             <div class="badge-row" id="aiAssistantProviderBadgeRow"></div>
-                            <div class="detail-meta" id="aiAssistantConversationMeta">智能插件会优先使用 wxrobot_api 工具完成查询、发送和群管理等操作。</div>
+                            <div class="detail-meta" id="aiAssistantConversationMeta">智能插件会优先使用 pywxrobot4 工具完成查询、发送和群管理等操作。</div>
                             <div class="smart-chat-transcript" id="aiAssistantConversation"></div>
                             <form class="settings-form smart-chat-form" id="aiAssistantPromptForm">
                                 <label class="field-group field-span-2">
