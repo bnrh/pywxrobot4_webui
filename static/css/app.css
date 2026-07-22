@@ -1,4 +1,4 @@
-:root {
+﻿:root {
     color-scheme: dark;
     --font-display: "Bahnschrift", "Trebuchet MS", "Microsoft YaHei UI", sans-serif;
     --font-body: "Microsoft YaHei UI", "Segoe UI Variable Text", sans-serif;
@@ -1650,6 +1650,8 @@ optgroup {
     display: grid;
     gap: 10px;
     min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .config-object-table-header,
@@ -1657,7 +1659,7 @@ optgroup {
     display: grid;
     gap: 12px;
     align-items: center;
-    min-width: 0;
+    width: fit-content;
 }
 
 .config-object-table-header {
@@ -1673,7 +1675,15 @@ optgroup {
 }
 
 .config-object-table-heading.is-actions {
-    justify-self: end;
+    justify-self: stretch;
+    position: sticky;
+    right: 0;
+    z-index: 2;
+    padding-left: 14px;
+    padding-right: 14px;
+    margin-right: -14px;
+    text-align: center;
+    background: #0E1621;
 }
 
 .config-object-table-row {
@@ -1681,6 +1691,22 @@ optgroup {
     border-radius: 14px;
     border: 1px solid rgba(145, 189, 232, 0.12);
     background: rgba(3, 10, 18, 0.72);
+    position: relative;
+}
+
+.config-object-table-row::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    background: rgba(3, 10, 18, 0.72);
+    border-radius: 14px;
+    border: 1px solid rgba(145, 189, 232, 0.12);
+    width: max-content;
+    min-width: 100%;
+    z-index: -1;
 }
 
 .config-object-table-row.is-editing {
@@ -1781,6 +1807,15 @@ optgroup {
     justify-content: flex-end;
     flex-wrap: wrap;
     align-items: center;
+    position: sticky;
+    right: 0;
+    z-index: 2;
+    padding-left: 14px;
+    padding-right: 14px;
+    margin-right: -14px;
+    background: #060D15;
+    padding-top: 8px; 
+    padding-bottom: 8px
 }
 
 .config-object-table-row.is-editing .config-object-table-actions {
@@ -1788,6 +1823,11 @@ optgroup {
     justify-content: flex-end;
     padding-top: 4px;
     border-top: 1px solid rgba(145, 189, 232, 0.1);
+    position: static;
+    background: transparent;
+    padding-left: 0;
+    padding-right: 0;
+    margin-right: 0;
 }
 
 .config-object-table-error {
