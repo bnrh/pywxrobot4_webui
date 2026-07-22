@@ -227,6 +227,24 @@ function renderProjectFilePickerInput(field, value, datasetKey = "data-config-ke
     `;
 }
 
+function renderProjectFolderPickerInput(field, value, datasetKey = "data-config-key") {
+    const currentValue = value ?? "";
+    const buttonLabel = String(field.pick_label || field.button_label || "选择文件夹").trim() || "选择文件夹";
+    return `
+        <div class="config-file-picker">
+            <input type="text" ${datasetKey}="${escapeHtml(field.key)}" value="${escapeHtml(currentValue)}" placeholder="${escapeHtml(field.placeholder || "")}">
+            <button
+                class="button secondary compact"
+                type="button"
+                data-config-pick-project-folder
+                data-target-key="${escapeHtml(field.key)}"
+                data-upload-dir="${escapeHtml(String(field.upload_dir || "uploads").trim())}"
+                data-accept="${escapeHtml(String(field.accept || "").trim())}"
+            >${escapeHtml(buttonLabel)}</button>
+        </div>
+    `;
+}
+
 function renderFetchOptionsTextInput(field, value, datasetKey = "data-config-key") {
     const currentValue = value ?? "";
     const inputType = escapeHtml(field.input_type || field.type || "text");
@@ -263,11 +281,34 @@ function renderPrimitiveInput(field, value, datasetKey = "data-config-key") {
     if (field.file_picker === "project-image") {
         return renderProjectFilePickerInput(field, currentValue, datasetKey);
     }
+    if (field.file_picker === "project-folder") {
+        return renderProjectFolderPickerInput(field, currentValue, datasetKey);
+    }
     if (field.fetch_options_button) {
         return renderFetchOptionsTextInput(field, currentValue, datasetKey);
     }
     if (field.type === "textarea") {
-        return `<textarea ${datasetKey}="${escapeHtml(field.key)}" rows="${escapeHtml(String(field.rows || 4))}" placeholder="${escapeHtml(field.placeholder || "")}">${escapeHtml(currentValue)}</textarea>`;
+        const filePickers = Array.isArray(field.file_pickers) ? field.file_pickers : [];
+        const pickerButtons = filePickers.map((picker, idx) => {
+            const pickerType = picker.type || "";
+            const pickerLabel = picker.label || "选择";
+            const dataAttrs = [];
+            if (pickerType) {
+                dataAttrs.push(`data-textarea-picker="${escapeHtml(pickerType)}"`);
+            }
+            if (picker.accept) {
+                dataAttrs.push(`data-picker-accept="${escapeHtml(picker.accept)}"`);
+            }
+            if (picker.upload_dir) {
+                dataAttrs.push(`data-picker-upload-dir="${escapeHtml(picker.upload_dir)}"`);
+            }
+            return `<button class="button secondary compact textarea-picker-button" type="button" ${dataAttrs.join(" ")}>${escapeHtml(pickerLabel)}</button>`;
+        }).join("");
+        const pickerBar = filePickers.length ? `<div class="textarea-picker-bar">${pickerButtons}</div>` : "";
+        return `<div class="textarea-with-pickers">
+            <textarea ${datasetKey}="${escapeHtml(field.key)}" rows="${escapeHtml(String(field.rows || 4))}" placeholder="${escapeHtml(field.placeholder || "")}">${escapeHtml(currentValue)}</textarea>
+            ${pickerBar}
+        </div>`;
     }
     if (field.type === "checkbox") {
         return `
