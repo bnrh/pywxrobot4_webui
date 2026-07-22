@@ -1652,6 +1652,8 @@ optgroup {
     min-width: 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    max-height: 460px;
+    overflow-y: auto;
 }
 
 .config-object-table-header,
@@ -1663,7 +1665,10 @@ optgroup {
 }
 
 .config-object-table-header {
-    padding: 0 14px;
+    padding: 12px 14px;
+    position: sticky;
+    top: 0;
+    z-index: 3;
 }
 
 .config-object-table-heading {
