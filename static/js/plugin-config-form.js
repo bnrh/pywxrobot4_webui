@@ -631,11 +631,15 @@ function renderObjectTableRow(field, rowValue = {}) {
     const row = rowValue && typeof rowValue === "object" ? rowValue : {};
     return `
         <div class="config-object-table-row" data-config-row data-row-value="${escapeHtml(JSON.stringify(row))}" ${getObjectTableGridStyle(field)}>
-            ${(Array.isArray(field.columns) ? field.columns : []).map((column) => `
+            ${(Array.isArray(field.columns) ? field.columns : []).map((column) => {
+                const cellValue = formatObjectTableValue(column, row[column.key]);
+                const fullValue = String(row[column.key] ?? "").trim();
+                const hasLongContent = fullValue.split("\n").length > 2 || fullValue.length > 100;
+                return `
                 <div class="config-object-table-cell">
-                    <div class="config-object-table-value">${escapeHtml(formatObjectTableValue(column, row[column.key]))}</div>
+                    <div class="config-object-table-value" ${hasLongContent ? `title="${escapeHtml(fullValue)}"` : ""}>${escapeHtml(cellValue)}</div>
                 </div>
-            `).join("")}
+            `}).join("")}
             <div class="config-object-table-actions">
                 <button class="button secondary compact" type="button" data-config-form-action="edit-row" data-field="${escapeHtml(field.key)}">编辑</button>
                 <button class="button ghost compact config-row-remove" type="button" data-config-form-action="remove-row" data-field="${escapeHtml(field.key)}">删除</button>

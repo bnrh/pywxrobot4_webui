@@ -1753,9 +1753,26 @@ optgroup {
     min-height: 20px;
     color: var(--text);
     line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    position: relative;
+    cursor: pointer;
+}
+
+.config-object-table-value:hover {
+    display: block;
+    overflow: visible;
+    text-overflow: clip;
+    background: rgba(0, 0, 0, 0.8);
+    border-radius: 6px;
+    padding: 8px;
+    z-index: 10;
+    max-height: 300px;
+    overflow-y: auto;
 }
 
 .config-object-table-actions {
