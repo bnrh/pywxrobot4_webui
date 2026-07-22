@@ -148,6 +148,63 @@ def register_core_api_routes(app: FastAPI, ctx: AppContext, callback_path: str) 
             "size": len(content),
         }
 
+    @app.get("/api/folders/browse")
+    async def browse_folders(path: str = "") -> dict:
+        """浏览本地目录，返回指定路径下的子目录列表。
+
+        用于前端「选择文件夹」按钮，支持获取完整目录路径。
+        """
+        # 解析目标路径：空或相对路径基于项目根目录
+        raw_path = str(path or "").strip()
+        if not raw_path:
+            target = PROJECT_ROOT
+        else:
+            candidate = Path(raw_path)
+            target = candidate if candidate.is_absolute() else (PROJECT_ROOT / candidate)
+
+        try:
+            target = target.resolve()
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=f"路径解析失败：{exc}") from exc
+
+        if not target.exists():
+            raise HTTPException(status_code=400, detail="指定路径不存在")
+        if not target.is_dir():
+            raise HTTPException(status_code=400, detail="指定路径不是目录")
+
+        # 计算父目录用于「返回上级」
+        parent_path = ""
+        try:
+            parent = target.parent
+            # 父目录必须是真实存在的目录，且不能等于自身（盘符根目录的 parent 是自身）
+            if parent.exists() and parent.is_dir() and parent != target:
+                parent_path = str(parent)
+        except (OSError, RuntimeError):
+            parent_path = ""
+
+        # 列出子目录
+        entries = []
+        try:
+            for item in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+                if not item.is_dir():
+                    continue
+                # 跳过隐藏目录和系统目录
+                if item.name.startswith(".") or item.name in {"$RECYCLE.BIN", "System Volume Information"}:
+                    continue
+                entries.append({
+                    "name": item.name,
+                    "path": str(item),
+                })
+        except (OSError, PermissionError) as exc:
+            raise HTTPException(status_code=400, detail=f"读取目录失败：{exc}") from exc
+
+        return {
+            "current_path": str(target),
+            "parent_path": parent_path,
+            "is_root": str(target) == str(PROJECT_ROOT.resolve()) or len(target.parts) <= 1,
+            "entries": entries,
+        }
+
     @app.get("/api/message-types")
     async def message_types() -> dict:
         from messaging.types import build_message_types_payload
