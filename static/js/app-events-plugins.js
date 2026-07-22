@@ -24,6 +24,17 @@ bindOnce(elements.refreshPluginsButton, "plugins.refreshPlugins", "click", async
     }
 });
 
+bindOnce(elements.reloadPluginsButton, "plugins.reloadPlugins", "click", async () => {
+    try {
+        actions.setStatus("正在从源码重新加载插件...");
+        await actions.reloadPluginsFromSource();
+        await actions.loadPlugins();
+        actions.setStatus("插件已从源码重新加载", "good");
+    } catch (error) {
+        actions.setStatus(`插件重新加载失败：${error.message}`, "bad");
+    }
+});
+
 bindOnce(elements.refreshFeaturePluginsButton, "plugins.refreshFeatures", "click", async () => {
     try {
         actions.setStatus("正在刷新功能插件...");
@@ -31,6 +42,17 @@ bindOnce(elements.refreshFeaturePluginsButton, "plugins.refreshFeatures", "click
         actions.setStatus("功能插件已刷新", "good");
     } catch (error) {
         actions.setStatus(`功能插件刷新失败：${error.message}`, "bad");
+    }
+});
+
+bindOnce(elements.reloadFeaturePluginsButton, "plugins.reloadFeatures", "click", async () => {
+    try {
+        actions.setStatus("正在从源码重新加载插件...");
+        await actions.reloadPluginsFromSource();
+        await actions.loadPlugins();
+        actions.setStatus("插件已从源码重新加载", "good");
+    } catch (error) {
+        actions.setStatus(`插件重新加载失败：${error.message}`, "bad");
     }
 });
 

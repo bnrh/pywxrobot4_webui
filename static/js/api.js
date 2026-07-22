@@ -179,6 +179,9 @@ export const api = {
     reloadPlugins() {
         return requestJson("/api/plugins/reload", { method: "POST" });
     },
+    reloadPluginsFromSource() {
+        return requestJson("/api/plugins/reload-source", { method: "POST" });
+    },
     togglePlugin(moduleName, enabled) {
         return requestJson(`/api/plugins/${encodeURIComponent(moduleName)}/toggle`, {
             method: "POST",

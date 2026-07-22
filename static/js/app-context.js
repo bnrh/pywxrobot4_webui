@@ -267,6 +267,14 @@ export function createAppContext() {
         setStatus(`重载完成${suffix}`, result.restart_required ? "bad" : "good");
     }
 
+    async function reloadPluginsFromSource() {
+        setStatus("正在从源码重新加载插件...");
+        const result = await api.reloadPluginsFromSource();
+        applyPluginMutationResult(result);
+        const suffix = result.restart_required ? `，需要重启字段：${result.restart_required_fields.join(", ")}` : "";
+        setStatus(`插件已从源码重新加载${suffix}`, result.restart_required ? "bad" : "good");
+    }
+
     function switchTab(tabName) {
         state.activeTab = tabName;
         ensurePanelLoaded(tabName, elements)
@@ -338,6 +346,7 @@ export function createAppContext() {
         setStoredApiToken,
         switchTab,
         reloadFromConfig,
+        reloadPluginsFromSource,
         updateHeaderForTab,
         syncMessageTypeLabels,
         applyPluginMutationResult,
