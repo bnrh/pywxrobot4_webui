@@ -2046,6 +2046,109 @@ optgroup {
     margin: 0;
 }
 
+/* ===== 本地目录选择对话框 ===== */
+
+.textarea-with-pickers {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.textarea-picker-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.textarea-picker-button {
+    flex-shrink: 0;
+}
+
+.folder-picker-backdrop {
+    z-index: 100;
+}
+
+.folder-picker-card {
+    width: min(720px, 100%);
+}
+
+.folder-picker-toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.folder-picker-path-input {
+    margin: 0;
+    min-width: 0;
+}
+
+.folder-picker-current {
+    font-size: 13px;
+    color: var(--muted-color, #8a94a6);
+    word-break: break-all;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 6px;
+}
+
+.folder-picker-list {
+    min-height: 240px;
+    max-height: 360px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+}
+
+.folder-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: inherit;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.folder-picker-item:hover,
+.folder-picker-item:focus-visible {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.folder-picker-item-icon {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.folder-picker-item-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.folder-picker-empty {
+    padding: 24px 12px;
+    text-align: center;
+    color: var(--muted-color, #8a94a6);
+    font-size: 13px;
+}
+
+.folder-picker-empty.is-error {
+    color: #ff6b6b;
+}
+
 .config-searchable-select-input {
     padding-right: 52px;
 }
