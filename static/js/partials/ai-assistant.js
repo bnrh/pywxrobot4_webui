@@ -4,6 +4,7 @@ export const html = `                <section class="panel-shell shell-card tab-
                     <div class="panel-toolbar">
                         <div class="panel-actions">
                             <button class="button secondary" id="refreshAiAssistantButton" type="button">刷新智能插件</button>
+                            <button class="button secondary" id="reloadAiAssistantPluginsButton" type="button">重新加载插件</button>
                             <button class="button secondary compact smart-toolbar-button" id="newAiAssistantConversationButton" type="button">新建对话</button>
                             <button class="button ghost compact smart-toolbar-button" id="openAiAssistantConversationSwitcherButton" type="button">切换对话</button>
                             <button class="button ghost" id="clearAiAssistantConversationButton" type="button">清空对话</button>

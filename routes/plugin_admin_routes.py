@@ -29,6 +29,19 @@ def register_plugin_admin_routes(app: FastAPI, ctx: AppContext) -> None:
         reload_state = await sync_runtime_with_config(ctx.runtime, configured_settings)
         return ctx.with_mutation_payload(reload_state)
 
+    @app.post("/api/plugins/reload-source")
+    async def reload_plugins_from_source() -> dict:
+        configured_settings = PluginServiceSettings.from_storage()
+        await ctx.runtime.reload(configured_settings)
+        return ctx.with_mutation_payload(
+            {
+                "changed_fields": ["plugins", "plugin_settings"],
+                "applied_fields": ["plugins", "plugin_settings"],
+                "restart_required_fields": [],
+                "restart_required": False,
+            }
+        )
+
     @app.post("/api/plugins/{module_name}/toggle")
     async def toggle_plugin(module_name: str, item: PluginToggleRequest) -> dict:
         configured_settings = PluginServiceSettings.from_storage()

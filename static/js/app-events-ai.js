@@ -100,6 +100,17 @@ bindOnce(elements.refreshAiAssistantButton, "ai.refresh", "click", async () => {
     }
 });
 
+bindOnce(elements.reloadAiAssistantPluginsButton, "ai.reloadPlugins", "click", async () => {
+    try {
+        actions.setStatus("正在从源码重新加载插件...");
+        await actions.reloadPluginsFromSource();
+        await actions.loadAiAssistant();
+        actions.setStatus("插件已从源码重新加载", "good");
+    } catch (error) {
+        actions.setStatus(`插件重新加载失败：${error.message}`, "bad");
+    }
+});
+
 bindOnce(elements.newAiAssistantConversationButton, "ai.newConversation", "click", async () => {
     try {
         actions.setStatus("正在新建对话...");
