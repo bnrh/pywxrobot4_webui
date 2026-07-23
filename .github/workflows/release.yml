@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags:
+      # 匹配 v 开头的所有标签，例如 v0.2.3、v1.0.0
+      - 'v*'
+
+# 创建 Release 需要写入仓库内容的权限
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # 自动生成变更日志（基于 commits / PRs）
+          generate_release_notes: true
+          # 非正式版本（标签名包含 -，如 v0.2.3-rc1）自动标记为预发布
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          draft: false
