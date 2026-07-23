@@ -225,7 +225,6 @@ def register_settings_routes(app: FastAPI, ctx: AppContext) -> None:
                         cmd,
                         cwd=cwd,
                         startupinfo=startupinfo,
-                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                     )
                     logger.info(f"新进程已启动，PID: {proc.pid}")
                 else:
