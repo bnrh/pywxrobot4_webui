@@ -48,6 +48,8 @@ SYSTEM_SETTING_FIELDS = (
     "image_download_timeout",
     "api_token",
     "callback_secret",
+    "pywxrobot_dir",
+    "robot_type",
 )
 
 
@@ -150,6 +152,8 @@ def _read_legacy_webui_config(config_path: str | Path | None = None) -> dict[str
         "image_download_timeout": int(webui_config.get("image_download_timeout", 15)),
         "api_token": str(webui_config.get("api_token", "") or "").strip(),
         "callback_secret": str(webui_config.get("callback_secret", "") or "").strip(),
+        "pywxrobot_dir": str(webui_config.get("pywxrobot_dir", "") or "").strip(),
+        "robot_type": str(webui_config.get("robot_type", "pywxrobot") or "pywxrobot").strip(),
     }
 
 
@@ -471,6 +475,8 @@ class PluginServiceSettings(BaseModel):
     image_download_timeout: int = Field(15, ge=1, le=120, description="图片下载等待超时")
     api_token: str = Field("", description="Web API 访问令牌，留空表示不启用鉴权")
     callback_secret: str = Field("", description="微信消息回调共享密钥，留空表示不校验")
+    pywxrobot_dir: str = Field("", description="pywxrobot 目录路径")
+    robot_type: str = Field("pywxrobot", description="机器人类型，pywxrobot 或 pywxrobot_mcp")
 
     @field_validator("callback_path")
     @classmethod

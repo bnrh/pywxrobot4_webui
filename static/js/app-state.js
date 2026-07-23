@@ -118,6 +118,8 @@ const ELEMENT_IDS = [
     "settingsAlert",
     "refreshSettingsButton",
     "restartSystemButton",
+    "restartRobotButton",
+    "selectPywxrobotDirButton",
     "logFileSelect",
     "logTimeRange",
     "logLevelFilter",

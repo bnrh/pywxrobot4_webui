@@ -2,6 +2,7 @@
 
 import { SECRET_SETTINGS_PLACEHOLDER } from "./api.js";
 import { bindOnce } from "./dom-bind.js";
+import { openFolderPickerDialog } from "./folder-picker.js";
 
 export function registerSettingsEvents(actions) {
     const { elements } = actions;
@@ -47,6 +48,36 @@ export function registerSettingsEvents(actions) {
         } catch (error) {
             actions.setStatus(`服务重启失败：${error.message}`, "bad");
             elements.restartSystemButton.disabled = false;
+        }
+    });
+
+    bindOnce(elements.selectPywxrobotDirButton, "settings.browseDir", "click", async () => {
+        const dirInput = elements.settingsForm?.elements?.namedItem("pywxrobot_dir");
+        const initialPath = dirInput ? dirInput.value.trim() : "";
+        try {
+            const selected = await openFolderPickerDialog({
+                title: "选择 pywxrobot 目录",
+                initialPath,
+            });
+            if (selected && dirInput) {
+                dirInput.value = selected;
+            }
+        } catch (error) {
+            actions.setStatus(`选择目录失败：${error.message}`, "bad");
+        }
+    });
+
+    bindOnce(elements.restartRobotButton, "settings.restartRobot", "click", async () => {
+        if (!window.confirm("确定要重启机器人吗？将关闭当前正在运行的机器人程序并重新启动。")) {
+            return;
+        }
+        elements.restartRobotButton.disabled = true;
+        try {
+            await actions.restartRobot();
+        } catch (error) {
+            actions.setStatus(`机器人重启失败：${error.message}`, "bad");
+        } finally {
+            elements.restartRobotButton.disabled = false;
         }
     });
 }

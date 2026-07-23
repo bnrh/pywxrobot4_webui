@@ -305,6 +305,15 @@ export function createAppContext() {
         poll();
     }
 
+    async function restartRobot() {
+        setStatus("正在重启机器人...");
+        const result = await api.restartRobot();
+        const killedInfo = Array.isArray(result.killed_pids) && result.killed_pids.length
+            ? `，已终止旧进程: ${result.killed_pids.join(", ")}`
+            : "";
+        setStatus(`机器人已重启${killedInfo}`, "good");
+    }
+
     function switchTab(tabName) {
         state.activeTab = tabName;
         ensurePanelLoaded(tabName, elements)
@@ -378,6 +387,7 @@ export function createAppContext() {
         reloadFromConfig,
         reloadPluginsFromSource,
         restartSystem,
+        restartRobot,
         updateHeaderForTab,
         syncMessageTypeLabels,
         applyPluginMutationResult,

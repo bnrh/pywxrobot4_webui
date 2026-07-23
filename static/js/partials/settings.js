@@ -5,6 +5,7 @@ export const html = `                <section class="panel-shell shell-card tab-
                         <div class="panel-actions">
                             <button class="button secondary" id="refreshSettingsButton" type="button">刷新设置</button>
                             <button class="button ghost" id="restartSystemButton" type="button">重启服务</button>
+                            <button class="button secondary" id="restartRobotButton" type="button">重启机器人</button>
                         </div>
                     </div>
                     <div class="settings-alert" id="settingsAlert"></div>
@@ -52,6 +53,20 @@ export const html = `                <section class="panel-shell shell-card tab-
                         <label class="field-group field-span-2">
                             <span class="field-label">消息回调密钥 callback_secret</span>
                             <input name="callback_secret" type="password" autocomplete="new-password" placeholder="留空表示不校验；pywxrobot4 需在请求头携带 X-Callback-Secret">
+                        </label>
+                        <label class="field-group">
+                            <span class="field-label">pywxrobot 目录</span>
+                            <div class="file-input-group">
+                                <input name="pywxrobot_dir" type="text" placeholder="请输入或选择目录">
+                                <button type="button" class="button compact" id="selectPywxrobotDirButton">选择目录</button>
+                            </div>
+                        </label>
+                        <label class="field-group">
+                            <span class="field-label">机器人类型</span>
+                            <div class="radio-group">
+                                <label class="radio-item"><input type="radio" name="robot_type" value="pywxrobot" checked> pywxrobot</label>
+                                <label class="radio-item"><input type="radio" name="robot_type" value="pywxrobot_mcp"> pywxrobot_mcp</label>
+                            </div>
                         </label>
                         <div class="field-actions field-span-2">
                             <button class="button primary" type="submit">保存系统设置</button>

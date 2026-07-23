@@ -24,6 +24,8 @@ RUNTIME_LIGHT_REFRESH_FIELDS = {
     "image_download_flag",
     "image_download_wait",
     "image_download_timeout",
+    "pywxrobot_dir",
+    "robot_type",
 }
 PLUGIN_MANAGER_RELOAD_FIELDS = {"plugins", "plugin_settings"}
 SYSTEM_SETTINGS_FIELDS = (
@@ -41,6 +43,8 @@ SYSTEM_SETTINGS_FIELDS = (
     "image_download_timeout",
     "api_token",
     "callback_secret",
+    "pywxrobot_dir",
+    "robot_type",
 )
 SECRET_SETTINGS_PLACEHOLDER = "******"
 REMOVED_PLUGIN_MODULES = {normalize_plugin_module_name("webui.plugins.monitor_biz")}
