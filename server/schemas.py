@@ -31,6 +31,8 @@ class SystemSettingsUpdateRequest(BaseModel):
     heartbeat_interval_seconds: int = Field(..., ge=0, le=3600)
     api_token: str = ""
     callback_secret: str = ""
+    pywxrobot_dir: str = ""
+    robot_type: str = "pywxrobot"
 
 
 class AiAssistantSettingsUpdateRequest(BaseModel):

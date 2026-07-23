@@ -17,6 +17,8 @@ export function readSettingsForm(elements) {
         heartbeat_interval_seconds: Number(form.heartbeat_interval_seconds.value),
         api_token: form.api_token.value.trim(),
         callback_secret: form.callback_secret.value.trim(),
+        pywxrobot_dir: form.pywxrobot_dir.value.trim(),
+        robot_type: form.robot_type.value,
     };
 }
 

@@ -185,6 +185,9 @@ export const api = {
     restartSystem() {
         return requestJson("/api/system/restart", { method: "POST" });
     },
+    restartRobot() {
+        return requestJson("/api/robot/restart", { method: "POST" });
+    },
     togglePlugin(moduleName, enabled) {
         return requestJson(`/api/plugins/${encodeURIComponent(moduleName)}/toggle`, {
             method: "POST",

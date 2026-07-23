@@ -1,4 +1,4 @@
-﻿:root {
+:root {
     color-scheme: dark;
     --font-display: "Bahnschrift", "Trebuchet MS", "Microsoft YaHei UI", sans-serif;
     --font-body: "Microsoft YaHei UI", "Segoe UI Variable Text", sans-serif;
@@ -2405,6 +2405,36 @@ optgroup {
 
 .field-span-2 {
     grid-column: span 2;
+}
+
+.file-input-group {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.radio-group {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    min-height: 48px;
+}
+
+.radio-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--muted-strong);
+}
+
+.radio-item input[type="radio"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
 }
 
 .toggle-field {
