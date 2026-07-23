@@ -36,4 +36,17 @@ export function registerSettingsEvents(actions) {
             actions.setStatus(`系统设置刷新失败：${error.message}`, "bad");
         }
     });
+
+    bindOnce(elements.restartSystemButton, "settings.restart", "click", async () => {
+        if (!window.confirm("确定要重启服务吗？重启期间服务将短暂不可用。")) {
+            return;
+        }
+        elements.restartSystemButton.disabled = true;
+        try {
+            await actions.restartSystem();
+        } catch (error) {
+            actions.setStatus(`服务重启失败：${error.message}`, "bad");
+            elements.restartSystemButton.disabled = false;
+        }
+    });
 }

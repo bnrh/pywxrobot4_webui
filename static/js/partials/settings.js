@@ -4,6 +4,7 @@ export const html = `                <section class="panel-shell shell-card tab-
                     <div class="panel-toolbar">
                         <div class="panel-actions">
                             <button class="button secondary" id="refreshSettingsButton" type="button">刷新设置</button>
+                            <button class="button ghost" id="restartSystemButton" type="button">重启服务</button>
                         </div>
                     </div>
                     <div class="settings-alert" id="settingsAlert"></div>

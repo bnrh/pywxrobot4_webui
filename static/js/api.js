@@ -182,6 +182,9 @@ export const api = {
     reloadPluginsFromSource() {
         return requestJson("/api/plugins/reload-source", { method: "POST" });
     },
+    restartSystem() {
+        return requestJson("/api/system/restart", { method: "POST" });
+    },
     togglePlugin(moduleName, enabled) {
         return requestJson(`/api/plugins/${encodeURIComponent(moduleName)}/toggle`, {
             method: "POST",
