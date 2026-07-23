@@ -13,7 +13,12 @@ def register_security_middleware(app: FastAPI, runtime: PluginRuntime) -> None:
     async def enforce_security_middleware(request: Request, call_next):
         request_path = str(request.url.path or "")
         if is_public_request_path(request_path):
-            return await call_next(request)
+            response = await call_next(request)
+            if request_path.startswith("/static/") and (request_path.endswith(".css") or request_path.endswith(".js")):
+                from routes.settings_routes import is_cache_bust_active
+                if is_cache_bust_active():
+                    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            return response
 
         current_settings = getattr(app.state, "plugin_runtime", runtime).settings
         callback_path = str(current_settings.callback_path or "/messages").rstrip("/") or "/messages"

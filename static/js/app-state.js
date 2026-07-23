@@ -117,6 +117,7 @@ const ELEMENT_IDS = [
     "settingsForm",
     "settingsAlert",
     "refreshSettingsButton",
+    "restartSystemButton",
     "logFileSelect",
     "logTimeRange",
     "logLevelFilter",
